@@ -1,0 +1,23 @@
+name: Lean proofs and regression suite
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leanprover/lean-action@f061402b660e0c34644504b324e830f2991d4865
+        with:
+          auto-config: false
+          build: true
+          build-args: 'factor factorTests factorBench Tests.Audit'
+          test: true
+      - name: Reject proof escape hatches
+        run: python3 scripts/audit_sources.py
+      - name: Check benchmark dataset oracle
+        run: python3 scripts/validate_dataset.py

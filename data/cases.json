@@ -1,0 +1,2770 @@
+[
+  {
+    "id": "zero",
+    "n": "0",
+    "factors": null,
+    "category": "edge",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "one",
+    "n": "1",
+    "factors": [],
+    "category": "edge",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-2",
+    "n": "2",
+    "factors": [
+      "2"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-3",
+    "n": "3",
+    "factors": [
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-4",
+    "n": "4",
+    "factors": [
+      "2",
+      "2"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-5",
+    "n": "5",
+    "factors": [
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-6",
+    "n": "6",
+    "factors": [
+      "2",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-7",
+    "n": "7",
+    "factors": [
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-8",
+    "n": "8",
+    "factors": [
+      "2",
+      "2",
+      "2"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-9",
+    "n": "9",
+    "factors": [
+      "3",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-10",
+    "n": "10",
+    "factors": [
+      "2",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-11",
+    "n": "11",
+    "factors": [
+      "11"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-12",
+    "n": "12",
+    "factors": [
+      "2",
+      "2",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-13",
+    "n": "13",
+    "factors": [
+      "13"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-14",
+    "n": "14",
+    "factors": [
+      "2",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-15",
+    "n": "15",
+    "factors": [
+      "3",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-16",
+    "n": "16",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "2"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-17",
+    "n": "17",
+    "factors": [
+      "17"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-18",
+    "n": "18",
+    "factors": [
+      "2",
+      "3",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-19",
+    "n": "19",
+    "factors": [
+      "19"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-20",
+    "n": "20",
+    "factors": [
+      "2",
+      "2",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-21",
+    "n": "21",
+    "factors": [
+      "3",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-22",
+    "n": "22",
+    "factors": [
+      "2",
+      "11"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-23",
+    "n": "23",
+    "factors": [
+      "23"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-24",
+    "n": "24",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-25",
+    "n": "25",
+    "factors": [
+      "5",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-26",
+    "n": "26",
+    "factors": [
+      "2",
+      "13"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-27",
+    "n": "27",
+    "factors": [
+      "3",
+      "3",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-28",
+    "n": "28",
+    "factors": [
+      "2",
+      "2",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-29",
+    "n": "29",
+    "factors": [
+      "29"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-30",
+    "n": "30",
+    "factors": [
+      "2",
+      "3",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-31",
+    "n": "31",
+    "factors": [
+      "31"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-32",
+    "n": "32",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "2",
+      "2"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-33",
+    "n": "33",
+    "factors": [
+      "3",
+      "11"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-34",
+    "n": "34",
+    "factors": [
+      "2",
+      "17"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-35",
+    "n": "35",
+    "factors": [
+      "5",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-36",
+    "n": "36",
+    "factors": [
+      "2",
+      "2",
+      "3",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-37",
+    "n": "37",
+    "factors": [
+      "37"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-38",
+    "n": "38",
+    "factors": [
+      "2",
+      "19"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-39",
+    "n": "39",
+    "factors": [
+      "3",
+      "13"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-40",
+    "n": "40",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-41",
+    "n": "41",
+    "factors": [
+      "41"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-42",
+    "n": "42",
+    "factors": [
+      "2",
+      "3",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-43",
+    "n": "43",
+    "factors": [
+      "43"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-44",
+    "n": "44",
+    "factors": [
+      "2",
+      "2",
+      "11"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-45",
+    "n": "45",
+    "factors": [
+      "3",
+      "3",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-46",
+    "n": "46",
+    "factors": [
+      "2",
+      "23"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-47",
+    "n": "47",
+    "factors": [
+      "47"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-48",
+    "n": "48",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "2",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-49",
+    "n": "49",
+    "factors": [
+      "7",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-50",
+    "n": "50",
+    "factors": [
+      "2",
+      "5",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-51",
+    "n": "51",
+    "factors": [
+      "3",
+      "17"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-52",
+    "n": "52",
+    "factors": [
+      "2",
+      "2",
+      "13"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-53",
+    "n": "53",
+    "factors": [
+      "53"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-54",
+    "n": "54",
+    "factors": [
+      "2",
+      "3",
+      "3",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-55",
+    "n": "55",
+    "factors": [
+      "5",
+      "11"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-56",
+    "n": "56",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-57",
+    "n": "57",
+    "factors": [
+      "3",
+      "19"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-58",
+    "n": "58",
+    "factors": [
+      "2",
+      "29"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-59",
+    "n": "59",
+    "factors": [
+      "59"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-60",
+    "n": "60",
+    "factors": [
+      "2",
+      "2",
+      "3",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-61",
+    "n": "61",
+    "factors": [
+      "61"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-62",
+    "n": "62",
+    "factors": [
+      "2",
+      "31"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-63",
+    "n": "63",
+    "factors": [
+      "3",
+      "3",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-64",
+    "n": "64",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-65",
+    "n": "65",
+    "factors": [
+      "5",
+      "13"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-66",
+    "n": "66",
+    "factors": [
+      "2",
+      "3",
+      "11"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-67",
+    "n": "67",
+    "factors": [
+      "67"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-68",
+    "n": "68",
+    "factors": [
+      "2",
+      "2",
+      "17"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-69",
+    "n": "69",
+    "factors": [
+      "3",
+      "23"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-70",
+    "n": "70",
+    "factors": [
+      "2",
+      "5",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-71",
+    "n": "71",
+    "factors": [
+      "71"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-72",
+    "n": "72",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "3",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-73",
+    "n": "73",
+    "factors": [
+      "73"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-74",
+    "n": "74",
+    "factors": [
+      "2",
+      "37"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-75",
+    "n": "75",
+    "factors": [
+      "3",
+      "5",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-76",
+    "n": "76",
+    "factors": [
+      "2",
+      "2",
+      "19"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-77",
+    "n": "77",
+    "factors": [
+      "7",
+      "11"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-78",
+    "n": "78",
+    "factors": [
+      "2",
+      "3",
+      "13"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-79",
+    "n": "79",
+    "factors": [
+      "79"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-80",
+    "n": "80",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "2",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-81",
+    "n": "81",
+    "factors": [
+      "3",
+      "3",
+      "3",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-82",
+    "n": "82",
+    "factors": [
+      "2",
+      "41"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-83",
+    "n": "83",
+    "factors": [
+      "83"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-84",
+    "n": "84",
+    "factors": [
+      "2",
+      "2",
+      "3",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-85",
+    "n": "85",
+    "factors": [
+      "5",
+      "17"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-86",
+    "n": "86",
+    "factors": [
+      "2",
+      "43"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-87",
+    "n": "87",
+    "factors": [
+      "3",
+      "29"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-88",
+    "n": "88",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "11"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-89",
+    "n": "89",
+    "factors": [
+      "89"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-90",
+    "n": "90",
+    "factors": [
+      "2",
+      "3",
+      "3",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-91",
+    "n": "91",
+    "factors": [
+      "7",
+      "13"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-92",
+    "n": "92",
+    "factors": [
+      "2",
+      "2",
+      "23"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-93",
+    "n": "93",
+    "factors": [
+      "3",
+      "31"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-94",
+    "n": "94",
+    "factors": [
+      "2",
+      "47"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-95",
+    "n": "95",
+    "factors": [
+      "5",
+      "19"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-96",
+    "n": "96",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "3"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-97",
+    "n": "97",
+    "factors": [
+      "97"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-98",
+    "n": "98",
+    "factors": [
+      "2",
+      "7",
+      "7"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-99",
+    "n": "99",
+    "factors": [
+      "3",
+      "3",
+      "11"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "small-100",
+    "n": "100",
+    "factors": [
+      "2",
+      "2",
+      "5",
+      "5"
+    ],
+    "category": "exhaustive-small",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "prime-127",
+    "n": "127",
+    "factors": [
+      "127"
+    ],
+    "category": "prime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "prime-257",
+    "n": "257",
+    "factors": [
+      "257"
+    ],
+    "category": "prime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "prime-65537",
+    "n": "65537",
+    "factors": [
+      "65537"
+    ],
+    "category": "prime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "prime-999983",
+    "n": "999983",
+    "factors": [
+      "999983"
+    ],
+    "category": "prime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "prime-1000003",
+    "n": "1000003",
+    "factors": [
+      "1000003"
+    ],
+    "category": "prime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "prime-15485863",
+    "n": "15485863",
+    "factors": [
+      "15485863"
+    ],
+    "category": "prime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "prime-2147483647",
+    "n": "2147483647",
+    "factors": [
+      "2147483647"
+    ],
+    "category": "prime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "power-2-32",
+    "n": "4294967296",
+    "factors": [
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2"
+    ],
+    "category": "prime-power",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "power-3-20",
+    "n": "3486784401",
+    "factors": [
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3",
+      "3"
+    ],
+    "category": "prime-power",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "power-5-12",
+    "n": "244140625",
+    "factors": [
+      "5",
+      "5",
+      "5",
+      "5",
+      "5",
+      "5",
+      "5",
+      "5",
+      "5",
+      "5",
+      "5",
+      "5"
+    ],
+    "category": "prime-power",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "power-7-9",
+    "n": "40353607",
+    "factors": [
+      "7",
+      "7",
+      "7",
+      "7",
+      "7",
+      "7",
+      "7",
+      "7",
+      "7"
+    ],
+    "category": "prime-power",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "power-97-4",
+    "n": "88529281",
+    "factors": [
+      "97",
+      "97",
+      "97",
+      "97"
+    ],
+    "category": "prime-power",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "power-1009-3",
+    "n": "1027243729",
+    "factors": [
+      "1009",
+      "1009",
+      "1009"
+    ],
+    "category": "prime-power",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "pseudoprime-561",
+    "n": "561",
+    "factors": [
+      "3",
+      "11",
+      "17"
+    ],
+    "category": "pseudoprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "pseudoprime-1105",
+    "n": "1105",
+    "factors": [
+      "5",
+      "13",
+      "17"
+    ],
+    "category": "pseudoprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "pseudoprime-1729",
+    "n": "1729",
+    "factors": [
+      "7",
+      "13",
+      "19"
+    ],
+    "category": "pseudoprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "pseudoprime-2465",
+    "n": "2465",
+    "factors": [
+      "5",
+      "17",
+      "29"
+    ],
+    "category": "pseudoprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "pseudoprime-2821",
+    "n": "2821",
+    "factors": [
+      "7",
+      "13",
+      "31"
+    ],
+    "category": "pseudoprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "pseudoprime-6601",
+    "n": "6601",
+    "factors": [
+      "7",
+      "23",
+      "41"
+    ],
+    "category": "pseudoprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "pseudoprime-3215031751",
+    "n": "3215031751",
+    "factors": [
+      "151",
+      "751",
+      "28351"
+    ],
+    "category": "pseudoprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "pseudoprime-341550071728321",
+    "n": "341550071728321",
+    "factors": [
+      "10670053",
+      "32010157"
+    ],
+    "category": "pseudoprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "semiprime-1009-1013",
+    "n": "1022117",
+    "factors": [
+      "1009",
+      "1013"
+    ],
+    "category": "close-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "semiprime-10007-10009",
+    "n": "100160063",
+    "factors": [
+      "10007",
+      "10009"
+    ],
+    "category": "close-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "semiprime-1000003-1000033",
+    "n": "1000036000099",
+    "factors": [
+      "1000003",
+      "1000033"
+    ],
+    "category": "close-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "semiprime-15485863-15485917",
+    "n": "239812789091371",
+    "factors": [
+      "15485863",
+      "15485917"
+    ],
+    "category": "close-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "semiprime-2147483647-2147483629",
+    "n": "4611685975477714963",
+    "factors": [
+      "2147483629",
+      "2147483647"
+    ],
+    "category": "close-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "semiprime-65537-1000000007",
+    "n": "65537000458759",
+    "factors": [
+      "65537",
+      "1000000007"
+    ],
+    "category": "semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "semiprime-257-1000003",
+    "n": "257000771",
+    "factors": [
+      "257",
+      "1000003"
+    ],
+    "category": "semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-0",
+    "n": "22785781",
+    "factors": [
+      "3847",
+      "5923"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-1",
+    "n": "6637597",
+    "factors": [
+      "1361",
+      "4877"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-2",
+    "n": "16602511",
+    "factors": [
+      "1777",
+      "9343"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-3",
+    "n": "10334273",
+    "factors": [
+      "2203",
+      "4691"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-4",
+    "n": "76535999",
+    "factors": [
+      "8311",
+      "9209"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-5",
+    "n": "3200377",
+    "factors": [
+      "1777",
+      "1801"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-6",
+    "n": "1520261",
+    "factors": [
+      "193",
+      "7877"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-7",
+    "n": "6644923",
+    "factors": [
+      "2063",
+      "3221"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-8",
+    "n": "25494167",
+    "factors": [
+      "2833",
+      "8999"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-9",
+    "n": "5701099",
+    "factors": [
+      "1901",
+      "2999"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-10",
+    "n": "17553817",
+    "factors": [
+      "3329",
+      "5273"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-11",
+    "n": "60073463",
+    "factors": [
+      "6043",
+      "9941"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-12",
+    "n": "31697777",
+    "factors": [
+      "3943",
+      "8039"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-13",
+    "n": "1391809",
+    "factors": [
+      "149",
+      "9341"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-14",
+    "n": "25076633",
+    "factors": [
+      "4447",
+      "5639"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-15",
+    "n": "7928957",
+    "factors": [
+      "877",
+      "9041"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-16",
+    "n": "32675813",
+    "factors": [
+      "3607",
+      "9059"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-17",
+    "n": "953257",
+    "factors": [
+      "907",
+      "1051"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-18",
+    "n": "1158967",
+    "factors": [
+      "757",
+      "1531"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-19",
+    "n": "265679",
+    "factors": [
+      "379",
+      "701"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-20",
+    "n": "4599041",
+    "factors": [
+      "541",
+      "8501"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-21",
+    "n": "14935513",
+    "factors": [
+      "1979",
+      "7547"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-22",
+    "n": "4408927",
+    "factors": [
+      "907",
+      "4861"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-23",
+    "n": "5242429",
+    "factors": [
+      "971",
+      "5399"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-24",
+    "n": "7105921",
+    "factors": [
+      "929",
+      "7649"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-25",
+    "n": "27387007",
+    "factors": [
+      "3253",
+      "8419"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-26",
+    "n": "52932961",
+    "factors": [
+      "6337",
+      "8353"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-27",
+    "n": "14910059",
+    "factors": [
+      "2267",
+      "6577"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-28",
+    "n": "33559403",
+    "factors": [
+      "3761",
+      "8923"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-29",
+    "n": "59282411",
+    "factors": [
+      "6521",
+      "9091"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-30",
+    "n": "3660421",
+    "factors": [
+      "1553",
+      "2357"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-31",
+    "n": "76839247",
+    "factors": [
+      "8353",
+      "9199"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-32",
+    "n": "3910307",
+    "factors": [
+      "631",
+      "6197"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-33",
+    "n": "36031571",
+    "factors": [
+      "4691",
+      "7681"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-34",
+    "n": "42395911",
+    "factors": [
+      "5791",
+      "7321"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-35",
+    "n": "7436563",
+    "factors": [
+      "1097",
+      "6779"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-36",
+    "n": "33558653",
+    "factors": [
+      "5779",
+      "5807"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-37",
+    "n": "30321983",
+    "factors": [
+      "3911",
+      "7753"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-38",
+    "n": "26036011",
+    "factors": [
+      "3307",
+      "7873"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-core-39",
+    "n": "33078061",
+    "factors": [
+      "4957",
+      "6673"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "core",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-0",
+    "n": "39535043929",
+    "factors": [
+      "88643",
+      "446003"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-1",
+    "n": "270681864667",
+    "factors": [
+      "456763",
+      "592609"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-2",
+    "n": "51797260819",
+    "factors": [
+      "60209",
+      "860291"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-3",
+    "n": "8239816229",
+    "factors": [
+      "11821",
+      "697049"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-4",
+    "n": "54648071449",
+    "factors": [
+      "151303",
+      "361183"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-5",
+    "n": "61630630121",
+    "factors": [
+      "107077",
+      "575573"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-6",
+    "n": "31542614281",
+    "factors": [
+      "59999",
+      "525719"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-7",
+    "n": "80804153939",
+    "factors": [
+      "123001",
+      "656939"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-8",
+    "n": "60943814083",
+    "factors": [
+      "208283",
+      "292601"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-9",
+    "n": "344996339581",
+    "factors": [
+      "400441",
+      "861541"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-10",
+    "n": "14335457803",
+    "factors": [
+      "15971",
+      "897593"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-11",
+    "n": "153475636547",
+    "factors": [
+      "282809",
+      "542683"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-12",
+    "n": "22849835971",
+    "factors": [
+      "71287",
+      "320533"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-13",
+    "n": "143552017277",
+    "factors": [
+      "162553",
+      "883109"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-14",
+    "n": "9949975799",
+    "factors": [
+      "74653",
+      "133283"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-15",
+    "n": "631600591537",
+    "factors": [
+      "775601",
+      "814337"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-16",
+    "n": "125981598349",
+    "factors": [
+      "153457",
+      "820957"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-17",
+    "n": "141621784331",
+    "factors": [
+      "205703",
+      "688477"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-18",
+    "n": "577264824827",
+    "factors": [
+      "676649",
+      "853123"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "seeded-stress-19",
+    "n": "191411363093",
+    "factors": [
+      "353179",
+      "541967"
+    ],
+    "category": "seeded-semiprime",
+    "tier": "stress",
+    "source": "generated",
+    "source_line": null
+  },
+  {
+    "id": "cunningham-2-3-minus",
+    "n": "7",
+    "factors": [
+      "7"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "    3   7"
+  },
+  {
+    "id": "cunningham-2-5-minus",
+    "n": "31",
+    "factors": [
+      "31"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "    5   31"
+  },
+  {
+    "id": "cunningham-2-7-minus",
+    "n": "127",
+    "factors": [
+      "127"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "    7   127"
+  },
+  {
+    "id": "cunningham-2-9-minus",
+    "n": "511",
+    "factors": [
+      "7",
+      "73"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "    9  (3) 73"
+  },
+  {
+    "id": "cunningham-2-11-minus",
+    "n": "2047",
+    "factors": [
+      "23",
+      "89"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   11   23.89"
+  },
+  {
+    "id": "cunningham-2-13-minus",
+    "n": "8191",
+    "factors": [
+      "8191"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   13   8191"
+  },
+  {
+    "id": "cunningham-2-15-minus",
+    "n": "32767",
+    "factors": [
+      "7",
+      "31",
+      "151"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   15  (3,5) 151"
+  },
+  {
+    "id": "cunningham-2-17-minus",
+    "n": "131071",
+    "factors": [
+      "131071"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   17   131071"
+  },
+  {
+    "id": "cunningham-2-19-minus",
+    "n": "524287",
+    "factors": [
+      "524287"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   19   524287"
+  },
+  {
+    "id": "cunningham-2-21-minus",
+    "n": "2097151",
+    "factors": [
+      "7",
+      "7",
+      "127",
+      "337"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   21  (3,7) 7*.337"
+  },
+  {
+    "id": "cunningham-2-23-minus",
+    "n": "8388607",
+    "factors": [
+      "47",
+      "178481"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   23   47.178481"
+  },
+  {
+    "id": "cunningham-2-25-minus",
+    "n": "33554431",
+    "factors": [
+      "31",
+      "601",
+      "1801"
+    ],
+    "category": "cunningham",
+    "tier": "core",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   25  (5) 601.1801"
+  },
+  {
+    "id": "cunningham-2-27-minus",
+    "n": "134217727",
+    "factors": [
+      "7",
+      "73",
+      "262657"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   27  (3,9) 262657"
+  },
+  {
+    "id": "cunningham-2-29-minus",
+    "n": "536870911",
+    "factors": [
+      "233",
+      "1103",
+      "2089"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   29   233.1103.2089"
+  },
+  {
+    "id": "cunningham-2-31-minus",
+    "n": "2147483647",
+    "factors": [
+      "2147483647"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   31   2147483647"
+  },
+  {
+    "id": "cunningham-2-33-minus",
+    "n": "8589934591",
+    "factors": [
+      "7",
+      "23",
+      "89",
+      "599479"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   33  (3,11) 599479"
+  },
+  {
+    "id": "cunningham-2-35-minus",
+    "n": "34359738367",
+    "factors": [
+      "31",
+      "71",
+      "127",
+      "122921"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   35  (5,7) 71.122921"
+  },
+  {
+    "id": "cunningham-2-37-minus",
+    "n": "137438953471",
+    "factors": [
+      "223",
+      "616318177"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   37   223.616318177"
+  },
+  {
+    "id": "cunningham-2-39-minus",
+    "n": "549755813887",
+    "factors": [
+      "7",
+      "79",
+      "8191",
+      "121369"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   39  (3,13) 79.121369"
+  },
+  {
+    "id": "cunningham-2-41-minus",
+    "n": "2199023255551",
+    "factors": [
+      "13367",
+      "164511353"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   41   13367.164511353"
+  },
+  {
+    "id": "cunningham-2-43-minus",
+    "n": "8796093022207",
+    "factors": [
+      "431",
+      "9719",
+      "2099863"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   43   431.9719.2099863"
+  },
+  {
+    "id": "cunningham-2-45-minus",
+    "n": "35184372088831",
+    "factors": [
+      "7",
+      "31",
+      "73",
+      "151",
+      "631",
+      "23311"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   45  (3,5,9,15) 631.23311"
+  },
+  {
+    "id": "cunningham-2-47-minus",
+    "n": "140737488355327",
+    "factors": [
+      "2351",
+      "4513",
+      "13264529"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   47   2351.4513.13264529"
+  },
+  {
+    "id": "cunningham-2-49-minus",
+    "n": "562949953421311",
+    "factors": [
+      "127",
+      "4432676798593"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   49  (7) 4432676798593"
+  },
+  {
+    "id": "cunningham-2-51-minus",
+    "n": "2251799813685247",
+    "factors": [
+      "7",
+      "103",
+      "2143",
+      "11119",
+      "131071"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   51  (3,17) 103.2143.11119"
+  },
+  {
+    "id": "cunningham-2-53-minus",
+    "n": "9007199254740991",
+    "factors": [
+      "6361",
+      "69431",
+      "20394401"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   53   6361.69431.20394401"
+  },
+  {
+    "id": "cunningham-2-55-minus",
+    "n": "36028797018963967",
+    "factors": [
+      "23",
+      "31",
+      "89",
+      "881",
+      "3191",
+      "201961"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   55  (5,11) 881.3191.201961"
+  },
+  {
+    "id": "cunningham-2-57-minus",
+    "n": "144115188075855871",
+    "factors": [
+      "7",
+      "32377",
+      "524287",
+      "1212847"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   57  (3,19) 32377.1212847"
+  },
+  {
+    "id": "cunningham-2-59-minus",
+    "n": "576460752303423487",
+    "factors": [
+      "179951",
+      "3203431780337"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   59   179951.3203431780337"
+  },
+  {
+    "id": "cunningham-2-61-minus",
+    "n": "2305843009213693951",
+    "factors": [
+      "2305843009213693951"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   61   2305843009213693951"
+  },
+  {
+    "id": "cunningham-2-63-minus",
+    "n": "9223372036854775807",
+    "factors": [
+      "7",
+      "7",
+      "73",
+      "127",
+      "337",
+      "92737",
+      "649657"
+    ],
+    "category": "cunningham",
+    "tier": "stress",
+    "source": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
+    "source_line": "   63  (3,7,9,21) 92737.649657"
+  }
+]
