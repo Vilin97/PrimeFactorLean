@@ -239,11 +239,17 @@ def collectRound (ctx : Ctx) (params : Params) (threads : Nat) (st : Collection)
   else
     let qs := specialQs ctx.sel (max st.nextQ params.algBound) (threads * params.qPerTask)
     st := { st with nextQ := (qs.back?.map (·.1)).getD st.nextQ }
+  -- Update the containers through local variables so each stays uniquely
+  -- referenced (a structure update would copy them on every insertion).
+  let mut rels := st.rels
+  let mut seen := st.seen
+  st := { st with rels := #[], seen := {} }
   for batch in batches do
     for rel in batch do
-      if !st.seen.contains (rel.a, rel.b) then
-        st := { st with seen := st.seen.insert (rel.a, rel.b), rels := st.rels.push rel }
-  return st
+      if !seen.contains (rel.a, rel.b) then
+        seen := seen.insert (rel.a, rel.b)
+        rels := rels.push rel
+  return { st with rels := rels, seen := seen }
 
 /-- Whether the matrix has enough excess after singleton removal. -/
 def matrixReady (ctx : Ctx) (params : Params) (rels : Array Rel) : Bool :=
@@ -269,10 +275,15 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run
   let mut coll : Collection := {}
   let mut round := 0
   let mut ready := false
+  -- The readiness test rebuilds the matrix (single-threaded), so it runs only
+  -- after the relation count has grown by a tenth since the previous test.
+  let mut lastCheck := 0
   while !ready && round < cfg.maxRounds do
     round := round + 1
     coll := collectRound ctx params threads coll
-    ready := matrixReady ctx params coll.rels
+    if coll.rels.size * 10 ≥ lastCheck * 11 then
+      lastCheck := coll.rels.size
+      ready := matrixReady ctx params coll.rels
   if !ready then return none
   let rels := coll.rels
   let (rows, numCols) := buildRows ctx.fb rels

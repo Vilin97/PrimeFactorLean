@@ -15,10 +15,13 @@ def nfsDebug (n : Nat) (threads : Nat) (params : Params) (maxRounds : Nat := 50)
   let mut coll : Collection := {}
   let mut round := 0
   let mut ready := false
+  let mut lastCheck := 0
   while !ready && round < maxRounds do
     round := round + 1
     coll ← IO.lazyPure fun _ => collectRound ctx params threads coll
     let rels := coll.rels
+    if rels.size * 10 < lastCheck * 11 then continue
+    lastCheck := rels.size
     let (rows, numCols) := buildRows ctx.fb rels
     let kept := PrimeFactorLean.GF2.removeSingletons numCols rows
     let active := activeColumns numCols rows kept
@@ -28,7 +31,14 @@ def nfsDebug (n : Nat) (threads : Nat) (params : Params) (maxRounds : Nat := 50)
     if kept.size ≥ active + params.extra then ready := true
   let rels := coll.rels
   if !ready then return
-  let (rows, numCols) := buildRows ctx.fb rels
+  let ta ← IO.monoNanosNow
+  let (rows, numCols) ← IO.lazyPure fun _ => buildRows ctx.fb rels
+  let tb ← IO.monoNanosNow
+  let merged ← IO.lazyPure fun _ => PrimeFactorLean.GF2.mergeColumns numCols rows
+  let tc ← IO.monoNanosNow
+  let inner ← IO.lazyPure fun _ => PrimeFactorLean.GF2.denseDependencies numCols (merged.map (·.1)) 64
+  let td ← IO.monoNanosNow
+  IO.println s!"matrix {rows.size}x{numCols}: build {(tb-ta)/1000000} ms, merge -> {merged.size} rows {(tc-tb)/1000000} ms, dense {inner.size} deps {(td-tc)/1000000} ms"
   let deps := PrimeFactorLean.GF2.dependencies numCols rows 64
   let t3 ← IO.monoNanosNow
   IO.println s!"deps {deps.size} ({(t3-t0)/1000000} ms)"

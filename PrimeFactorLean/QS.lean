@@ -534,53 +534,88 @@ def UnionFind.union (g : UnionFind) (a b : Nat) : UnionFind × Bool :=
     let sa := g.size.getD ra 1
     let sb := g.size.getD rb 1
     let (small, big) := if sa < sb then (ra, rb) else (rb, ra)
-    ({ parent := (g.parent.insert small big).insert big big,
-       size := g.size.insert big (sa + sb) }, false)
+    -- Take the maps out of `g` first so that the insertions happen in place.
+    let ⟨parent, size⟩ := g
+    ({ parent := (parent.insert small big).insert big big,
+       size := size.insert big (sa + sb) }, false)
 
 /-- Cycles of the large-prime graph, as lists of edge ids: a breadth-first
-spanning forest is built once; every non-forest edge closes one cycle through
-the forest paths to the lowest common ancestor. -/
+spanning forest is built once (adjacency in compressed sparse-row form, so a
+vertex of large degree such as `1` costs nothing extra); every non-forest edge
+closes one cycle through the forest paths to the lowest common ancestor. -/
 def graphCycles (ends : Array (Nat × Nat)) : Array (Array Nat) := Id.run do
-  let mut adj : Std.HashMap Nat (Array (Nat × Nat)) := {}
-  for e in [0:ends.size] do
-    let (a, b) := ends[e]!
-    adj := adj.insert a ((adj.getD a #[]).push (b, e))
-    adj := adj.insert b ((adj.getD b #[]).push (a, e))
-  -- parent vertex, parent edge, depth
-  let mut info : Std.HashMap Nat (Nat × Nat × Nat) := {}
-  let mut treeEdge : Array Bool := Array.replicate ends.size false
-  for (root, _) in adj.toList do
-    if info.contains root then continue
-    info := info.insert root (root, ends.size, 0)
-    let mut queue : Array Nat := #[root]
-    let mut head := 0
+  -- Dense vertex numbering.
+  let mut index : Std.HashMap Nat Nat := {}
+  let mut ends' : Array (Nat × Nat) := Array.mkEmpty ends.size
+  for (a, b) in ends do
+    let ia := match index.get? a with
+      | some i => i
+      | none => index.size
+    index := index.insert a ia
+    let ib := match index.get? b with
+      | some i => i
+      | none => index.size
+    index := index.insert b ib
+    ends' := ends'.push (ia, ib)
+  let nv := index.size
+  -- Compressed sparse rows: offsets, then (neighbor, edge) pairs.
+  let mut deg : Array Nat := Array.replicate (nv + 1) 0
+  for (a, b) in ends' do
+    deg := deg.set! a (deg[a]! + 1)
+    deg := deg.set! b (deg[b]! + 1)
+  let mut offset : Array Nat := Array.replicate (nv + 1) 0
+  for v in [0:nv] do
+    offset := offset.set! (v + 1) (offset[v]! + deg[v]!)
+  let mut fill : Array Nat := offset
+  let mut nbr : Array Nat := Array.replicate (2 * ends'.size) 0
+  let mut via : Array Nat := Array.replicate (2 * ends'.size) 0
+  for e in [0:ends'.size] do
+    let (a, b) := ends'[e]!
+    nbr := nbr.set! fill[a]! b
+    via := via.set! fill[a]! e
+    fill := fill.set! a (fill[a]! + 1)
+    nbr := nbr.set! fill[b]! a
+    via := via.set! fill[b]! e
+    fill := fill.set! b (fill[b]! + 1)
+  -- Breadth-first spanning forest: parent vertex, parent edge, depth.
+  let none' := nv
+  let mut parent : Array Nat := Array.replicate nv none'
+  let mut pedge : Array Nat := Array.replicate nv 0
+  let mut depth : Array Nat := Array.replicate nv 0
+  let mut treeEdge : Array Bool := Array.replicate ends'.size false
+  let mut queue : Array Nat := Array.mkEmpty nv
+  for root in [0:nv] do
+    if parent[root]! != none' then continue
+    parent := parent.set! root root
+    queue := queue.push root
+    let mut head := queue.size - 1
     while head < queue.size do
       let v := queue[head]!
       head := head + 1
-      let dv := (info.getD v (v, 0, 0)).2.2
-      for (w, e) in adj.getD v #[] do
-        if !info.contains w then
-          info := info.insert w (v, e, dv + 1)
-          treeEdge := treeEdge.set! e true
+      for k in [offset[v]!:offset[v + 1]!] do
+        let w := nbr[k]!
+        if parent[w]! == none' then
+          parent := parent.set! w v
+          pedge := pedge.set! w via[k]!
+          depth := depth.set! w (depth[v]! + 1)
+          treeEdge := treeEdge.set! via[k]! true
           queue := queue.push w
   let mut cycles : Array (Array Nat) := #[]
-  for e in [0:ends.size] do
+  for e in [0:ends'.size] do
     if treeEdge[e]! then continue
-    let (a, b) := ends[e]!
+    let (a, b) := ends'[e]!
     let mut path : Array Nat := #[e]
     let mut x := a
     let mut y := b
-    let mut fuel := 2 * ends.size + 2
+    let mut fuel := 2 * nv + 2
     while x != y && fuel > 0 do
       fuel := fuel - 1
-      let (px, ex, dx) := info.getD x (x, 0, 0)
-      let (py, ey, dy) := info.getD y (y, 0, 0)
-      if dx ≥ dy then
-        path := path.push ex
-        x := px
+      if depth[x]! ≥ depth[y]! then
+        path := path.push pedge[x]!
+        x := parent[x]!
       else
-        path := path.push ey
-        y := py
+        path := path.push pedge[y]!
+        y := parent[y]!
     if x == y then cycles := cycles.push path
   return cycles
 

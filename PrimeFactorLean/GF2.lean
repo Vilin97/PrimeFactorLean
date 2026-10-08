@@ -95,10 +95,15 @@ def mergeColumns (numCols : Nat) (rows : Array (Array Nat)) (maxRowWeight : Nat 
   while changed && passes < 50 do
     changed := false
     passes := passes + 1
+    -- Occurrence lists only for columns of weight at most two (in-place updates).
+    let mut weight : Array Nat := Array.replicate numCols 0
+    for i in [0:cur.size] do
+      for c in cur[i]!.1 do
+        weight := weight.set! c (weight[c]! + 1)
     let mut occ : Array (Array Nat) := Array.replicate numCols #[]
     for i in [0:cur.size] do
       for c in cur[i]!.1 do
-        occ := occ.set! c (occ[c]!.push i)
+        if weight[c]! ≤ 2 then occ := occ.modify c (·.push i)
     let mut dead : Array Bool := Array.replicate cur.size false
     let mut touched : Array Bool := Array.replicate cur.size false
     for c in [0:numCols] do
