@@ -123,6 +123,8 @@ modular inversions, stage 1 only. `ecm` is the modern form:
 - a Montgomery ladder over the maximal prime powers up to `B1`;
 - a stage-2 standard continuation (baby steps / giant steps with
   `D = 2310` and one batched gcd);
+- backtracking when stage 1 annihilates every prime factor at once
+  (`gcd = n`): a replay with a gcd after each prime power;
 - curves run in parallel tasks.
 
 The automatic schedule follows GMP-ECM's recommended `(B1, curves)` pairs.
