@@ -197,7 +197,8 @@ def activeColumns (numCols : Nat) (rows : Array (Array Nat)) (kept : Array Nat) 
 structure Config where
   threads : Nat := 8
   params : Option Params := none
-  maxRounds : Nat := 100000
+  /-- Collection rounds before giving up (each round is `threads` tasks). -/
+  maxRounds : Nat := 3000
   deriving Inhabited
 
 def decimalDigits (n : Nat) : Nat := (toString n).length

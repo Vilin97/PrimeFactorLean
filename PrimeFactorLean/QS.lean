@@ -2,6 +2,7 @@ import Std.Data.HashMap
 import Std.Data.HashSet
 import PrimeFactorLean.Squares
 import PrimeFactorLean.GF2
+import PrimeFactorLean.SQUFOF
 
 /-!
 # The quadratic sieve family: QS, MPQS and SIQS
@@ -51,6 +52,9 @@ structure Params where
   lpMult : Nat
   extra : Nat := 40
   sieveStart : Nat := 6
+  /-- Double large prime variation: cofactors up to `dlpFactor⁻¹ · lpBound²`
+  that split into two large primes are kept (`0` disables it). -/
+  dlpFactor : Nat := 0
   deriving Repr, Inhabited
 
 /-- `(digits, factor-base size, half-width M, large-prime multiplier)`. -/
@@ -112,6 +116,8 @@ structure Context where
   M : Nat
   threshold : UInt8
   lpBound : Nat
+  /-- Largest double-large-prime cofactor (`0` when the variation is off). -/
+  dlpBound : Nat
   sieveStart : Nat
   zeros : ByteArray
 
@@ -158,18 +164,20 @@ def mkContext (n : Nat) (params : Params) : Context ⊕ Nat := Id.run do
   let M := params.halfWidth
   let pmax := fb[fb.size - 1]!
   let lpBound := pmax * params.lpMult
+  let dlpBound := if params.dlpFactor == 0 then 0 else lpBound * lpBound / params.dlpFactor
   -- Expected contribution of the unsieved small primes.
   let mut small : Float := 0
   for i in [1:min params.sieveStart fb.size] do
     let p := fb[i]!.toFloat
     small := small + 2.0 * Float.log2 p / (p - 1.0)
   let target := Float.log2 M.toFloat + (N.log2.toFloat + 1.0) / 2.0 - 0.5
-  let thr := target - Float.log2 lpBound.toFloat - small - 1.0
+  let slack := if dlpBound > 0 then Float.log2 dlpBound.toFloat else Float.log2 lpBound.toFloat
+  let thr := target - slack - small - 1.0
   let threshold := (if thr < 8.0 then 8.0 else thr).toUInt8
   let mut zeros := ByteArray.emptyWithCapacity (2 * M)
   for _ in [0:2 * M] do zeros := zeros.push 0
   return .inl { n := n, k := k, N := N, fb := fb, roots := roots, logp := logp, M := M,
-                threshold := threshold, lpBound := lpBound,
+                threshold := threshold, lpBound := lpBound, dlpBound := dlpBound,
                 sieveStart := params.sieveStart, zeros := zeros }
 
 /-- Sentinel for "no root": any position `≥ 2M` is never sieved. -/
@@ -230,9 +238,32 @@ def stripPrime (u p : Nat) : Nat × Nat := Id.run do
     e := e + 1
   return (u, e)
 
+/-- A relation together with its large primes (`1` when absent): a full
+relation has `l1 = l2 = 1`, a partial one an edge `(l1, l2)` of the large-prime
+graph (`l1 = 1` for a single large prime). -/
+structure Found (n : Nat) (fb : Array Nat) where
+  rel : Relation n fb
+  l1 : Nat
+  l2 : Nat
+
+instance (n : Nat) (fb : Array Nat) : Inhabited (Found n fb) := ⟨⟨default, 1, 1⟩⟩
+
+/-- Classify a cofactor: full, one large prime, or two large primes. -/
+def splitCofactor (ctx : Context) (u : Nat) : Option (Nat × Nat) :=
+  if u == 1 then some (1, 1)
+  else if u < ctx.lpBound then some (1, u)
+  else if ctx.dlpBound > 0 && u < ctx.dlpBound && !isProbablePrime u then
+    match SQUFOF.split u with
+    | some d =>
+      let a := min d.val (u / d.val)
+      let b := max d.val (u / d.val)
+      if a < ctx.lpBound && b < ctx.lpBound && a * b == u && a != b then some (a, b) else none
+    | none => none
+  else none
+
 /-- Trial-divide `v(x)` at sieve position `j` and build a checked relation. -/
 def candidateRelation (ctx : Context) (poly : Poly) (pos1 pos2 : Array Nat) (j : Nat) :
-    Option (Relation ctx.n ctx.fb) := Id.run do
+    Option (Found ctx.n ctx.fb) := Id.run do
   let x : Int := (j : Int) - (ctx.M : Int)
   let v : Int := (poly.A : Int) * x * x + 2 * poly.B * x + poly.C
   if v == 0 then return none
@@ -253,15 +284,17 @@ def candidateRelation (ctx : Context) (poly : Poly) (pos1 pos2 : Array Nat) (j :
       if e > 0 then
         u := u'
         exps := (i, e) :: exps
-  if u ≥ ctx.lpBound then return none
+  let some (l1, l2) := splitCofactor ctx u | return none
   let X := (((poly.A : Int) * x + poly.B) % (ctx.n : Int)).toNat
-  return Relation.mk? ctx.n ctx.fb X poly.sqA u (decide (v < 0)) exps
+  match Relation.mk? ctx.n ctx.fb X poly.sqA u (decide (v < 0)) exps with
+  | some r => return some ⟨r, l1, l2⟩
+  | none => return none
 
 /-- Sieve one polynomial and return its relations (full and partial). -/
 def sievePoly (ctx : Context) (poly : Poly) (pos1 pos2 : Array Nat) (buf : ByteArray) :
-    ByteArray × Array (Relation ctx.n ctx.fb) := Id.run do
+    ByteArray × Array (Found ctx.n ctx.fb) := Id.run do
   let (buf, cands) := sieve ctx pos1 pos2 poly.skip buf
-  let mut rels : Array (Relation ctx.n ctx.fb) := #[]
+  let mut rels : Array (Found ctx.n ctx.fb) := #[]
   for j in cands do
     if let some r := candidateRelation ctx poly pos1 pos2 j then
       rels := rels.push r
@@ -271,7 +304,7 @@ def sievePoly (ctx : Context) (poly : Poly) (pos1 pos2 : Array Nat) (buf : ByteA
 
 /-- QS: windows of the single polynomial `(x + B₀ + 2Mt)² - N`. -/
 def qsBatch (ctx : Context) (batch : Nat) (windows : Nat) :
-    Array (Relation ctx.n ctx.fb) := Id.run do
+    Array (Found ctx.n ctx.fb) := Id.run do
   let b0 : Int := (Nat.sqrt ctx.N : Int)
   let mut buf := ctx.zeros
   let mut rels := #[]
@@ -303,7 +336,7 @@ def sqrtModPrimeSquare (N q : Nat) : Option Nat := do
 
 /-- MPQS: `A = q²` for consecutive suitable primes `q` from a per-batch start. -/
 def mpqsBatch (ctx : Context) (batch : Nat) (polys : Nat) :
-    Array (Relation ctx.n ctx.fb) := Id.run do
+    Array (Found ctx.n ctx.fb) := Id.run do
   let ideal := Nat.sqrt (Nat.sqrt (2 * ctx.N) / ctx.M)
   let mut q := max 3 (ideal + batch * polys * 8) ||| 1
   let mut buf := ctx.zeros
@@ -371,7 +404,7 @@ def chooseA (ctx : Context) (seed s lo hi target : Nat) : Option (Array Nat) := 
 
 /-- SIQS: `numA` values of `A`, each with its `2^{s-1}` Gray-code polynomials. -/
 def siqsBatch (ctx : Context) (batch : Nat) (numA : Nat) :
-    Array (Relation ctx.n ctx.fb) := Id.run do
+    Array (Found ctx.n ctx.fb) := Id.run do
   let target := Nat.sqrt (2 * ctx.N) / ctx.M
   -- Number of A-factors: aim for factors of roughly 2000 (smaller for small N).
   let qSize : Nat := if target.log2 > 66 then 2000 else if target.log2 > 40 then 600
@@ -459,19 +492,115 @@ inductive Variant where
   | qs | mpqs | siqs
   deriving Repr, Inhabited, BEq
 
+/-- Union–find over large primes (vertex `1` stands for "no large prime"),
+used to count the independent cycles of the large-prime graph while relations
+are collected. -/
+structure UnionFind where
+  parent : Std.HashMap Nat Nat := {}
+  size : Std.HashMap Nat Nat := {}
+  deriving Inhabited
+
+def UnionFind.find (g : UnionFind) (v : Nat) : Nat := Id.run do
+  let mut v := v
+  let mut fuel := 64
+  while fuel > 0 do
+    fuel := fuel - 1
+    match g.parent.get? v with
+    | some p => if p == v then break else v := p
+    | none => break
+  return v
+
+/-- Union by size; returns `true` when the edge closes a cycle. -/
+def UnionFind.union (g : UnionFind) (a b : Nat) : UnionFind × Bool :=
+  let ra := g.find a
+  let rb := g.find b
+  if ra == rb then (g, true)
+  else
+    let sa := g.size.getD ra 1
+    let sb := g.size.getD rb 1
+    let (small, big) := if sa < sb then (ra, rb) else (rb, ra)
+    ({ parent := (g.parent.insert small big).insert big big,
+       size := g.size.insert big (sa + sb) }, false)
+
+/-- Cycles of the large-prime graph, as lists of edge ids: a breadth-first
+spanning forest is built once; every non-forest edge closes one cycle through
+the forest paths to the lowest common ancestor. -/
+def graphCycles (ends : Array (Nat × Nat)) : Array (Array Nat) := Id.run do
+  let mut adj : Std.HashMap Nat (Array (Nat × Nat)) := {}
+  for e in [0:ends.size] do
+    let (a, b) := ends[e]!
+    adj := adj.insert a ((adj.getD a #[]).push (b, e))
+    adj := adj.insert b ((adj.getD b #[]).push (a, e))
+  -- parent vertex, parent edge, depth
+  let mut info : Std.HashMap Nat (Nat × Nat × Nat) := {}
+  let mut treeEdge : Array Bool := Array.replicate ends.size false
+  for (root, _) in adj.toList do
+    if info.contains root then continue
+    info := info.insert root (root, ends.size, 0)
+    let mut queue : Array Nat := #[root]
+    let mut head := 0
+    while head < queue.size do
+      let v := queue[head]!
+      head := head + 1
+      let dv := (info.getD v (v, 0, 0)).2.2
+      for (w, e) in adj.getD v #[] do
+        if !info.contains w then
+          info := info.insert w (v, e, dv + 1)
+          treeEdge := treeEdge.set! e true
+          queue := queue.push w
+  let mut cycles : Array (Array Nat) := #[]
+  for e in [0:ends.size] do
+    if treeEdge[e]! then continue
+    let (a, b) := ends[e]!
+    let mut path : Array Nat := #[e]
+    let mut x := a
+    let mut y := b
+    let mut fuel := 2 * ends.size + 2
+    while x != y && fuel > 0 do
+      fuel := fuel - 1
+      let (px, ex, dx) := info.getD x (x, 0, 0)
+      let (py, ey, dy) := info.getD y (y, 0, 0)
+      if dx ≥ dy then
+        path := path.push ex
+        x := px
+      else
+        path := path.push ey
+        y := py
+    if x == y then cycles := cycles.push path
+  return cycles
+
+/-- Multiply the relations of a cycle; their large-prime product is the square of
+the product of the cycle's vertices, which `absorb` checks. -/
+def combineCycle {n : Nat} {fb : Array Nat} (edges : Array (Found n fb)) (ids : Array Nat) :
+    Option (Relation n fb) := Id.run do
+  if ids.isEmpty then return none
+  let rels := ids.toList.map fun i => edges[i]!.rel
+  let mut vertices : Std.HashSet Nat := {}
+  for i in ids do
+    vertices := (vertices.insert edges[i]!.l1).insert edges[i]!.l2
+  let s := vertices.fold (fun acc v => acc * v) 1
+  match rels with
+  | [] => return none
+  | r :: rest =>
+    let R := r.prod rest
+    if h : R.large = s * s then return some (R.absorb s h) else return none
+
 /-- Collect relations on `threads` parallel tasks until `needed` full relations
-(after large-prime pairing) are available or `maxRounds` is reached. -/
+(counting the cycles of partial relations) are available or `maxRounds` is
+reached; then turn every cycle into a full relation. -/
 def collect (ctx : Context) (variant : Variant) (needed threads maxRounds : Nat) :
     Array (Relation ctx.n ctx.fb) := Id.run do
   let mut fulls : Array (Relation ctx.n ctx.fb) := #[]
-  let mut partials : Std.HashMap Nat (Relation ctx.n ctx.fb) := {}
+  let mut edges : Array (Found ctx.n ctx.fb) := #[]
+  let mut uf : UnionFind := {}
+  let mut cycles := 0
   let mut seen : Std.HashSet Nat := {}
   let mut round := 0
   let perTask : Nat := match variant with
     | .qs => 4
     | .mpqs => 8
     | .siqs => 1
-  while fulls.size < needed && round < maxRounds do
+  while fulls.size + cycles < needed && round < maxRounds do
     let base := round * threads
     let tasks := (List.range threads).map fun t =>
       Task.spawn fun _ => match variant with
@@ -479,17 +608,19 @@ def collect (ctx : Context) (variant : Variant) (needed threads maxRounds : Nat)
         | .mpqs => mpqsBatch ctx (base + t) perTask
         | .siqs => siqsBatch ctx (base + t) perTask
     for task in tasks do
-      for r in task.get do
-        if seen.contains r.x then continue
-        seen := seen.insert r.x
-        if r.large == 1 then
-          fulls := fulls.push r
+      for f in task.get do
+        if seen.contains f.rel.x then continue
+        seen := seen.insert f.rel.x
+        if f.l1 == 1 && f.l2 == 1 then
+          fulls := fulls.push f.rel
         else
-          match partials.get? r.large with
-          | some r0 =>
-            if h : r0.large = r.large then fulls := fulls.push (r0.pair r h)
-          | none => partials := partials.insert r.large r
+          edges := edges.push f
+          let (uf', closed) := uf.union f.l1 f.l2
+          uf := uf'
+          if closed then cycles := cycles + 1
     round := round + 1
+  for ids in graphCycles (edges.map fun f => (f.l1, f.l2)) do
+    if let some r := combineCycle edges ids then fulls := fulls.push r
   return fulls
 
 /-- Linear algebra and square roots: try each dependency until one splits `n`. -/

@@ -31,11 +31,16 @@ def main (args : List String) : IO Unit := do
     nfsDebug n ts.toNat! (NFS.chooseParams (QS.decimalDigits n))
   | ["qsdebug", ns, fbs, m, lp, numA] =>
     let n := ns.toNat!
-    let params : QS.Params := QS.Params.mk fbs.toNat! m.toNat! lp.toNat! 40 6
+    let params : QS.Params := QS.Params.mk fbs.toNat! m.toNat! lp.toNat! 40 6 0
     qsDebug n params numA.toNat!
   | ["qsdebug", ns, numA] =>
     let n := ns.toNat!
     qsDebug n (QS.chooseParams (QS.decimalDigits n)) numA.toNat!
+  | ["siqsp", ns, ts, fbs, m, lp, dlp] =>
+    let n := ns.toNat!
+    let params : QS.Params := { (QS.Params.mk fbs.toNat! m.toNat! lp.toNat! 40 6 dlp.toNat!) with }
+    timed s!"siqs n={n} fb={fbs} M={m} lp={lp} dlp={dlp}" fun _ =>
+      (QS.split n { threads := ts.toNat!, params := some params }).map (·.val)
   | ["gnfs", ns, ts] =>
     let n := ns.toNat!
     timed s!"gnfs n={n} digits={QS.decimalDigits n}" fun _ =>

@@ -170,6 +170,20 @@ def Relation.pair {n : Nat} {fb : Array Nat} (r s : Relation n fb)
     rw [mul_pow, r.valid, s.valid, ← h]
     ring
 
+/-- A relation whose large-prime part is a perfect square `s²` (e.g. the product
+of the relations along a cycle of the large-prime graph) becomes a full relation. -/
+def Relation.absorb {n : Nat} {fb : Array Nat} (r : Relation n fb) (s : Nat)
+    (h : r.large = s * s) : Relation n fb where
+  x := r.x
+  sq := r.sq * s % n
+  large := 1
+  neg := r.neg
+  exps := r.exps
+  valid := by
+    rw [r.valid, h]
+    simp only [ZMod.natCast_mod, Nat.cast_mul, Nat.cast_one]
+    ring
+
 /-- Multiply a nonempty list of relations. -/
 def Relation.prod {n : Nat} {fb : Array Nat} (r : Relation n fb) :
     List (Relation n fb) → Relation n fb

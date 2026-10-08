@@ -51,30 +51,31 @@ structure Params where
   qPerTask : Nat := 4
   deriving Repr, Inhabited
 
-/-- `(digits, params)`, chosen for line sieving at small and medium sizes. -/
+/-- `(digits, params)`: line sieving for small inputs, special-`q` lattice
+sieving from 35 digits (measured on balanced semiprimes, 16 threads). -/
 def paramTable : List (Nat × Params) :=
-  [(20, { degree := 3, ratBound := 1200, algBound := 1200, halfWidth := 2048, lpMult := 15,
-          linesPerTask := 20 }),
-   (25, { degree := 3, ratBound := 2000, algBound := 2000, halfWidth := 4096, lpMult := 20,
-          linesPerTask := 20 }),
-   (30, { degree := 3, ratBound := 3500, algBound := 3500, halfWidth := 8192, lpMult := 20,
-          linesPerTask := 25 }),
-   (35, { degree := 3, ratBound := 6000, algBound := 6000, halfWidth := 16384, lpMult := 25,
-          linesPerTask := 25 }),
-   (40, { degree := 3, ratBound := 12000, algBound := 12000, halfWidth := 32768, lpMult := 30,
-          linesPerTask := 25 }),
-   (45, { degree := 4, ratBound := 25000, algBound := 25000, halfWidth := 65536, lpMult := 40,
-          linesPerTask := 25 }),
-   (50, { degree := 4, ratBound := 45000, algBound := 45000, halfWidth := 65536, lpMult := 50,
-          linesPerTask := 25 }),
-   (55, { degree := 4, ratBound := 80000, algBound := 80000, halfWidth := 131072, lpMult := 60,
-          linesPerTask := 25 }),
-   (60, { degree := 4, ratBound := 140000, algBound := 140000, halfWidth := 131072,
-          lpMult := 70, linesPerTask := 25 }),
-   (65, { degree := 5, ratBound := 220000, algBound := 220000, halfWidth := 262144,
-          lpMult := 80, linesPerTask := 20 }),
-   (70, { degree := 5, ratBound := 350000, algBound := 350000, halfWidth := 262144,
-          lpMult := 90, linesPerTask := 20 })]
+  [(20, { degree := 3, ratBound := 1500, algBound := 1500, halfWidth := 4096, lpMult := 15,
+          linesPerTask := 10 }),
+   (25, { degree := 3, ratBound := 3000, algBound := 3000, halfWidth := 8192, lpMult := 20,
+          linesPerTask := 10 }),
+   (30, { degree := 3, ratBound := 8000, algBound := 8000, halfWidth := 32768, lpMult := 20,
+          linesPerTask := 5 }),
+   (35, { degree := 3, ratBound := 12000, algBound := 12000, halfWidth := 65536, lpMult := 25,
+          latticeI := 2048, latticeJ := 256, qPerTask := 2 }),
+   (40, { degree := 3, ratBound := 20000, algBound := 20000, halfWidth := 131072, lpMult := 30,
+          latticeI := 2048, latticeJ := 256, qPerTask := 2 }),
+   (45, { degree := 4, ratBound := 35000, algBound := 35000, halfWidth := 262144, lpMult := 40,
+          latticeI := 4096, latticeJ := 256, qPerTask := 2 }),
+   (50, { degree := 4, ratBound := 60000, algBound := 60000, halfWidth := 262144, lpMult := 50,
+          latticeI := 4096, latticeJ := 256, qPerTask := 4 }),
+   (55, { degree := 4, ratBound := 90000, algBound := 90000, halfWidth := 262144, lpMult := 60,
+          latticeI := 4096, latticeJ := 512, qPerTask := 2 }),
+   (60, { degree := 4, ratBound := 120000, algBound := 120000, halfWidth := 262144,
+          lpMult := 60, latticeI := 4096, latticeJ := 1024, qPerTask := 2 }),
+   (65, { degree := 5, ratBound := 180000, algBound := 180000, halfWidth := 524288,
+          lpMult := 70, latticeI := 8192, latticeJ := 512, qPerTask := 2 }),
+   (70, { degree := 5, ratBound := 250000, algBound := 250000, halfWidth := 524288,
+          lpMult := 80, latticeI := 8192, latticeJ := 1024, qPerTask := 2 })]
 
 def chooseParams (digits : Nat) : Params :=
   ((paramTable.find? fun e => digits ≤ e.1).map Prod.snd).getD

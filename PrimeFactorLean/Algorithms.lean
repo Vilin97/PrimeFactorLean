@@ -97,6 +97,14 @@ def ecmSchedule (digits : Nat) : List (Nat × Nat) :=
   else if digits ≤ 80 then [(2000, 25), (11000, 90), (50000, 300), (250000, 200)]
   else [(2000, 25), (11000, 90), (50000, 300), (250000, 700), (1000000, 500)]
 
+/-- The full GMP-ECM schedule, levels for factors of 15, 20, …, 40 digits, up to
+factors of about half the size of `n` (standalone ECM). -/
+def ecmScheduleFull (digits : Nat) : List (Nat × Nat) :=
+  let levels : List (Nat × Nat × Nat) :=
+    [(15, 2000, 25), (20, 11000, 90), (25, 50000, 300), (30, 250000, 700),
+     (35, 1000000, 1800), (40, 3000000, 5100)]
+  (levels.filter fun l => l.1 ≤ max 15 (digits / 2 + 5)).map fun l => (l.2.1, l.2.2)
+
 /-- ECM over a list of `(B1, curves)` levels; the first factor wins. -/
 def ecmLevels (threads : Nat) (levels : List (Nat × Nat)) : Splitter := fun n =>
   levels.foldl (fun acc (b1, curves) => acc.orElse fun _ =>
@@ -131,7 +139,7 @@ def splitter (algorithm : Algorithm) (cfg : Config := {}) : Splitter :=
   | .ecm => fun n =>
       if cfg.ecmB1 > 0 then
         ECMM.split n { b1 := cfg.ecmB1, curves := max 1 cfg.ecmCurves, threads := cfg.threads }
-      else ecmLevels cfg.threads (ecmSchedule (QS.decimalDigits n)) n
+      else ecmLevels cfg.threads (ecmScheduleFull (QS.decimalDigits n)) n
   | .cfrac => fun n => CFRAC.split n
   | .qs => fun n => QS.split n { variant := .qs, threads := cfg.threads }
   | .mpqs => fun n => QS.split n { variant := .mpqs, threads := cfg.threads }

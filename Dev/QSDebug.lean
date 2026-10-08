@@ -53,6 +53,6 @@ def qsDebug (n : Nat) (params : Params) (numA : Nat) : IO Unit := do
     nPolys := nPolys + 1
     nCands := nCands + cands.size
     for r in rels do
-      if r.large == 1 then nFull := nFull + 1 else nPartial := nPartial + 1
+      if r.l1 == 1 && r.l2 == 1 then nFull := nFull + 1 else nPartial := nPartial + 1
   IO.println s!"polys {nPolys}: positions {tPos/1000000} ms, sieve+scan {tSieve/1000000} ms, candidates {tCand/1000000} ms"
   IO.println s!"candidates {nCands}, full {nFull}, partial {nPartial}"
