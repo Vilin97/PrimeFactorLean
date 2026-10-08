@@ -24,3 +24,5 @@ lean_exe factorTests where
 
 lean_exe dev where
   root := `Dev.Main
+
+lean_lib Dev

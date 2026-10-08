@@ -2,165 +2,27 @@
   "source_url": "https://homes.cerias.purdue.edu/~ssw/cun/pmain126.txt",
   "retrieved": "2026-10-07",
   "source_sha256": "ad0ca98600df26bc07bd682f7be479c520a7f0359adfc2987f09312377726a42",
-  "selected_table_lines": [
-    {
-      "exponent": 3,
-      "table": "2-",
-      "line": "    3   7"
-    },
-    {
-      "exponent": 5,
-      "table": "2-",
-      "line": "    5   31"
-    },
-    {
-      "exponent": 7,
-      "table": "2-",
-      "line": "    7   127"
-    },
-    {
-      "exponent": 9,
-      "table": "2-",
-      "line": "    9  (3) 73"
-    },
-    {
-      "exponent": 11,
-      "table": "2-",
-      "line": "   11   23.89"
-    },
-    {
-      "exponent": 13,
-      "table": "2-",
-      "line": "   13   8191"
-    },
-    {
-      "exponent": 15,
-      "table": "2-",
-      "line": "   15  (3,5) 151"
-    },
-    {
-      "exponent": 17,
-      "table": "2-",
-      "line": "   17   131071"
-    },
-    {
-      "exponent": 19,
-      "table": "2-",
-      "line": "   19   524287"
-    },
-    {
-      "exponent": 21,
-      "table": "2-",
-      "line": "   21  (3,7) 7*.337"
-    },
-    {
-      "exponent": 23,
-      "table": "2-",
-      "line": "   23   47.178481"
-    },
-    {
-      "exponent": 25,
-      "table": "2-",
-      "line": "   25  (5) 601.1801"
-    },
-    {
-      "exponent": 27,
-      "table": "2-",
-      "line": "   27  (3,9) 262657"
-    },
-    {
-      "exponent": 29,
-      "table": "2-",
-      "line": "   29   233.1103.2089"
-    },
-    {
-      "exponent": 31,
-      "table": "2-",
-      "line": "   31   2147483647"
-    },
-    {
-      "exponent": 33,
-      "table": "2-",
-      "line": "   33  (3,11) 599479"
-    },
-    {
-      "exponent": 35,
-      "table": "2-",
-      "line": "   35  (5,7) 71.122921"
-    },
-    {
-      "exponent": 37,
-      "table": "2-",
-      "line": "   37   223.616318177"
-    },
-    {
-      "exponent": 39,
-      "table": "2-",
-      "line": "   39  (3,13) 79.121369"
-    },
-    {
-      "exponent": 41,
-      "table": "2-",
-      "line": "   41   13367.164511353"
-    },
-    {
-      "exponent": 43,
-      "table": "2-",
-      "line": "   43   431.9719.2099863"
-    },
-    {
-      "exponent": 45,
-      "table": "2-",
-      "line": "   45  (3,5,9,15) 631.23311"
-    },
-    {
-      "exponent": 47,
-      "table": "2-",
-      "line": "   47   2351.4513.13264529"
-    },
-    {
-      "exponent": 49,
-      "table": "2-",
-      "line": "   49  (7) 4432676798593"
-    },
-    {
-      "exponent": 51,
-      "table": "2-",
-      "line": "   51  (3,17) 103.2143.11119"
-    },
-    {
-      "exponent": 53,
-      "table": "2-",
-      "line": "   53   6361.69431.20394401"
-    },
-    {
-      "exponent": 55,
-      "table": "2-",
-      "line": "   55  (5,11) 881.3191.201961"
-    },
-    {
-      "exponent": 57,
-      "table": "2-",
-      "line": "   57  (3,19) 32377.1212847"
-    },
-    {
-      "exponent": 59,
-      "table": "2-",
-      "line": "   59   179951.3203431780337"
-    },
-    {
-      "exponent": 61,
-      "table": "2-",
-      "line": "   61   2305843009213693951"
-    },
-    {
-      "exponent": 63,
-      "table": "2-",
-      "line": "   63  (3,7,9,21) 92737.649657"
-    }
+  "tables": [
+    "2-",
+    "3-",
+    "5-",
+    "6-",
+    "7-",
+    "10-",
+    "11-",
+    "12-"
   ],
   "seed": 20261007,
-  "reference": "Pure Python exact arithmetic; deterministic Miller-Rabin on all inputs < 2^64; independent rho for expected factors",
-  "notes": "Only Table 2- odd exponents 3..63 are sampled. Parenthesized inherited factors are expanded by independent reference factoring; no unknown cofactors are included. RSA challenge numbers are excluded because even RSA-100 is unsuitable for routine CI in this implementation.",
-  "cases_sha256": "be9010add607bdea914ba107fef219d363601d91328c666633f9fcbc4431eb98"
+  "cunningham_rule": "b^n - 1, b in {2,3,5,6,7,10,11,12}, n odd, at most 100 digits, complete factorization reconstructable from the table",
+  "cunningham_skipped": [],
+  "rsa100": "RSA-100 = 37975227936943673922808872755445627854565536638199 * 40094690950920881030683735292761468389214899724061",
+  "reference": "Pure Python exact arithmetic: Cunningham factorizations from the pinned table and cyclotomic values; Pollard rho for small generated inputs; strong probable-prime test to 25 bases for every reference factor.",
+  "tiers": {
+    "core": 204,
+    "medium": 102,
+    "large": 271,
+    "huge": 253,
+    "challenge": 1
+  },
+  "cases_sha256": "e7067f4a4178c28c6c8dc9e0c67562206b86e345be24b8b9589fca7535414982"
 }

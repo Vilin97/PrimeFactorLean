@@ -1,5 +1,6 @@
 import PrimeFactorLean.Primality
 import PrimeFactorLean.Algorithms
+import PrimeFactorLean.Pocklington
 import Mathlib.Data.Nat.Factors
 
 /-!
@@ -56,10 +57,32 @@ def run : IO Unit := do
     (!(generatePrimeCertificate Nat.primeFactorsList 101 64 0).isSome)
   require "base prime independent of budgets"
     (generatePrimeCertificate (fun _ => []) 2 0 0).isSome
-  for n in [2, 3, 101, 65537, 1000000007] do
-    require ("production oracle prime " ++ toString n) (algorithmPrimeOracle {} n).isSome
-  for n in [0, 1, 4, 561, 1105, 1729, 3215031751] do
-    require ("production oracle composite " ++ toString n) (!(algorithmPrimeOracle {} n).isSome)
+  for n in [2, 3, 101, 65537, 1000000007, 2 ^ 61 - 1, 2 ^ 89 - 1, 2 ^ 127 - 1,
+            79638304766856507377778616296087448490695649] do
+    require ("production oracle prime " ++ toString n) (primeOracle {} n).isSome
+  for n in [0, 1, 4, 561, 1105, 1729, 3215031751, 2 ^ 67 - 1, 3825123056546413051] do
+    require ("production oracle composite " ++ toString n) (!(primeOracle {} n).isSome)
+  -- Pocklington certificates: generated ones check, tampered ones are rejected.
+  let split : Nat → Option Nat := fun m => (autoSplitter {} m).map Subtype.val
+  let big := 79638304766856507377778616296087448490695649
+  match Pocklington.generate split big with
+  | none => throw (IO.userError "Failed to construct a Pocklington certificate")
+  | some c =>
+    require "Pocklington certificate checks" (c.n == big && c.check)
+    match c.steps.getLast? with
+    | none => throw (IO.userError "empty Pocklington certificate")
+    | some last =>
+      let init := c.steps.dropLast
+      let tamper (ws : List (Nat × Nat × Nat)) : Pocklington.Certificate :=
+        ⟨big, init ++ [⟨big, ws⟩]⟩
+      require "wrong witness" (!(tamper (last.witnesses.map fun t => (t.1, t.2.1, 1))).check)
+      require "too small factored part" (!(tamper (last.witnesses.take 1)).check)
+      require "exponent too large"
+        (!(tamper (last.witnesses.map fun t => (t.1, t.2.1 + 50, t.2.2))).check)
+      require "duplicated prime" (!(tamper (last.witnesses ++ last.witnesses)).check)
+      require "unproved composite witness prime"
+        (!(tamper ((last.witnesses.map fun t => (t.1 * 4294967311, t.2.1, t.2.2)))).check)
+      require "different target" (!(Pocklington.Certificate.mk (big + 2) c.steps).check)
   require "production factor prime" (factor .auto 1000000007 == some [1000000007])
   require "production factor Carmichael" (factor .auto 561 == some [3, 11, 17])
   let hostileOracle : PrimeOracle := prattOracle (fun _ => [0])

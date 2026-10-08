@@ -1,8 +1,6 @@
 import Mathlib.Data.Nat.Sqrt
 import Mathlib.Data.Nat.ModEq
 import Mathlib.Algebra.BigOperators.Group.List.Basic
-import PrimeFactorLean.ECM
-import PrimeFactorLean.QuadraticSieve
 
 /-!
 # Bounded integer factor searches
@@ -24,8 +22,6 @@ structure Config where
   pMinusOneBound : Nat := 1000
   ecmCurves : Nat := 12
   ecmBound : Nat := 200
-  qsBound : Nat := 100
-  qsIntervals : Nat := 20000
   deriving Repr, Inhabited
 
 def absDiff (a b : Nat) : Nat := if a < b then b - a else a - b
@@ -234,14 +230,6 @@ def pMinusOne (n : Nat) (cfg : Config := {}) : Option Nat :=
     let powers := pMinusOnePowers cfg.pMinusOneBound
     firstAttempt (fun attempt => pMinusOneAttemptWithPowers n (attempt + 2) powers)
       cfg.rhoRestarts 0
-
-/-- Affine elliptic-curve stage one with nonunit-denominator detection. -/
-def ecm (n : Nat) (cfg : Config := {}) : Option Nat :=
-  PrimeFactorLean.ECM.split n cfg.ecmBound cfg.ecmCurves
-
-/-- Single-polynomial quadratic sieve with exact modular-root block sieving. -/
-def quadraticSieve (n : Nat) (cfg : Config := {}) : Option Nat :=
-  PrimeFactorLean.QuadraticSieve.split n cfg.qsBound cfg.qsIntervals
 
 /-! ## Execution invariants -/
 
@@ -589,12 +577,5 @@ theorem pMinusOne_sound {n d : Nat} {cfg : Config}
       have hd : factor = d := by simpa [he] using h
       subst factor
       exact evenFactor_sound he
-
-theorem ecm_sound {n d : Nat} {cfg : Config} (h : ecm n cfg = some d) :
-    1 < d ∧ d < n ∧ d ∣ n := PrimeFactorLean.ECM.split_sound h
-
-theorem quadraticSieve_sound {n d : Nat} {cfg : Config}
-    (h : quadraticSieve n cfg = some d) : 1 < d ∧ d < n ∧ d ∣ n :=
-  PrimeFactorLean.QuadraticSieve.split_sound n cfg.qsBound cfg.qsIntervals d h
 
 end PrimeFactorLean.Search

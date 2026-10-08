@@ -2,22 +2,36 @@ import PrimeFactorLean.Core
 import PrimeFactorLean.Trial
 import PrimeFactorLean.Search
 import PrimeFactorLean.ECM
-import PrimeFactorLean.QuadraticSieve
+import PrimeFactorLean.ECMMontgomery
+import PrimeFactorLean.QS
+import PrimeFactorLean.GNFS
+import PrimeFactorLean.SQUFOF
+import PrimeFactorLean.CFRAC
+import PrimeFactorLean.PMinusOne
 import PrimeFactorLean.Primality
-import PrimeFactorLean.NumberFieldSieve
-import PrimeFactorLean.CubicNumberFieldSieve
+import PrimeFactorLean.Pocklington
 
 /-!
 # Public algorithms and their exact specification
 
-Probable-prime tests below only guide untrusted certificate construction.
-Every prime leaf in `factor` is justified either by the kernel-proved Pratt
-checker or by exact trial division. No probable-prime test is trusted.
+Every algorithm is exposed as a *proof-carrying splitter*
+`(n : Nat) → Option (ProperFactor n)`: a returned divisor comes with the proof
+`1 < d ∧ d < n ∧ d ∣ n`, obtained from that algorithm's own soundness theorem
+(never from a second runtime check). The verified engine `factorCoreWith`
+recursively splits, certifies prime leaves with Pocklington certificates
+(`Pocklington.oracle`, proved sound), and falls back to exact trial division
+when a bounded search gives up. Hence `factor_total_correct` holds for every
+algorithm, every configuration and every positive input.
+
+Probable-prime tests and all factoring heuristics only guide the search; no
+correctness theorem depends on them.
 -/
+
 namespace PrimeFactorLean
 
 inductive Algorithm where
-  | trialReference | trial | wheel | fermat | rho | brent | pMinusOne | ecm | qs | mpqs | nfsQuadratic | nfsCubic | auto
+  | trialReference | trial | wheel | fermat | rho | brent | squfof | pMinusOne | pPlusOne
+  | ecmAffine | ecm | cfrac | qs | mpqs | siqs | gnfs | auto
   deriving Repr, Inhabited, DecidableEq
 
 def Algorithm.name : Algorithm → String
@@ -27,115 +41,131 @@ def Algorithm.name : Algorithm → String
   | .fermat => "fermat"
   | .rho => "rho"
   | .brent => "brent"
+  | .squfof => "squfof"
   | .pMinusOne => "pminusone"
+  | .pPlusOne => "pplusone"
+  | .ecmAffine => "ecm-affine"
   | .ecm => "ecm"
+  | .cfrac => "cfrac"
   | .qs => "qs"
   | .mpqs => "mpqs"
-  | .nfsQuadratic => "nfs-quadratic"
-  | .nfsCubic => "nfs-cubic"
+  | .siqs => "siqs"
+  | .gnfs => "gnfs"
   | .auto => "auto"
 
-def Algorithm.parse : String → Option Algorithm
-  | "trial-reference" => some .trialReference
-  | "trial" => some .trial
-  | "wheel" => some .wheel
-  | "fermat" => some .fermat
-  | "rho" => some .rho
-  | "brent" => some .brent
-  | "pminusone" => some .pMinusOne
-  | "ecm" => some .ecm
-  | "qs" => some .qs
-  | "mpqs" => some .mpqs
-  | "nfs-quadratic" => some .nfsQuadratic
-  | "nfs-cubic" => some .nfsCubic
-  | "auto" => some .auto
-  | _ => none
+def Algorithm.all : List Algorithm :=
+  [.trialReference, .trial, .wheel, .fermat, .rho, .brent, .squfof, .pMinusOne, .pPlusOne,
+   .ecmAffine, .ecm, .cfrac, .qs, .mpqs, .siqs, .gnfs, .auto]
 
-/-- Remove powers of two; fuel is deliberately explicit. -/
-def twoPart : Nat → Nat → Nat × Nat
-  | 0, d => (d, 0)
-  | fuel + 1, d =>
-    if d > 0 && d % 2 == 0 then
-      let r := twoPart fuel (d / 2)
-      (r.1, r.2 + 1)
-    else (d, 0)
+def Algorithm.parse (s : String) : Option Algorithm :=
+  Algorithm.all.find? (·.name == s)
 
-def strongScreenLoop (n : Nat) : Nat → Nat → Bool
-  | 0, _ => false
-  | k + 1, x =>
-    let y := x * x % n
-    if y == n - 1 then true else strongScreenLoop n k y
+/-- Run-time configuration shared by all algorithms. -/
+structure Config where
+  search : Search.Config := {}
+  /-- Parallel tasks used by ECM, the quadratic sieves and the number field sieve. -/
+  threads : Nat := 8
+  /-- Stage-one bound for `p - 1` and `p + 1`. -/
+  pm1Bound : Nat := 100000
+  /-- Fixed ECM `B1` (`0` selects the automatic schedule). -/
+  ecmB1 : Nat := 0
+  ecmCurves : Nat := 0
+  deriving Inhabited
 
-/-- A rejection/branching heuristic, never an assertion of primality. -/
-def probablePrime (n : Nat) : Bool :=
-  if n < 2 then false else
-  if n == 2 || n == 3 then true else
-  if n % 2 == 0 then false else
-  let ds := twoPart 256 (n - 1)
-  [2, 325, 9375, 28178, 450775, 9780504, 1795265022].all fun a =>
-    if a % n == 0 then true else
-      let x := Search.modPow a ds.1 n
-      x == 1 || x == n - 1 || strongScreenLoop n (ds.2 - 1) x
+/-- Turn a raw search and its soundness theorem into a proof-carrying splitter. -/
+def ofSound (search : Nat → Option Nat)
+    (sound : ∀ n d, search n = some d → 1 < d ∧ d < n ∧ d ∣ n) : Splitter :=
+  fun n => match h : search n with
+    | some d => some ⟨d, sound n d h⟩
+    | none => none
 
-/-- The automatic portfolio tries increasingly expensive bounded searches. -/
-def portfolio (n : Nat) (cfg : Search.Config := {}) : Option Nat :=
-  (trialSearchAux n 2 63).orElse fun _ =>
-    (Search.fermat n {cfg with fermatSteps := min cfg.fermatSteps 128}).orElse fun _ =>
-      (Search.brent n cfg).orElse fun _ =>
-        (Search.pMinusOne n cfg).orElse fun _ =>
-          (ECM.split n cfg.ecmBound cfg.ecmCurves).orElse fun _ =>
-            QuadraticSieve.split n cfg.qsBound cfg.qsIntervals
+/-- Trial division by `2, …, bound` (proved by `trialSearchAux_sound`). -/
+def smallSplitter (bound : Nat) : Splitter :=
+  ofSound (fun n => trialSearchAux n 2 (bound - 1)) (fun _ _ h => trialSearchAux_sound h)
 
-def rawSearch (algorithm : Algorithm) (cfg : Search.Config := {}) : Nat → Option Nat :=
+/-- Exact perfect powers `n = r^k`, `k ≥ 2`. -/
+def powerSplitter : Splitter := fun n =>
+  match h : Arith.perfectPower n with
+  | some (r, _) => some ⟨r, Arith.perfectPower_proper h⟩
+  | none => none
+
+/-- `(B1, curves)` for an automatic ECM schedule, by size of `n` in digits. -/
+def ecmSchedule (digits : Nat) : List (Nat × Nat) :=
+  if digits ≤ 30 then [(2000, 8)]
+  else if digits ≤ 45 then [(2000, 16), (11000, 32)]
+  else if digits ≤ 60 then [(2000, 25), (11000, 90), (50000, 100)]
+  else if digits ≤ 80 then [(2000, 25), (11000, 90), (50000, 300), (250000, 200)]
+  else [(2000, 25), (11000, 90), (50000, 300), (250000, 700), (1000000, 500)]
+
+/-- ECM over a list of `(B1, curves)` levels; the first factor wins. -/
+def ecmLevels (threads : Nat) (levels : List (Nat × Nat)) : Splitter := fun n =>
+  levels.foldl (fun acc (b1, curves) => acc.orElse fun _ =>
+    ECMM.split n { b1 := b1, curves := curves, threads := threads }) none
+
+/-- The automatic portfolio: cheap methods first, then ECM, then SIQS. -/
+def autoSplitter (cfg : Config) : Splitter := fun n =>
+  if n < 4 then none else
+  (smallSplitter 4096 n).orElse fun _ =>
+  (powerSplitter n).orElse fun _ =>
+  (if n < 2 ^ 62 then SQUFOF.split n else none).orElse fun _ =>
+  (ofSound (fun m => Search.brent m { cfg.search with rhoSteps := 20000, rhoRestarts := 2 })
+    (fun _ _ h => Search.brent_sound h) n).orElse fun _ =>
+  (PMinusOne.splitPMinusOne n 20000).orElse fun _ =>
+  (ecmLevels cfg.threads (ecmSchedule (QS.decimalDigits n)) n).orElse fun _ =>
+  QS.split n { variant := .siqs, threads := cfg.threads }
+
+/-- The proof-carrying splitter of each algorithm. -/
+def splitter (algorithm : Algorithm) (cfg : Config := {}) : Splitter :=
   match algorithm with
-  | .trialReference => trialSearchReference
-  | .trial => trialSearch
-  | .wheel => trialWheelSearch
-  | .fermat => fun n => Search.fermat n cfg
-  | .rho => fun n => Search.rho n cfg
-  | .brent => fun n => Search.brent n cfg
-  | .pMinusOne => fun n => Search.pMinusOne n cfg
-  | .ecm => fun n => ECM.split n cfg.ecmBound cfg.ecmCurves
-  | .qs => fun n => QuadraticSieve.split n cfg.qsBound cfg.qsIntervals
-  | .mpqs => fun n => QuadraticSieve.splitMPQS n
-  | .nfsQuadratic => fun n => NumberFieldSieve.split n
-  | .nfsCubic => fun n => CubicNumberFieldSieve.split n
-  | .auto => fun n => portfolio n cfg
+  | .trialReference => trialSplitterReference
+  | .trial => trialSplitter
+  | .wheel => trialWheelSplitter
+  | .fermat => ofSound (fun n => Search.fermat n cfg.search) (fun _ _ h => Search.fermat_sound h)
+  | .rho => ofSound (fun n => Search.rho n cfg.search) (fun _ _ h => Search.rho_sound h)
+  | .brent => ofSound (fun n => Search.brent n cfg.search) (fun _ _ h => Search.brent_sound h)
+  | .squfof => fun n => SQUFOF.split n
+  | .pMinusOne => fun n => PMinusOne.splitPMinusOne n cfg.pm1Bound
+  | .pPlusOne => fun n => PMinusOne.splitPPlusOne n cfg.pm1Bound
+  | .ecmAffine => ofSound (fun n => ECM.split n cfg.search.ecmBound cfg.search.ecmCurves)
+      (fun _ _ h => ECM.split_sound h)
+  | .ecm => fun n =>
+      if cfg.ecmB1 > 0 then
+        ECMM.split n { b1 := cfg.ecmB1, curves := max 1 cfg.ecmCurves, threads := cfg.threads }
+      else ecmLevels cfg.threads (ecmSchedule (QS.decimalDigits n)) n
+  | .cfrac => fun n => CFRAC.split n
+  | .qs => fun n => QS.split n { variant := .qs, threads := cfg.threads }
+  | .mpqs => fun n => QS.split n { variant := .mpqs, threads := cfg.threads }
+  | .siqs => fun n => QS.split n { variant := .siqs, threads := cfg.threads }
+  | .gnfs => fun n => GNFS.split n { threads := cfg.threads }
+  | .auto => autoSplitter cfg
 
-/-- Untrusted prime-factor candidates used solely by certificate generation.
-It is safe to stop on a probable prime: the resulting certificate is checked.
--/
-def candidateFactors (cfg : Search.Config) : Nat → Nat → List Nat
-  | 0, n => if n ≤ 1 then [] else [n]
-  | fuel + 1, n =>
-    if n ≤ 1 then [] else
-    if probablePrime n then [n] else
-      match portfolio n cfg with
-      | none => [n]
-      | some d =>
-        if 1 < d && d < n && n % d == 0 then
-          candidateFactors cfg fuel d ++ candidateFactors cfg fuel (n / d)
-        else [n]
+/-- The raw divisor search (for benchmarks that must not count fallbacks). -/
+def rawSearch (algorithm : Algorithm) (cfg : Config := {}) (n : Nat) : Option Nat :=
+  (splitter algorithm cfg n).map Subtype.val
 
-def algorithmPrimeOracle (cfg : Search.Config := {}) : PrimeOracle := fun n =>
-  if probablePrime n then
-    prattOracle (candidateFactors cfg 64) 64 256 n
-  else none
+theorem rawSearch_sound {algorithm : Algorithm} {cfg : Config} {n d : Nat}
+    (h : rawSearch algorithm cfg n = some d) : 1 < d ∧ d < n ∧ d ∣ n := by
+  unfold rawSearch at h
+  obtain ⟨f, _, rfl⟩ := Option.map_eq_some_iff.mp h
+  exact f.property
+
+/-- Prime leaves are certified by Pocklington certificates whose `n - 1`
+factorizations are found with the automatic splitter (an untrusted helper). -/
+def primeOracle (cfg : Config := {}) : PrimeOracle :=
+  Pocklington.oracle (fun m => (autoSplitter cfg m).map Subtype.val)
 
 /-- All nonzero inputs receive a complete factorization. Searches may fall back.
-The two trial implementations remain independent, certificate-free baselines.
--/
-def factor (algorithm : Algorithm) (n : Nat) (cfg : Search.Config := {}) :
-    Option (List Nat) :=
+The trial algorithms remain independent, certificate-free baselines. -/
+def factor (algorithm : Algorithm) (n : Nat) (cfg : Config := {}) : Option (List Nat) :=
   if n = 0 then none else
     match algorithm with
     | .trialReference => some (factorCore trialSplitterReference n)
     | .trial => some (trialCore n)
     | .wheel => some (trialWheelCore n)
-    | _ => some (factorCoreWith (algorithmPrimeOracle cfg) (checkedSplitter (rawSearch algorithm cfg)) n)
+    | _ => some (factorCoreWith (primeOracle cfg) (splitter algorithm cfg) n)
 
 /-- The same universal theorem covers each named executable implementation. -/
-theorem factor_correct (algorithm : Algorithm) (n : Nat) (cfg : Search.Config)
+theorem factor_correct (algorithm : Algorithm) (n : Nat) (cfg : Config)
     (factors : List Nat) (h : factor algorithm n cfg = some factors) :
     IsFactorization n factors := by
   unfold factor at h
@@ -150,22 +180,22 @@ theorem factor_correct (algorithm : Algorithm) (n : Nat) (cfg : Search.Config)
     all_goals exact factorCoreWith_correct _ _ n hn
 
 /-- Every positive input finishes with a complete prime factorization. -/
-theorem factor_total_correct (algorithm : Algorithm) (n : Nat) (cfg : Search.Config)
+theorem factor_total_correct (algorithm : Algorithm) (n : Nat) (cfg : Config)
     (hn : n ≠ 0) :
     ∃ ps, factor algorithm n cfg = some ps ∧ IsFactorization n ps := by
   cases hf : factor algorithm n cfg with
   | none => cases algorithm <;> simp [factor, hn] at hf
   | some ps => exact ⟨ps, rfl, factor_correct algorithm n cfg ps hf⟩
 
-@[simp] theorem factor_zero (algorithm : Algorithm) (cfg : Search.Config) :
+@[simp] theorem factor_zero (algorithm : Algorithm) (cfg : Config) :
     factor algorithm 0 cfg = none := by simp [factor]
 
 /-- Signed factorization with the same verified natural-number implementation. -/
-def factorSigned (algorithm : Algorithm) (z : Int) (cfg : Search.Config := {}) :
+def factorSigned (algorithm : Algorithm) (z : Int) (cfg : Config := {}) :
     Option (Int × List Nat) :=
   (factor algorithm z.natAbs cfg).map fun ps => (z.sign, ps)
 
-theorem factorSigned_correct (algorithm : Algorithm) (z : Int) (cfg : Search.Config)
+theorem factorSigned_correct (algorithm : Algorithm) (z : Int) (cfg : Config)
     (sign : Int) (ps : List Nat)
     (h : factorSigned algorithm z cfg = some (sign, ps)) :
     IsIntFactorization z sign ps := by
@@ -188,7 +218,7 @@ theorem factorSigned_correct (algorithm : Algorithm) (z : Int) (cfg : Search.Con
       exact Int.sign_mul_natAbs z
 
 theorem factorSigned_total_correct (algorithm : Algorithm) (z : Int)
-    (cfg : Search.Config) (hz : z ≠ 0) :
+    (cfg : Config) (hz : z ≠ 0) :
     ∃ sign ps, factorSigned algorithm z cfg = some (sign, ps) ∧
       IsIntFactorization z sign ps := by
   obtain ⟨ps, hf, _⟩ := factor_total_correct algorithm z.natAbs cfg

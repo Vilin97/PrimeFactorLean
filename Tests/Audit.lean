@@ -1,41 +1,15 @@
-import PrimeFactorLean.Core
-import PrimeFactorLean.Trial
-import PrimeFactorLean.Algorithms
-import PrimeFactorLean.NumberFieldSieve
-import PrimeFactorLean.CubicNumberFieldSieve
+import PrimeFactorLean
 
 /-! Kernel axiom audit and deterministic regression tests for the verified core. -/
 
-#print axioms PrimeFactorLean.factorCoreWith_correct
-#print axioms PrimeFactorLean.factorCore_correct
-#print axioms PrimeFactorLean.factorNat_correct
-#print axioms PrimeFactorLean.factorInt_correct
-#print axioms PrimeFactorLean.trialSearchAux_none_iff
-#print axioms PrimeFactorLean.trialSearch_none_prime
-#print axioms PrimeFactorLean.trialCore_correct
-#print axioms PrimeFactorLean.trialFactorReference_correct
-#print axioms PrimeFactorLean.trialWheelSearch_none_prime
-#print axioms PrimeFactorLean.trialWheelCore_correct
-#print axioms PrimeFactorLean.trialWheelFactor_correct
-#print axioms PrimeFactorLean.factor_correct
+/- The public correctness theorems, printed for inspection. -/
 #print axioms PrimeFactorLean.factor_total_correct
-#print axioms PrimeFactorLean.factorSigned_correct
 #print axioms PrimeFactorLean.factorSigned_total_correct
-#print axioms PrimeFactorLean.Search.modPow_correct
-#print axioms PrimeFactorLean.Search.brentBlock_product
-#print axioms PrimeFactorLean.ECM.add_preserves_curve
-#print axioms PrimeFactorLean.ECM.split_sound
-#print axioms PrimeFactorLean.QuadraticSieve.factorOverBase_factorization
-#print axioms PrimeFactorLean.PrimeCertificate.check_sound
-#print axioms PrimeFactorLean.NumberFieldSieve.square_roots_congruence
-#print axioms PrimeFactorLean.NumberFieldSieve.factorization_correct
-#print axioms PrimeFactorLean.QuadraticSieve.splitMPQS_sound
-#print axioms PrimeFactorLean.QuadraticSieve.mpqs_relation_congruence
-#print axioms PrimeFactorLean.QuadraticSieve.quotientValue_step
-#print axioms PrimeFactorLean.CubicNumberFieldSieve.mul_assoc
-#print axioms PrimeFactorLean.CubicNumberFieldSieve.norm_mul
-#print axioms PrimeFactorLean.CubicNumberFieldSieve.evaluate_mul_mod
-#print axioms PrimeFactorLean.CubicNumberFieldSieve.split_correct
+#print axioms PrimeFactorLean.Pocklington.pocklington
+#print axioms PrimeFactorLean.Squares.Relation.toSquares
+#print axioms PrimeFactorLean.Squares.SquareCongruence.factor_isSome
+#print axioms PrimeFactorLean.GNFS.nfs_square
+#print axioms PrimeFactorLean.NFS.eval_mulZ
 
 /- Fail CI on any additional axiom, including sorryAx, in the public specifications. -/
 run_cmd do
@@ -48,6 +22,17 @@ run_cmd do
     ``PrimeFactorLean.factor_total_correct,
     ``PrimeFactorLean.factorSigned_correct,
     ``PrimeFactorLean.factorSigned_total_correct,
+    ``PrimeFactorLean.rawSearch_sound,
+    ``PrimeFactorLean.Arith.powMod_eq,
+    ``PrimeFactorLean.Arith.perfectPower_proper,
+    ``PrimeFactorLean.Arith.smallPrime_sound,
+    ``PrimeFactorLean.Pocklington.prime_pow_dvd_sub_one,
+    ``PrimeFactorLean.Pocklington.pocklington,
+    ``PrimeFactorLean.Pocklington.Step.check_sound,
+    ``PrimeFactorLean.Pocklington.Certificate.check_sound,
+    ``PrimeFactorLean.Pocklington.generate_sound,
+    ``PrimeFactorLean.LucasStep.check_sound,
+    ``PrimeFactorLean.PrimeCertificate.check_sound,
     ``PrimeFactorLean.Search.modPow_correct,
     ``PrimeFactorLean.Search.brentBlock_product,
     ``PrimeFactorLean.Search.fermat_sound,
@@ -59,22 +44,25 @@ run_cmd do
     ``PrimeFactorLean.ECM.multiply_preserves_curve,
     ``PrimeFactorLean.ECM.stageOne_preserves_curve,
     ``PrimeFactorLean.ECM.split_sound,
-    ``PrimeFactorLean.QuadraticSieve.factorOverBase_factorization,
-    ``PrimeFactorLean.QuadraticSieve.even_powerProduct_is_square,
-    ``PrimeFactorLean.QuadraticSieve.split_sound,
-    ``PrimeFactorLean.LucasStep.check_sound,
-    ``PrimeFactorLean.PrimeCertificate.check_sound,
-    ``PrimeFactorLean.generatePrimeCertificate_sound,
-    ``PrimeFactorLean.NumberFieldSieve.square_roots_congruence,
-    ``PrimeFactorLean.NumberFieldSieve.split_correct,
-    ``PrimeFactorLean.NumberFieldSieve.factorization_correct,
-    ``PrimeFactorLean.QuadraticSieve.splitMPQS_sound,
-    ``PrimeFactorLean.QuadraticSieve.mpqs_relation_congruence,
-    ``PrimeFactorLean.QuadraticSieve.quotientValue_step,
-    ``PrimeFactorLean.CubicNumberFieldSieve.mul_assoc,
-    ``PrimeFactorLean.CubicNumberFieldSieve.norm_mul,
-    ``PrimeFactorLean.CubicNumberFieldSieve.evaluate_mul_mod,
-    ``PrimeFactorLean.CubicNumberFieldSieve.split_correct]
+    ``PrimeFactorLean.ECMM.xDBL_correct,
+    ``PrimeFactorLean.ECMM.xADD_correct,
+    ``PrimeFactorLean.ECMM.split_sound,
+    ``PrimeFactorLean.Squares.relationHolds_valid,
+    ``PrimeFactorLean.Squares.evalExps_mergeRuns,
+    ``PrimeFactorLean.Squares.evalExps_half,
+    ``PrimeFactorLean.Squares.SquareCongruence.factor_isSome,
+    ``PrimeFactorLean.QS.split_sound,
+    ``PrimeFactorLean.NFS.eval_mulL,
+    ``PrimeFactorLean.NFS.eval_reduce,
+    ``PrimeFactorLean.NFS.eval_mulZ,
+    ``PrimeFactorLean.NFS.eval_prodTree,
+    ``PrimeFactorLean.NFS.evalMod_cast,
+    ``PrimeFactorLean.GNFS.nfs_square,
+    ``PrimeFactorLean.GNFS.split_sound,
+    ``PrimeFactorLean.SQUFOF.split_sound,
+    ``PrimeFactorLean.CFRAC.split_sound,
+    ``PrimeFactorLean.PMinusOne.splitPMinusOne_sound,
+    ``PrimeFactorLean.PMinusOne.splitPPlusOne_sound]
   let allowed : List Lean.Name := [``propext, ``Classical.choice, ``Quot.sound]
   for declaration in audited do
     let axioms ← Lean.collectAxioms declaration
