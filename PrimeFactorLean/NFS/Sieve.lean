@@ -72,8 +72,8 @@ def paramTable : List (Nat × Params) :=
           latticeI := 4096, latticeJ := 512, qPerTask := 2 }),
    (60, { degree := 4, ratBound := 120000, algBound := 120000, halfWidth := 262144,
           lpMult := 60, latticeI := 4096, latticeJ := 1024, qPerTask := 2 }),
-   (65, { degree := 5, ratBound := 180000, algBound := 180000, halfWidth := 524288,
-          lpMult := 70, latticeI := 8192, latticeJ := 512, qPerTask := 2 }),
+   (65, { degree := 4, ratBound := 150000, algBound := 150000, halfWidth := 262144,
+          lpMult := 70, latticeI := 4096, latticeJ := 1024, qPerTask := 2 }),
    (70, { degree := 5, ratBound := 250000, algBound := 250000, halfWidth := 524288,
           lpMult := 80, latticeI := 8192, latticeJ := 1024, qPerTask := 2 })]
 
@@ -354,6 +354,22 @@ def threshold (x : Nat) (lpBits fudge : Nat) : UInt8 :=
   let bits := x.log2 + 1
   if bits > lpBits + fudge + 1 then (min 255 (bits - lpBits - fudge)).toUInt8 else 1
 
+/-- Positions in `[lo, hi)` whose byte reaches `thr`, testing blocks by a fold
+first and scanning only blocks that contain a candidate. -/
+def scanRange (s : ByteArray) (thr : UInt8) (lo hi : Nat) (out : Array Nat) : Array Nat := Id.run do
+  let block := 1024
+  let mut cands := out
+  let mut b := lo
+  while b < hi do
+    let e := min hi (b + block)
+    if s.foldl (fun acc x => acc || x ≥ thr) false b e then
+      for j in [b:e] do
+        if s.get! j ≥ thr then cands := cands.push j
+    b := e
+  return cands
+
+def scanAbove (s : ByteArray) (thr : UInt8) (size : Nat) : Array Nat := scanRange s thr 0 size #[]
+
 /-- Sieve one line `b`; return the verified relations. -/
 def sieveLine (ctx : Ctx) (b : Nat) (bufR bufA : ByteArray) :
     ByteArray × ByteArray × Array Rel := Id.run do
@@ -369,9 +385,7 @@ def sieveLine (ctx : Ctx) (b : Nat) (bufR bufA : ByteArray) :
       s := s.set! k (s.get! k + lg)
       k := k + p
   let thrR := threshold (b * ctx.sel.m + ctx.A) (ctx.lpR.log2 + 1) ctx.fudge
-  let mut cands : Array Nat := #[]
-  for k in [0:size] do
-    if s.get! k ≥ thrR then cands := cands.push k
+  let cands := scanAbove s thrR size
   if cands.isEmpty then return (s, bufA, #[])
   -- Algebraic side.
   let mut t := ctx.zeros.copySlice 0 bufA 0 size

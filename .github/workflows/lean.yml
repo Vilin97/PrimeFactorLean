@@ -8,16 +8,22 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@f061402b660e0c34644504b324e830f2991d4865
         with:
           auto-config: false
           build: true
-          build-args: 'factor factorTests factorBench Tests.Audit'
+          build-args: 'factor factorTests factorBench dev Tests.Audit'
           test: true
       - name: Reject proof escape hatches
         run: python3 scripts/audit_sources.py
       - name: Check benchmark dataset oracle
         run: python3 scripts/validate_dataset.py
+      - name: Smoke-test the CLI on Cunningham numbers
+        run: |
+          .lake/build/bin/factor --threads 2 auto 2535301200456458802993406410751
+          .lake/build/bin/factor --threads 2 --split gnfs 399689307492338326227643
+          python3 scripts/benchmark.py --tiers core --algorithms trial wheel rho siqs auto \
+            --jobs 2 --threads 1 --output /tmp/ci-benchmark.json

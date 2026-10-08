@@ -198,32 +198,42 @@ structure SquareCongruence (n : Nat) where
   y : Nat
   valid : (x : ZMod n) ^ 2 = (y : ZMod n) ^ 2
 
+/-- Merge adjacent entries with the same index into the current run `cur`
+(tail recursive: dependency lists reach hundreds of thousands of entries). -/
+def mergeRunsAux : Nat × Nat → List (Nat × Nat) → List (Nat × Nat) → List (Nat × Nat)
+  | cur, [], acc => (cur :: acc).reverse
+  | cur, a :: rest, acc =>
+    if a.1 = cur.1 then mergeRunsAux (cur.1, cur.2 + a.2) rest acc
+    else mergeRunsAux a rest (cur :: acc)
+
 /-- Merge adjacent entries with the same index (after sorting, all of them). -/
 def mergeRuns : List (Nat × Nat) → List (Nat × Nat)
   | [] => []
-  | a :: rest =>
-    match mergeRuns rest with
-    | b :: tail => if a.1 = b.1 then (a.1, a.2 + b.2) :: tail else a :: b :: tail
-    | [] => [a]
+  | a :: rest => mergeRunsAux a rest []
+
+theorem evalExps_mergeRunsAux (n : Nat) (fb : Array Nat) (cur : Nat × Nat)
+    (l acc : List (Nat × Nat)) :
+    evalExps n fb (mergeRunsAux cur l acc) =
+      evalExps n fb acc * ((fb[cur.1]! : Nat) : ZMod n) ^ cur.2 * evalExps n fb l := by
+  induction l generalizing cur acc with
+  | nil =>
+    simp only [mergeRunsAux, evalExps_nil, mul_one]
+    rw [evalExps_perm n fb (List.reverse_perm _), evalExps_cons]
+    ring
+  | cons a rest ih =>
+    simp only [mergeRunsAux]
+    split_ifs with he
+    · rw [ih, evalExps_cons, he, pow_add]
+      ring
+    · rw [ih, evalExps_cons, evalExps_cons]
+      ring
 
 theorem evalExps_mergeRuns (n : Nat) (fb : Array Nat) (l : List (Nat × Nat)) :
     evalExps n fb (mergeRuns l) = evalExps n fb l := by
-  induction l with
+  cases l with
   | nil => rfl
-  | cons a rest ih =>
-    rw [evalExps_cons, ← ih]
-    simp only [mergeRuns]
-    split
-    · rename_i b tail hm
-      rw [hm]
-      split_ifs with he
-      · simp only [evalExps_cons]
-        rw [he, pow_add]
-        ring
-      · simp
-    · rename_i hm
-      rw [hm]
-      simp
+  | cons a rest =>
+    rw [mergeRuns, evalExps_mergeRunsAux, evalExps_nil, evalExps_cons, one_mul]
 
 /-- Halve every exponent. -/
 def halfExps (l : List (Nat × Nat)) : List (Nat × Nat) := l.map fun t => (t.1, t.2 / 2)

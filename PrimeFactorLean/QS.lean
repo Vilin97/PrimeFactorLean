@@ -55,17 +55,21 @@ structure Params where
   /-- Double large prime variation: cofactors up to `dlpFactor⁻¹ · lpBound²`
   that split into two large primes are kept (`0` disables it). -/
   dlpFactor : Nat := 0
+  /-- Extra bits of sieve-threshold slack (more candidates, more partials). -/
+  slackBits : Nat := 0
   deriving Repr, Inhabited
 
-/-- `(digits, factor-base size, half-width M, large-prime multiplier)`. -/
+/-- `(digits, factor-base size, half-width M, large-prime multiplier)`, measured on
+balanced semiprimes with 32 threads (larger factor bases than classical tables:
+trial division by root position keeps candidates cheap). -/
 def paramTable : List (Nat × Nat × Nat × Nat) :=
   [(12, 40, 1024, 10), (15, 50, 2048, 20), (20, 80, 4096, 30), (25, 120, 8192, 30),
-   (30, 200, 16384, 40), (35, 300, 16384, 40), (40, 450, 32768, 50),
-   (45, 700, 32768, 50), (50, 1100, 65536, 60), (55, 1600, 65536, 70),
-   (60, 2400, 65536, 80), (65, 3500, 98304, 90), (70, 5000, 131072, 100),
-   (75, 7000, 131072, 100), (80, 9500, 196608, 120), (85, 13000, 196608, 120),
-   (90, 18000, 262144, 150), (95, 25000, 262144, 150), (100, 34000, 327680, 150),
-   (110, 50000, 393216, 200)]
+   (30, 200, 16384, 40), (35, 300, 16384, 40), (40, 500, 32768, 50),
+   (45, 800, 32768, 50), (50, 1300, 65536, 60), (55, 2200, 65536, 70),
+   (60, 4000, 65536, 80), (65, 6000, 98304, 90), (70, 9000, 131072, 100),
+   (75, 14000, 131072, 110), (80, 24000, 196608, 120), (85, 32000, 196608, 120),
+   (90, 42000, 262144, 150), (95, 52000, 262144, 150), (100, 64000, 327680, 150),
+   (110, 80000, 393216, 200)]
 
 def chooseParams (digits : Nat) : Params :=
   let entry := (paramTable.find? fun e => digits ≤ e.1).getD
@@ -172,7 +176,7 @@ def mkContext (n : Nat) (params : Params) : Context ⊕ Nat := Id.run do
     small := small + 2.0 * Float.log2 p / (p - 1.0)
   let target := Float.log2 M.toFloat + (N.log2.toFloat + 1.0) / 2.0 - 0.5
   let slack := if dlpBound > 0 then Float.log2 dlpBound.toFloat else Float.log2 lpBound.toFloat
-  let thr := target - slack - small - 1.0
+  let thr := target - slack - small - 1.0 - params.slackBits.toFloat
   let threshold := (if thr < 8.0 then 8.0 else thr).toUInt8
   let mut zeros := ByteArray.emptyWithCapacity (2 * M)
   for _ in [0:2 * M] do zeros := zeros.push 0
@@ -206,6 +210,20 @@ def positions (ctx : Context) (poly : Poly) : Array Nat × Array Nat := Id.run d
         pos2 := pos2.push (if t == 0 then noRoot ctx else (r2 + ctx.M) % p)
   return (pos1, pos2)
 
+/-- Positions `< size` whose byte reaches `thr`. A fold first tests whole blocks
+(most contain no candidate); only hit blocks are scanned byte by byte. -/
+def scanAbove (s : ByteArray) (thr : UInt8) (size : Nat) : Array Nat := Id.run do
+  let block := 1024
+  let mut cands : Array Nat := #[]
+  let mut b := 0
+  while b < size do
+    let e := min size (b + block)
+    if s.foldl (fun acc x => acc || x ≥ thr) false b e then
+      for j in [b:e] do
+        if s.get! j ≥ thr then cands := cands.push j
+    b := e
+  return cands
+
 /-- Logarithmic sieve over `[0, 2M)`; returns the buffer and candidate positions. -/
 def sieve (ctx : Context) (pos1 pos2 : Array Nat) (skip : Array Bool) (buf : ByteArray) :
     ByteArray × Array Nat := Id.run do
@@ -223,11 +241,7 @@ def sieve (ctx : Context) (pos1 pos2 : Array Nat) (skip : Array Bool) (buf : Byt
     while j < size do
       s := s.set! j (s.get! j + lg)
       j := j + p
-  let thr := ctx.threshold
-  let mut cands : Array Nat := #[]
-  for j in [0:size] do
-    if s.get! j ≥ thr then cands := cands.push j
-  return (s, cands)
+  return (s, scanAbove s ctx.threshold size)
 
 /-- Divide out all factors `p`; returns the cofactor and the exponent. -/
 def stripPrime (u p : Nat) : Nat × Nat := Id.run do
@@ -274,8 +288,9 @@ def candidateRelation (ctx : Context) (poly : Poly) (pos1 pos2 : Array Nat) (j :
   if e2 > 0 then exps := (0, e2) :: exps
   for i in [1:ctx.fb.size] do
     let p := ctx.fb[i]!
+    -- Primes dividing `A` or `N` (root 0) are tested directly; the others by position.
     let hit :=
-      if poly.skip[i]! || ctx.N % p == 0 then u % p == 0
+      if poly.skip[i]! || ctx.roots[i]! == 0 then u % p == 0
       else
         let jm := j % p
         jm == pos1[i]! || jm == pos2[i]!
@@ -446,17 +461,17 @@ def siqsBatch (ctx : Context) (batch : Nat) (numA : Nat) :
     let (p1, p2) := positions ctx poly0
     let mut pos1 := p1
     let mut pos2 := p2
-    -- 2·B_l·A⁻¹ mod p, for the Gray-code root updates.
+    -- A⁻¹ mod p once per prime, then 2·B_l·A⁻¹ mod p for the Gray-code updates.
+    let ainvs : Array Nat := (Array.range ctx.fb.size).map fun i =>
+      let p := ctx.fb[i]!
+      if i == 0 || skip[i]! then 0 else (invMod (A % p) p).getD 0
     let mut deltas : Array (Array Nat) := #[]
     for l in [0:Bl.size] do
       let mut row : Array Nat := Array.mkEmpty ctx.fb.size
+      let b := Bl[l]!
       for i in [0:ctx.fb.size] do
         let p := ctx.fb[i]!
-        if i == 0 || skip[i]! then row := row.push 0
-        else
-          match invMod (A % p) p with
-          | none => row := row.push 0
-          | some ainv => row := row.push (2 * (Bl[l]! % p) * ainv % p)
+        row := row.push (2 * (b % p) * ainvs[i]! % p)
       deltas := deltas.push row
     let (buf', found) := sievePoly ctx poly0 pos1 pos2 buf
     buf := buf'

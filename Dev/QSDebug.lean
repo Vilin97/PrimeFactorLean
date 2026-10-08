@@ -56,3 +56,36 @@ def qsDebug (n : Nat) (params : Params) (numA : Nat) : IO Unit := do
       if r.l1 == 1 && r.l2 == 1 then nFull := nFull + 1 else nPartial := nPartial + 1
   IO.println s!"polys {nPolys}: positions {tPos/1000000} ms, sieve+scan {tSieve/1000000} ms, candidates {tCand/1000000} ms"
   IO.println s!"candidates {nCands}, full {nFull}, partial {nPartial}"
+
+/-- Yield rates of the real SIQS batches for given parameters. -/
+def qsTune (n : Nat) (params : Params) (rounds threads : Nat) : IO Unit := do
+  let .inl ctx := mkContext n params | IO.println "small factor"
+  let t0 ← IO.monoNanosNow
+  let mut full := 0
+  let mut single := 0
+  let mut double := 0
+  for r in [0:rounds] do
+    let tasks := (List.range threads).map fun t =>
+      Task.spawn fun _ => siqsBatch ctx (r * threads + t + 1000) 1
+    for task in tasks do
+      for f in task.get do
+        if f.l1 == 1 && f.l2 == 1 then full := full + 1
+        else if f.l1 == 1 then single := single + 1
+        else double := double + 1
+  let t1 ← IO.monoNanosNow
+  let secs := (t1 - t0).toFloat / 1.0e9
+  IO.println s!"fb={ctx.fb.size} M={ctx.M} lp={params.lpMult} dlp={params.dlpFactor} thr={ctx.threshold}: {secs}s full {full} single {single} double {double} -> full/s {full.toFloat / secs} single/s {single.toFloat / secs} double/s {double.toFloat/secs} need {ctx.fb.size}"
+
+/-- Time relation collection and linear algebra separately for a full SIQS run. -/
+def qsPhases (n : Nat) (params : Params) (threads : Nat) : IO Unit := do
+  let .inl ctx := mkContext n params | IO.println "small factor"
+  let needed := ctx.fb.size + 1 + params.extra
+  let t0 ← IO.monoNanosNow
+  let rels ← IO.lazyPure fun _ => collect ctx .siqs needed threads 100000
+  let t1 ← IO.monoNanosNow
+  let rows := rels.map PrimeFactorLean.Squares.parityColumns
+  let deps ← IO.lazyPure fun _ => PrimeFactorLean.GF2.dependencies (ctx.fb.size + 1) rows 64
+  let t2 ← IO.monoNanosNow
+  let result ← IO.lazyPure fun _ => (extract ctx rels).map (·.val)
+  let t3 ← IO.monoNanosNow
+  IO.println s!"fb={ctx.fb.size} rels={rels.size} collect {(t1-t0)/1000000} ms, GF2 {deps.size} deps {(t2-t1)/1000000} ms, extract (incl. GF2) {(t3-t2)/1000000} ms -> {result}"

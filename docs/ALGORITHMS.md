@@ -1,120 +1,233 @@
-# Algorithms and what their proofs establish
+# Algorithms, proofs, and trust boundaries
 
-The public specification is deliberately short:
+This document describes every implementation in the library, from trial
+division to the general number field sieve, and states precisely what the
+kernel-checked proofs establish about each one.
+
+## The specification
 
 ```lean
-IsFactorization n factors :=
+def IsFactorization (n : Nat) (factors : List Nat) : Prop :=
   (∀ p ∈ factors, Nat.Prime p) ∧ factors.prod = n
+
+theorem factor_total_correct (algorithm : Algorithm) (n : Nat) (cfg : Config)
+    (hn : n ≠ 0) :
+    ∃ ps, factor algorithm n cfg = some ps ∧ IsFactorization n ps
 ```
 
-`Algorithms.factor_correct` proves this specification for every selected
-algorithm and every configuration whenever `factor` returns a list.
-`factor_total_correct` additionally states that every positive input has such
-a successful result. Zero returns
-`none`; one returns the empty list. Signed inputs use positive prime factors and
-a separate sign, with `factorSigned_correct` proving their product is the original
-integer. Repeated prime factors are repeated list entries. The specification
-does not require sorted output.
+`Nat.Prime` is mathlib's definition. The theorem holds for every algorithm,
+every configuration and every positive input. `factorSigned_total_correct`
+extends it to nonzero integers with a sign. Zero has no factorization and
+returns `none`.
 
-## Complete factorization and bounded searches
+## How the proofs are organized
 
-The search routines produce a **proper divisor**, rather than a complete prime
-factorization. A successful split satisfies
+Every algorithm is a **proof-carrying splitter**:
 
 ```lean
-1 < d ∧ d < n ∧ d ∣ n
+abbrev ProperFactor (n : Nat) := {d : Nat // 1 < d ∧ d < n ∧ d ∣ n}
+abbrev Splitter := (n : Nat) → Option (ProperFactor n)
 ```
 
-The complete engine recursively factors `d` and `n / d`. Both arguments are
-strictly smaller than `n`. A verified primality certificate can finish a prime
-leaf immediately. If a bounded search gives up and no certificate is available,
-the engine uses exact trial division through `Nat.minFac`. Consequently the
-complete engine terminates mathematically on every positive input and its
-correctness does not rely on random-walk or smoothness assumptions. This
-fallback can be prohibitively slow on large inputs.
+A splitter may fail (`none`), but whatever it returns carries a proof that it is
+a proper divisor. That proof comes from the algorithm's own soundness argument,
+never from a generic re-check in the driver. The verified engine
+`factorCoreWith` (`Core.lean`) handles each node as follows:
 
-`none` from a **raw search** means its configured work budget was exhausted or
-its attempted parameters failed. It does not mean that the input is prime. Raw
-search success and complete factorization success should be reported separately
-in benchmarks: a successful fallback is not evidence that rho, ECM, or a sieve
-found the factor.
+1. It asks a **prime oracle** for a primality proof (Pocklington certificates;
+   see below). If it gets one, the node is a prime leaf.
+2. Otherwise it calls the splitter and recurses on `d` and `n / d`.
+3. If the splitter gives up, it falls back to exact trial division
+   (`Nat.minFac`).
 
-The probable-prime screen in `Algorithms.lean` guides candidate generation. It
-does not justify a prime leaf. `PrimeCertificate.check_sound` and the Lucas/Pratt
-checker establish primality before the certificate oracle accepts that leaf.
+The engine terminates by well-founded recursion on `n`, and
+`factorCoreWith_correct` proves the specification for **any** oracle and **any**
+splitter. Search failures therefore never cost correctness, only time.
 
-## Implemented searches
+The heuristic algorithms are written in the style of *certifying algorithms*.
+Fast, untrusted search code (sieves, polynomial selection, the GF(2) solver,
+the p-adic square-root search) produces an object. A cheap check, whose meaning
+is proved, then validates it. Everything downstream of that check is proved.
+For each algorithm the table below lists both what is proved and what is
+checked at run time.
 
-| Search | Actual computation | Mathematical invariants in the source |
-| --- | --- | --- |
-| Trial reference | Test successive candidate divisors with an explicit budget. | `trialSearchAux_sound` and `trialSearchAux_none_iff` describe the searched interval. |
-| Square-root trial | Stop once the candidate exceeds the square root of the current input. | `trialSearch_sound`, `trialSearch_none_prime`, and `trialCore_correct`. |
-| 6-wheel trial | Check 2 and 3 separately, then test the candidate pairs `6k − 1`, `6k + 1` through the square root. | `trialWheelAux_sound`, `trialWheelAux_none_iff`, the residue-class completeness argument, `trialWheelSearch_none_prime`, and `trialWheelCore_correct`. |
-| Fermat | Starting at the ceiling of `sqrt n`, test whether `a² − n` is an integer square; try `a − b`. | `fermat_difference_identity` proves `(a + b)(a − b) = n` from the square equality. `fermatLoop_sound` and `fermat_sound` cover successful outputs. |
-| Pollard rho, Floyd | Iterate `x ↦ x² + c mod n` with one walker advancing once and the other twice, taking gcds of their differences. Restart with deterministic seeds. | `rhoStep_congruent` proves compatibility with every divisor modulus. `floydIterate_correct` proves the one/two-walker schedule. `rho_collision_divides_gcd` connects a modular collision to the computed gcd. `rhoLoop_sound` and `rho_sound` cover successful outputs. |
-| Pollard rho, Brent | Use doubling cycle blocks, modular products of differences, and one gcd per batch. Recover individual differences if a batch gcd is the whole input. | `brentBlock_iterates` and `brentBlock_product` give the exact executed orbit and product. `brent_collision_divides_gcd` proves that batching retains a collided divisor. The imperative loop returns proof-carrying factors; `brentAttempt_sound` and `brent_sound` establish its public result invariant. |
-| Pollard p−1, stage one | Build maximal prime powers up to the bound, use binary modular powering, and check each prefix. Precompute the schedule once across restart bases. | `modPow_correct`, `primePower_is_power`, `primePower_le_bound`, `primePower_maximal`, `powerSchedule_correct`, and `pMinusOne_step_exponent` identify the actual arithmetic. `pMinusOneLoop_sound` and `pMinusOne_sound` cover successful outputs. |
-| ECM, stage one | Seed affine Weierstrass curves with a known point. Compute inverses by extended Euclid; extract gcds from nonunit denominators or the discriminant. Use binary scalar multiplication and maximal prime powers. | `inverse_correct`, `seeded_point_on_curve`, `add_preserves_curve`, `multiply_preserves_curve`, and `stageOne_preserves_curve` prove actual modular arithmetic and curve-equation preservation. `split_sound` proves successful outputs are proper divisors. |
-| Basic quadratic sieve | Exactly sieve positive values of `x² − n` at modular roots of the factor-base primes. Store smooth relations, eliminate parity rows over F₂, reconstruct square products, and try both gcd signs. | `stripPower_factorization`, `factorOverBase_factorization`, `smooth_relation_congruence`, and `even_powerProduct_is_square` prove the relation arithmetic and square reconstruction. `split_sound` proves proper-divisor output soundness. |
-| Multiple-polynomial QS | Select products `A` of factor-base primes, assemble CRT roots `B`, and flip roots in Gray-code order. Sieve the quotient polynomial `Q(x) = ((Ax + B)² − n) / A`. Include the factors of `A` in every relation's exponents. | `mpqs_polynomial_identity` and `mpqs_relation_congruence` prove the exact quotient-polynomial arithmetic. `splitMPQS_sound` proves proper-divisor output soundness. The same smooth-relation and exponent-square invariants support reconstruction. |
-| Quadratic number-field prototype | Select `X² + c` with `m² + c = n`; collect smooth rational values and algebraic norms, combine parity dependencies, and check an actual algebraic square root. | `selected_polynomial`, `polynomial_no_rational_root`, `norm_mul`, `evaluate_mul_mod`, `evaluate_product_mod`, and `square_roots_congruence` prove the number-field construction. Square-root results and successful factors carry proofs. |
+| Implementation | File | Proved | Checked at run time (then trusted via proof) |
+|---|---|---|---|
+| `trial-reference`, `trial`, `wheel` | `Trial.lean` | Soundness **and completeness**: `trialSearch_none_prime` and `trialWheelSearch_none_prime` show that no divisor up to √n means `Nat.Prime n`. The 6-wheel skips only multiples of 2 and 3 (`trialWheelAux_none_iff`). | nothing |
+| `fermat` | `Search.lean` | `fermat_difference_identity`: `(a+b)(a-b) = n` from `b² = a² - n`; `fermat_sound` | the divisor test in `accept` |
+| `rho`, `brent` | `Search.lean` | `rhoStep_congruent` (iteration respects every divisor's modulus), `floydIterate_correct`, `rho_collision_divides_gcd`; Brent's batched product is exactly the product of the actual differences (`brentBlock_product`) and keeps every collided divisor (`brent_collision_divides_gcd`) | `accept` / `acceptCertified` |
+| `squfof` | `SQUFOF.lean` | `split_sound`; the divisor is a gcd, so it divides `n` by construction | nontriviality of the gcd |
+| `pminusone`, `pplusone` | `PMinusOne.lean` | `applyPowers_mod` (stage 1 computes `x^E mod n` for the true exponent product), the Lucas-sequence ladder identities `lucas_double` and `lucas_double_add_one` in any commutative ring, soundness | nontriviality of the gcd |
+| `ecm-affine` | `ECM.lean` | Chord and tangent formulas preserve the curve equation (`add_preserves_curve`), so do scalar multiplication and all of stage 1 (`stageOne_preserves_curve`); extended-Euclid inverses (`inverse_correct`) | `checkFactor` |
+| `ecm` (Montgomery) | `ECMMontgomery.lean` | `xDBL_correct` and `xADD_correct`: the projective x-only formulas compute the affine Montgomery doubling and differential-addition x-coordinates over any field; divisors are gcds (`gcdFactor`) | nontriviality of the gcd |
+| `cfrac`, `qs`, `mpqs`, `siqs` | `CFRAC.lean`, `QS.lean`, `Squares.lean` | Relations carry `x² ≡ ±s²·L·∏ fb[j]^e (mod n)`. Products (`Relation.mul`), large-prime pairing (`Relation.pair`), cycles (`Relation.absorb`), sorting/merging (`evalExps_perm`, `evalExps_mergeRuns`) and halving (`evalExps_half`) are proved, giving `X² ≡ Y² (mod n)` (`Relation.toSquares`). `SquareCongruence.factor_isSome` proves that every nontrivial congruence (`X ≢ ±Y`) splits `n`. | the relation congruence when a relation is created (`Relation.mk?`); evenness of the merged exponents of a dependency |
+| `gnfs` | `GNFS.lean`, `NFS/*.lean` | Evaluation `ℤ[ω] → ℤ/n`, `ω ↦ r`, is multiplicative for the executable convolution-and-reduction product whenever `f(r) = 0` (`eval_mulZ`, `eval_prodTree`). `nfs_square` derives `φ(β)² = (φ(f')·c_d^k·Y₀)²` | `f(c_d·m) ≡ 0 (mod n)`; `β·β = γ` exactly in `ℤ[ω]`; `∏(a - b·m) = Y₀²` exactly; even relation count |
+| prime leaves | `Pocklington.lean`, `Primality.lean` | **Pocklington's criterion** from scratch (`pocklington`, via `prime_pow_dvd_sub_one` and orders in `(ℤ/p)ˣ`); certificate checker soundness (`Step.check_sound`, `Certificate.check_sound`); Lucas/Pratt certificates (`PrimeCertificate.check_sound`) | the certificate (generated by untrusted code) |
 
-Every search uses exact `Nat`/`Int` arithmetic. None relies on floating-point
-rounding. ECM retains `splitFactorial` as a reference schedule for comparing the
-prime-power optimization; both schedules have curve-preservation proofs.
+`Tests/Audit.lean` prints the axioms of the central theorems and fails the
+build if any project declaration depends on anything beyond `propext`,
+`Classical.choice` and `Quot.sound`. `scripts/audit_sources.py` rejects the
+escape-hatch keywords `sorry`, `admit`, `axiom`, `native_decide`, `unsafe`,
+`partial`, `implemented_by` and `extern` anywhere in the sources.
 
-## Limits of these theorems
+### What is *not* proved
 
-The complete factorization theorem establishes the final mathematical answer.
-The listed execution invariants explain more of the search than a final divisor
-check alone, but their scope is precise:
+- None of the theorems bounds a running time or the success probability of a
+  heuristic search. Statements like "ECM finds 20-digit factors with these
+  parameters" or "the sieve collects enough relations" are measured, not
+  proved.
+- The ECM lemmas establish the coordinate formulas. They do not formalize the
+  group law of the elliptic curve over `ℤ/p` or the smooth-order argument.
+- Linear algebra over GF(2) is untrusted. A wrong dependency fails the evenness
+  check and is skipped.
+- The GNFS proof does not show that the quadratic characters make `γ` a square;
+  it only needs the checked equality `β·β = γ`.
 
-- No theorem claims that a fixed rho, ECM, or sieve budget succeeds on every
-  composite input.
-- No expected-time, success-probability, or subexponential complexity bound is
-  formalized.
-- The ECM curve-preservation lemmas do not yet identify the executable scalar
-  routine with abstract elliptic-curve group multiplication after reduction
-  modulo a prime, nor prove the usual smooth-group-order success condition.
-- The QS relation and square lemmas do not yet provide a whole-program theorem
-  for the imperative F₂ elimination routine. Square reconstruction rejects odd
-  exponent sums, and divisor certification protects the complete factorizer.
-- The prime-power arithmetic is proved; enumeration of the small primes into
-  the p−1 schedule does not yet have a completeness theorem.
+## Implementations, simplest to most sophisticated
 
-## Number-field scope
+### Trial division (`trial-reference`, `trial`, `wheel`)
+The reference implementation tests every `d < n`, `trial` stops at `⌊√n⌋`, and
+`wheel` tests 2, 3 and then the residues `6k ± 1`. These are the only
+algorithms whose *completeness* is proved, and they do not need the
+fallback or a prime oracle: a failed search proves primality.
 
-The degree-two method is a small **number-field prototype**, not a production
-GNFS implementation. Norm parity is only a prefilter: a square algebraic norm
-does not imply that the algebraic element is square. The implementation checks
-the two integer coefficients of the proposed algebraic root and rejects a
-dependency without a valid root.
+### Fermat's method (`fermat`)
+Searches `a ≥ ⌈√n⌉` with `a² - n` a perfect square. It is fast only when the two
+factors are close.
 
-Production general number field sieve requires substantially more machinery:
-higher-degree polynomial selection, prime-ideal and character columns, lattice
-sieving, relation filtering, large sparse linear algebra, and an efficient
-algebraic square-root algorithm. These components, the advanced production
-SIQS features, ECM stage two, and Pollard p−1 stage two are not implemented
-here. The prototype has no claim
-to GNFS's asymptotic performance or ability to factor RSA challenge sizes.
+### Pollard rho (`rho`) and Brent's variant (`brent`)
+These run the random walk `x ↦ x² + c mod n`. Floyd's version compares `x_i`
+with `x_{2i}`. Brent's version uses power-of-two cycle blocks and batches 64
+differences into one gcd, with recovery when the batched gcd is `n`. The
+expected cost is `O(√p)` for the smallest prime `p`.
 
-## Primary references
+### SQUFOF (`squfof`)
+This is Shanks' square forms factorization for `n < 2^62`. It races 16
+multipliers, forward-cycles until it finds a square form, then
+reverse-cycles to the factor. It needs `O(n^{1/4})` steps of single-word
+arithmetic.
 
-- R. P. Brent, *An improved Monte Carlo factorization algorithm* (1980):
-  [author's paper page](https://maths-people.anu.edu.au/~brent/pub/pub051.html).
-- H. W. Lenstra, Jr., *Factoring integers with elliptic curves* (1987):
-  [Annals of Mathematics](https://annals.math.princeton.edu/1987/126-3/p09).
-- C. Pomerance, *A Tale of Two Sieves* (1996):
-  [author's PDF](https://math.dartmouth.edu/~carlp/PDF/paper109.pdf).
-- A. K. Lenstra and H. W. Lenstra, Jr., eds., *The Development of the Number
-  Field Sieve* (1993):
-  [Springer](https://link.springer.com/book/10.1007/BFb0091534).
-- The CADO-NFS Development Team:
-  [official implementation and phase description](https://cado-nfs.gitlabpages.inria.fr/).
-- Mathlib's [Lucas primality theorem](https://leanprover-community.github.io/mathlib4_docs/Mathlib/NumberTheory/LucasPrimality.html).
+### Pollard `p - 1` and Williams `p + 1` (`pminusone`, `pplusone`)
+Stage 1 raises to the maximal prime powers up to `B1`, with chunked gcds and
+replay. Stage 2 covers the primes in `(B1, B2]` with prime-gap powers. Williams'
+method uses Lucas sequences `V_k(P)` with six seeds that have independent
+quadratic characters. These methods succeed when `p ∓ 1` is smooth.
 
-## Cubic number-field prototype
+### Elliptic curve method (`ecm-affine`, `ecm`)
+`ecm-affine` is Lenstra's original formulation: affine Weierstrass curves with
+modular inversions, stage 1 only. `ecm` is the modern form:
 
-`CubicNumberFieldSieve.split` selects a monic base-m cubic with a checked prime-field irreducibility certificate, collects rational and degree-one prime-ideal `(p,r)` relations, computes exact determinant norms, and searches a finite dictionary of actual algebraic squares. The executable norm is proved equal to the signed Sylvester resultant on linear elements. Multiplication, norm multiplicativity, reduction at the selected modular root, and the actual two-root square congruence are kernel proved. Raw `2479` returns `37` with factor base bound31; both37 and67 lie outside that base.
+- Montgomery curves in Suyama's parametrization, whose group order is
+  divisible by 12;
+- projective x-only arithmetic, with no inversions;
+- a Montgomery ladder over the maximal prime powers up to `B1`;
+- a stage-2 standard continuation (baby steps / giant steps with
+  `D = 2310` and one batched gcd);
+- curves run in parallel tasks.
 
-This is a bounded cubic educational implementation. It omits arbitrary-degree selection, character columns, lattice sieving, scalable sparse linear algebra, and a general efficient algebraic square-root algorithm. A dependency alone does not certify an algebraic square; the exact coefficient equality is checked. It does not complete the modern GNFS requirement. Primary reference: Matthew E. Briggs, [An Introduction to the General Number Field Sieve](https://intranet.math.vt.edu/people/brown/doc/briggs_gnfs_thesis.pdf), Virginia Tech,1998, Chapters2–4.
+The automatic schedule follows GMP-ECM's recommended `(B1, curves)` pairs.
+
+### Continued fraction method (`cfrac`)
+Morrison–Brillhart was the first subexponential algorithm. It expands `√(kn)`
+and collects the relations `A_{i-1}² ≡ (-1)^i Q_i (mod n)` over a factor base,
+with single large primes. It then solves for a dependency over GF(2) and takes
+the square root as above.
+
+### Quadratic sieves (`qs`, `mpqs`, `siqs`)
+All three variants sieve `Q(x) = (Ax + B)² - kn = A·(Ax² + 2Bx + C)` over
+`[-M, M)` with logarithms in a byte array:
+
+- `qs` uses the single polynomial (`A = 1`, shifted windows);
+- `mpqs` uses Montgomery's `A = q²` with Hensel-lifted `B`;
+- `siqs` chooses `A = q₁⋯q_s` from the factor base near `√(2kn)/M` and
+  enumerates the `2^{s-1}` values of `B` in Gray-code order, so a new
+  polynomial costs one addition per root.
+
+All three use:
+
+- a Knuth–Schroeppel multiplier;
+- the small-prime variation;
+- trial division of candidates by root position, never by big-number
+  reduction;
+- single and (optionally) double large primes, with union–find cycle counting
+  and spanning-forest cycle extraction;
+- parallel collection;
+- singleton removal followed by GMP-bitset Gaussian elimination.
+
+### General number field sieve (`gnfs`)
+The asymptotically fastest known general method, `L_n[1/3, (64/9)^{1/3}]`. Its
+stages are:
+
+- **Polynomial selection.** Degree 3–5 base-`m` polynomials. The leading
+  coefficients are scanned up to `n^{1/(d+1)}`, and candidates are ranked by
+  sampled log norms over the sieve region plus Murphy's `α`.
+- **Factor bases.** Rational and algebraic. Algebraic roots modulo `p` are
+  found with `gcd(x^p - x, f)` and Cantor–Zassenhaus. Projective ideals are
+  included, as are 48 quadratic characters above the large-prime bound.
+- **Sieving.** Line sieving for small inputs; Pollard's special-`q` lattice
+  sieve (Gauss-reduced lattices, row sieving with incremental starts) from 35
+  digits. One large prime per side.
+- **Linear algebra.** Columns for the sign, the relation count, the
+  characters, rational primes and algebraic ideals.
+- **Square roots.** The algebraic square root of
+  `γ = f'(ω)² ∏(c_d a - b ω)` comes from `p`-adic Newton iteration at an inert
+  prime: Tonelli–Shanks in `𝔽_{p^d}`, then lifting the inverse square root.
+  It is verified by exact multiplication in `ℤ[ω]`.
+
+### Automatic portfolio (`auto`)
+The portfolio tries, in order:
+
+1. trial division to 4096;
+2. perfect powers;
+3. SQUFOF below `2^62`;
+4. a short Brent rho;
+5. `p - 1` with `B1 = 20000`;
+6. ECM, with effort scaled to the input size;
+7. SIQS.
+
+### Primality certificates
+The default prime oracle builds **Pocklington certificates**. It factors
+`n - 1` only until the factored part `F` satisfies `F² > n`, using the
+automatic splitter, which is untrusted. Each certificate step names primes `q`
+that are proved earlier in the certificate or are below `2^32`, where they
+are proved by verified trial division. For each `q` the step gives a witness
+`a` with `a^{n-1} ≡ 1` and `gcd(a^{(n-1)/q} - 1, n) = 1`. The kernel-checked
+theorem:
+
+```lean
+theorem pocklington {N : Nat} (hN : 2 ≤ N) (ws : List (Nat × Nat × Nat))
+    (hprime : ∀ t ∈ ws, t.1.Prime) (hnodup : (ws.map Prod.fst).Nodup)
+    (hdvd : ∀ t ∈ ws, t.1 ^ t.2.1 ∣ N - 1) (hbig : N < factoredPart ws ^ 2)
+    (hwit : ∀ t ∈ ws, ∀ p, p.Prime → p ∣ N →
+      (t.2.2 : ZMod p) ^ (N - 1) = 1 ∧ (t.2.2 : ZMod p) ^ ((N - 1) / t.1) ≠ 1) :
+    N.Prime
+```
+
+The older Lucas–Pratt checker (full `n - 1` factorizations) is retained and
+benchmarked against it.
+
+## References
+
+- J. M. Pollard, *A Monte Carlo method for factorization* (1975); R. P. Brent,
+  *An improved Monte Carlo factorization algorithm* (1980).
+- D. Shanks, *SQUFOF* (unpublished notes, 1975); J. Gower and S. Wagstaff,
+  *Square form factorization*, Math. Comp. 77 (2008).
+- J. M. Pollard, *Theorems on factorization and primality testing* (1974);
+  H. C. Williams, *A p+1 method of factoring*, Math. Comp. 39 (1982).
+- H. W. Lenstra Jr., *Factoring integers with elliptic curves*, Annals of Math.
+  126 (1987); P. L. Montgomery, *Speeding the Pollard and elliptic curve
+  methods of factorization*, Math. Comp. 48 (1987).
+- M. A. Morrison and J. Brillhart, *A method of factoring and the factorization
+  of F₇*, Math. Comp. 29 (1975).
+- C. Pomerance, *The quadratic sieve factoring algorithm* (1985);
+  R. D. Silverman, *The multiple polynomial quadratic sieve*, Math. Comp. 48
+  (1987); S. Contini, *Factoring integers with the self-initializing quadratic
+  sieve* (1997).
+- A. K. Lenstra and H. W. Lenstra Jr. (eds.), *The development of the number
+  field sieve*, LNM 1554 (1993); M. Briggs, *An introduction to the general
+  number field sieve* (1998); B. A. Murphy, *Polynomial selection for the
+  number field sieve* (thesis, 1999); J. M. Pollard, *The lattice sieve* (1993).
+- H. C. Pocklington, *The determination of the prime or composite nature of
+  large numbers by Fermat's theorem* (1914).
+- The Cunningham Project, S. S. Wagstaff Jr.,
+  <https://homes.cerias.purdue.edu/~ssw/cun/>.

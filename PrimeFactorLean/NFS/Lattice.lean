@@ -71,19 +71,25 @@ def specialQs (sel : Selection) (start count : Nat) : Array (Nat × Nat) := Id.r
       out := out.push (q, ρ)
   return out
 
-/-- Trial-divide the norms of a general pair `(a, b)` (with `b > 0`); the
+/-- Trial-divide the norms of a lattice point. A factor-base prime `p` with a
+nondegenerate progression divides the norm exactly when the position `k` is
+congruent to that row's start (`ratCur`/`algCur`), so most primes cost one
+small remainder; degenerate progressions are tested on `(a, b)` directly. The
 special-`q` ideal is divided out first. -/
-def verifyAB (ctx : Ctx) (a : Int) (b : Nat) (q ρ : Nat) : Option Rel := Id.run do
+def verifyLattice (ctx : Ctx) (a : Int) (b : Nat) (q ρ k : Nat)
+    (ratR ratCur algR algCur : Array Nat) : Option Rel := Id.run do
   if b == 0 || Nat.gcd a.natAbs b != 1 then return none
   let fb := ctx.fb
   let v : Int := a - (b : Int) * (ctx.sel.m : Int)
   if v == 0 then return none
+  let bi : Int := b
   let mut u := v.natAbs
   let mut rat : List (Nat × Nat) := []
-  let bi : Int := b
   for i in [0:fb.ratPrimes.size] do
     let p := fb.ratPrimes[i]!
-    if (a - bi * (fb.ratRoots[i]! : Int)) % (p : Int) == 0 then
+    let hit := if ratR[i]! == p then (a - bi * (fb.ratRoots[i]! : Int)) % (p : Int) == 0
+      else k % p == ratCur[i]!
+    if hit then
       let (u', e) := stripPrime u p
       if e > 0 then
         u := u'
@@ -99,8 +105,10 @@ def verifyAB (ctx : Ctx) (a : Int) (b : Nat) (q ρ : Nat) : Option Rel := Id.run
   for i in [0:fb.algPrimes.size] do
     let p := fb.algPrimes[i]!
     let r := fb.algRoots[i]!
-    let hit := if r == p then b % p == 0
-      else (a - bi * (r : Int)) % (p : Int) == 0
+    let hit :=
+      if algR[i]! == p then
+        if r == p then b % p == 0 else (a - bi * (r : Int)) % (p : Int) == 0
+      else k % p == algCur[i]!
     if hit then
       let (z', e) := stripPrime z p
       if e > 0 then
@@ -164,8 +172,8 @@ def sieveSpecialQ (ctx : Ctx) (q ρ I J skew : Nat) : Array Rel := Id.run do
       thrR := thrR.push (threshold (rn + 1) lpBitsR ctx.fudge)
       thrA := thrA.push (threshold (an + 1) lpBitsA ctx.fudge)
     let mut cands : Array Nat := #[]
-    for k in [0:width] do
-      if sR.get! k ≥ thrR[k / chunk]! then cands := cands.push k
+    for c in [0:chunks] do
+      cands := scanRange sR thrR[c]! (c * chunk) (min width ((c + 1) * chunk)) cands
     if !cands.isEmpty then
       sA := zeros.copySlice 0 sA 0 width
       for k in [ctx.algStart:fb.algPrimes.size] do
@@ -182,7 +190,8 @@ def sieveSpecialQ (ctx : Ctx) (q ρ I J skew : Nat) : Array Rel := Id.run do
           let a := i * u.1 + (j : Int) * v.1
           let b := i * u.2 + (j : Int) * v.2
           let (a, b) := if b < 0 then (-a, -b) else (a, b)
-          if let some rel := verifyAB ctx a b.toNat q ρ then rels := rels.push rel
+          if let some rel := verifyLattice ctx a b.toNat q ρ k ratR ratCur algR algCur then
+            rels := rels.push rel
     -- Advance every progression to the next row.
     for k in [0:fb.ratPrimes.size] do
       let p := fb.ratPrimes[k]!

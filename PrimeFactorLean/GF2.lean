@@ -14,7 +14,10 @@ Algorithm:
    Such rows can never belong to a dependency.
 2. Columns that remain are renumbered densely; sparse (large-prime) columns
    receive the highest bit positions.
-3. *Incremental elimination* on GMP-backed bitsets: each row is reduced by the
+3. *Merging* (structured Gaussian elimination): a column met by exactly two
+   rows is eliminated by adding one row to the other, which removes a row and
+   a column at once. Each merged row remembers the original rows it combines.
+4. *Incremental elimination* on GMP-backed bitsets: each row is reduced by the
    pivot row of its highest set bit. A row that vanishes yields a dependency,
    recorded by a second bitset of combined row indices.
 -/
@@ -55,9 +58,77 @@ def removeSingletons (numCols : Nat) (rows : Array (Array Nat)) : Array Nat := I
     if alive[i]! then kept := kept.push i
   return kept
 
-/-- Find up to `maxDeps` subsets of `rows` (lists of column indices) whose
-symmetric difference is empty. Each subset is returned as row indices. -/
-def dependencies (numCols : Nat) (rows : Array (Array Nat)) (maxDeps : Nat := 64) :
+/-- Symmetric difference of two sorted arrays without repetitions. -/
+def symmDiff (a b : Array Nat) : Array Nat := Id.run do
+  let mut out : Array Nat := Array.mkEmpty (a.size + b.size)
+  let mut i := 0
+  let mut j := 0
+  while i < a.size || j < b.size do
+    if j ≥ b.size then
+      out := out.push a[i]!
+      i := i + 1
+    else if i ≥ a.size then
+      out := out.push b[j]!
+      j := j + 1
+    else
+      let x := a[i]!
+      let y := b[j]!
+      if x < y then
+        out := out.push x
+        i := i + 1
+      else if y < x then
+        out := out.push y
+        j := j + 1
+      else
+        i := i + 1
+        j := j + 1
+  return out
+
+/-- Merge passes: eliminate weight-two columns (and drop weight-one columns'
+rows), returning the reduced rows with the original rows each one combines. -/
+def mergeColumns (numCols : Nat) (rows : Array (Array Nat)) (maxRowWeight : Nat := 64) :
+    Array (Array Nat × Array Nat) := Id.run do
+  let mut cur : Array (Array Nat × Array Nat) := (Array.range rows.size).map fun i =>
+    ((rows[i]!.filter (· < numCols)).qsort (· < ·), #[i])
+  let mut changed := true
+  let mut passes := 0
+  while changed && passes < 50 do
+    changed := false
+    passes := passes + 1
+    let mut occ : Array (Array Nat) := Array.replicate numCols #[]
+    for i in [0:cur.size] do
+      for c in cur[i]!.1 do
+        occ := occ.set! c (occ[c]!.push i)
+    let mut dead : Array Bool := Array.replicate cur.size false
+    let mut touched : Array Bool := Array.replicate cur.size false
+    for c in [0:numCols] do
+      let o := occ[c]!
+      if o.size == 1 then
+        let i := o[0]!
+        if !touched[i]! && !dead[i]! then
+          dead := dead.set! i true
+          touched := touched.set! i true
+          changed := true
+      else if o.size == 2 then
+        let i := o[0]!
+        let j := o[1]!
+        if !touched[i]! && !touched[j]! && !dead[i]! && !dead[j]! then
+          let (ri, ci) := cur[i]!
+          let (rj, cj) := cur[j]!
+          let merged := symmDiff ri rj
+          if merged.size ≤ maxRowWeight then
+            cur := cur.set! j (merged, ci ++ cj)
+            dead := dead.set! i true
+            touched := (touched.set! i true).set! j true
+            changed := true
+    let mut next : Array (Array Nat × Array Nat) := Array.mkEmpty cur.size
+    for i in [0:cur.size] do
+      if !dead[i]! then next := next.push cur[i]!
+    cur := next
+  return cur
+
+/-- Dense phase: singleton removal, then incremental bitset elimination. -/
+def denseDependencies (numCols : Nat) (rows : Array (Array Nat)) (maxDeps : Nat := 64) :
     Array (Array Nat) := Id.run do
   let kept := removeSingletons numCols rows
   -- Dense renumbering of the live columns, keeping the original order
@@ -96,5 +167,18 @@ def dependencies (numCols : Nat) (rows : Array (Array Nat)) (maxDeps : Nat := 64
           pivots := pivots.set! j (some (r, combo))
           done := true
   return deps
+
+/-- Find up to `maxDeps` subsets of `rows` (lists of column indices) whose
+symmetric difference is empty. Each subset is returned as row indices. -/
+def dependencies (numCols : Nat) (rows : Array (Array Nat)) (maxDeps : Nat := 64) :
+    Array (Array Nat) := Id.run do
+  -- Structured elimination first; then dense elimination on the merged rows.
+  let merged := mergeColumns numCols rows
+  let inner := denseDependencies numCols (merged.map (·.1)) maxDeps
+  return inner.map fun dep => Id.run do
+    let mut out : Array Nat := #[]
+    for k in dep do
+      out := out ++ merged[k]!.2
+    return out
 
 end PrimeFactorLean.GF2
