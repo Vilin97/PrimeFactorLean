@@ -10,15 +10,24 @@ open PrimeFactorLean Lean
     IO (Option Nat) := IO.lazyPure fun _ => rawSearch algorithm cfg n
 
 private def usage : String :=
-  "Usage: factor [--threads T] ALGORITHM INTEGER\n" ++
-  "       factor [--threads T] --split ALGORITHM NATURAL\n" ++
+  "Usage: factor [--threads T] [--ecm-b1 B1 --ecm-curves C] ALGORITHM INTEGER\n" ++
+  "       factor [options] --split ALGORITHM NATURAL\n" ++
   "Algorithms: " ++ " ".intercalate (Algorithm.all.map Algorithm.name)
 
-/-- Parse leading `--threads T` options. -/
+/-- Parse leading options: `--threads T`, and a fixed ECM schedule
+`--ecm-b1 B1 --ecm-curves C` for the `ecm` algorithm. -/
 private def parseOptions : List String → Config → List String × Config
   | "--threads" :: t :: rest, cfg =>
     match t.toNat? with
     | some k => parseOptions rest { cfg with threads := max 1 k }
+    | none => (["--invalid"], cfg)
+  | "--ecm-b1" :: t :: rest, cfg =>
+    match t.toNat? with
+    | some k => parseOptions rest { cfg with ecmB1 := k }
+    | none => (["--invalid"], cfg)
+  | "--ecm-curves" :: t :: rest, cfg =>
+    match t.toNat? with
+    | some k => parseOptions rest { cfg with ecmCurves := k }
     | none => (["--invalid"], cfg)
   | args, cfg => (args, cfg)
 

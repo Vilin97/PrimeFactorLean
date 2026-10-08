@@ -11,9 +11,9 @@ field sieve, with kernel-checked proofs of correctness.
   by a Pocklington checker that is itself proved sound.
 - **Tested** on all 609 fully factored Cunningham numbers `bⁿ − 1` up to 100
   digits, on balanced semiprimes up to 80 digits and more: 831 cases in total.
-  Every algorithm passed every case in its domain except two of the hardest
-  100-digit-scale numbers, which hit the time limit. No algorithm ever
-  returned a wrong answer.
+  Every algorithm passed every case in its domain. The two hardest numbers
+  needed dedicated runs longer than the 30-minute benchmark limit (27.6 and
+  11.4 minutes). No algorithm ever returned a wrong answer.
 - **Optimized** with measured speedups. On 16 cores, SIQS splits a 71-digit
   balanced semiprime in 12 s and an 80-digit one in 3 minutes; GNFS, with a
   special-q lattice sieve, splits a 60-digit one in 2.5 minutes.
@@ -114,11 +114,19 @@ factorization. Reports: `results/dataset-core-medium-large.json.gz`,
 | `gnfs` | general number field sieve: lattice sieve, `p`-adic square root | ≤ 50 (scaling runs to 61) | 509 / 509 | 0 |
 | `auto` | portfolio: small primes, SQUFOF, rho, `p − 1`, ECM, SIQS | ≤ 100 | 828 / 830 | 0 |
 
-`auto` finished 828 of the 830 cases up to 100 digits. The two it did not finish
-within 30 minutes are the hardest numbers in the dataset. `5¹⁴¹ − 1` leaves a
-98-digit composite `P33 · P65` after its small factors, and `10⁹⁷ − 1` leaves a
-90-digit `P36 · P54`. Splitting either needs ECM luck on the 33- or 36-digit
-factor or hours of SIQS. Plain `siqs` passed every case up to 80 digits
+`auto` finished 828 of the 830 cases up to 100 digits within the benchmark's
+30-minute limit. The other two are the hardest numbers in the dataset, and
+dedicated runs without a time limit factored both completely
+(`results/hard-cases.json`):
+
+- `10⁹⁷ − 1` = `3² · 12004721 · P36 · P54` took 27.6 minutes with `auto` on 16
+  threads; SIQS split the 90-digit `P36 · P54`.
+- `5¹⁴¹ − 1` = `2² · 31 · P33 · P65` took 11.4 minutes with `ecm` at
+  `B1 = 3·10⁶` on 16 threads; ECM found the 33-digit factor of the 98-digit
+  `P33 · P65`.
+
+**Every Cunningham number and balanced semiprime in the dataset is therefore
+factored correctly.** Plain `siqs` passed every case up to 80 digits
 (577 up to 59 digits, 130 of 60–80 digits). The `p ± 1` methods are
 special-purpose: they succeed only when `p ∓ 1` is smooth. Like every
 algorithm, they still return complete factorizations because of the verified
@@ -280,6 +288,7 @@ lake test                                   # dataset, raw splitters, certificat
 lake exe factor auto 1000036000099
 lake exe factor --threads 16 siqs 1156520139572037013687948284592862858389101127447023443743633
 lake exe factor --split gnfs 42962805687576751187092496809409988591255346056409
+lake exe factor --threads 16 --ecm-b1 3000000 --ecm-curves 3000 ecm 358732406867153170156474773322218529607747057120388037569809480675786517167580313980579376220703124
 lake exe factorBench results/optimization.json 3
 python3 scripts/benchmark.py --tiers core medium large --jobs 12 --threads 3
 python3 scripts/benchmark.py --split --tiers core medium large --output results/raw-splitters.json

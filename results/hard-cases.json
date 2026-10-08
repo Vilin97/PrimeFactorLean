@@ -1,0 +1,31 @@
+{
+ "note": "Dedicated runs (no time limit) for the two dataset cases that exceeded the 30-minute benchmark limit; complete factorizations through the verified pipeline, prime leaves certified.",
+ "runs": [
+  {
+   "case": "cunningham-10-97-minus",
+   "command": "factor --threads 16 auto 10^97-1",
+   "factors": [
+    "3",
+    "3",
+    "12004721",
+    "846035731396919233767211537899097169",
+    "109399846855370537540339266842070119107662296580348039"
+   ],
+   "matches_reference": true,
+   "seconds": 1655.1
+  },
+  {
+   "case": "cunningham-5-141-minus",
+   "command": "factor --threads 16 --ecm-b1 3000000 --ecm-curves 3000 ecm 5^141-1",
+   "factors": [
+    "2",
+    "2",
+    "31",
+    "177635683940025046467781066894531",
+    "16286160623917663079467944573580125726889931566772922392814390121"
+   ],
+   "matches_reference": true,
+   "seconds": 686.2
+  }
+ ]
+}
