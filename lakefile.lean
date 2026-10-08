@@ -21,3 +21,6 @@ lean_exe factorBench where
 @[test_driver]
 lean_exe factorTests where
   root := `Tests.Main
+
+lean_exe dev where
+  root := `Dev.Main
