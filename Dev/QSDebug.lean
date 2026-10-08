@@ -89,3 +89,43 @@ def qsPhases (n : Nat) (params : Params) (threads : Nat) : IO Unit := do
   let result ← IO.lazyPure fun _ => (extract ctx rels).map (·.val)
   let t3 ← IO.monoNanosNow
   IO.println s!"fb={ctx.fb.size} rels={rels.size} collect {(t1-t0)/1000000} ms, GF2 {deps.size} deps {(t2-t1)/1000000} ms, extract (incl. GF2) {(t3-t2)/1000000} ms -> {result}"
+
+/-- A long SIQS run with progress lines (same collection logic as `QS.collect`). -/
+def qsLong (n : Nat) (params : Params) (threads : Nat) : IO Unit := do
+  let .inl ctx := mkContext n params | IO.println "small factor"
+  let needed := ctx.fb.size + 1 + params.extra
+  IO.println s!"k={ctx.k} fb={ctx.fb.size} M={ctx.M} thr={ctx.threshold} lp={ctx.lpBound} dlp={ctx.dlpBound} needed={needed}"
+  let t0 ← IO.monoNanosNow
+  let mut fulls : Array (PrimeFactorLean.Squares.Relation ctx.n ctx.fb) := #[]
+  let mut edges : Array (Found ctx.n ctx.fb) := #[]
+  let mut uf : UnionFind := {}
+  let mut cycles := 0
+  let mut seen : Std.HashSet Nat := {}
+  let mut round := 0
+  while fulls.size + cycles < needed do
+    let base := round * threads
+    let tasks := (List.range threads).map fun t =>
+      Task.spawn fun _ => siqsBatch ctx (base + t) 1
+    for task in tasks do
+      for f in task.get do
+        if seen.contains f.rel.x then continue
+        seen := seen.insert f.rel.x
+        if f.l1 == 1 && f.l2 == 1 then
+          fulls := fulls.push f.rel
+        else
+          edges := edges.push f
+          let (uf', closed) := uf.union f.l1 f.l2
+          uf := uf'
+          if closed then cycles := cycles + 1
+    round := round + 1
+    let t1 ← IO.monoNanosNow
+    let secs := (t1 - t0).toFloat / 1.0e9
+    IO.println s!"round {round} {secs}s: fulls {fulls.size} partials {edges.size} cycles {cycles} total {fulls.size + cycles}/{needed}"
+    (← IO.getStdout).flush
+  for ids in graphCycles (edges.map fun f => (f.l1, f.l2)) do
+    if let some r := combineCycle edges ids then fulls := fulls.push r
+  let t2 ← IO.monoNanosNow
+  IO.println s!"relations {fulls.size} after cycle extraction ({(t2 - t0) / 1000000} ms)"
+  let result ← IO.lazyPure fun _ => (extract ctx fulls).map (·.val)
+  let t3 ← IO.monoNanosNow
+  IO.println s!"factor {result} (linear algebra and square roots {(t3 - t2) / 1000000} ms, total {(t3 - t0) / 1000000} ms)"

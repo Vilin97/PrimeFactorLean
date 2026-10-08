@@ -47,6 +47,9 @@ def main (args : List String) : IO Unit := do
   | ["qsphases", ns, fbs, m, lp, dlp, ss, ts] =>
     let params : QS.Params := { (QS.Params.mk fbs.toNat! m.toNat! lp.toNat! 40 ss.toNat! dlp.toNat! 0) with }
     qsPhases ns.toNat! params ts.toNat!
+  | ["qslong", ns, fbs, m, lp, dlp, ts] =>
+    let params : QS.Params := { (QS.Params.mk fbs.toNat! m.toNat! lp.toNat! 40 6 dlp.toNat! 0) with }
+    qsLong ns.toNat! params ts.toNat!
   | ["gnfs", ns, ts] =>
     let n := ns.toNat!
     timed s!"gnfs n={n} digits={QS.decimalDigits n}" fun _ =>

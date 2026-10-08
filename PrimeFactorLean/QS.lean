@@ -25,10 +25,16 @@ every `v(x)` that factors over the factor base yields a relation.
   `B = ±B₁ ± ⋯ ± B_s` are enumerated in Gray-code order, so each new polynomial
   costs only one addition per factor-base root.
 
-Sieving uses rounded base-2 logarithms in a `ByteArray`, skips the smallest
-primes (small prime variation), and keeps relations with one large prime below
-`lpMult · p_max` (large prime variation); partial relations sharing their large
-prime are paired. Collection runs on parallel `Task`s.
+Sieving adds rounded base-2 logarithms into a `ByteArray` and skips the
+smallest primes (small prime variation). Primes beyond the interval are sieved
+in the same pass that moves their roots. Thresholds are scanned block by block.
+Candidates are trial divided by comparing root positions, so the large
+modulus is never reduced. Relations may keep one large prime below
+`lpMult · p_max`, and optionally two (double large prime variation, the
+cofactor split by SQUFOF). Partial relations are edges of a large-prime graph:
+union–find counts its cycles during collection, and every cycle is finally
+multiplied into a full relation (`Squares.Relation.absorb`). Collection runs on
+parallel `Task`s.
 
 **What is proved.** Each relation is a `Squares.Relation`, whose defining
 congruence is checked when it is created; pairing, multiplication, the
@@ -184,8 +190,9 @@ def mkContext (n : Nat) (params : Params) : Context ⊕ Nat := Id.run do
                 threshold := threshold, lpBound := lpBound, dlpBound := dlpBound,
                 sieveStart := params.sieveStart, zeros := zeros }
 
-/-- Sentinel for "no root": any position `≥ 2M` is never sieved. -/
-def noRoot (ctx : Context) : Nat := 2 * ctx.M + 1
+/-- Sentinel for "no root": it is at least `2M` (never sieved) and larger than
+every factor-base prime (never mistaken for a residue). -/
+def noRoot (ctx : Context) : Nat := 2 * ctx.M + ctx.fb[ctx.fb.size - 1]! + 1
 
 /-- Sieve positions `j = x + M` of the two roots of `Q(x)` modulo each prime. -/
 def positions (ctx : Context) (poly : Poly) : Array Nat × Array Nat := Id.run do
@@ -224,12 +231,12 @@ def scanAbove (s : ByteArray) (thr : UInt8) (size : Nat) : Array Nat := Id.run d
     b := e
   return cands
 
-/-- Logarithmic sieve over `[0, 2M)`; returns the buffer and candidate positions. -/
-def sieve (ctx : Context) (pos1 pos2 : Array Nat) (skip : Array Bool) (buf : ByteArray) :
-    ByteArray × Array Nat := Id.run do
+/-- Add the logarithms of the factor-base primes with index in `[start, stop)`. -/
+def sieveRange (ctx : Context) (pos1 pos2 : Array Nat) (skip : Array Bool) (s : ByteArray)
+    (start stop : Nat) : ByteArray := Id.run do
   let size := 2 * ctx.M
-  let mut s := ctx.zeros.copySlice 0 buf 0 size
-  for i in [ctx.sieveStart:ctx.fb.size] do
+  let mut s := s
+  for i in [start:stop] do
     if skip[i]! then continue
     let p := ctx.fb[i]!
     let lg := ctx.logp.get! i
@@ -241,7 +248,15 @@ def sieve (ctx : Context) (pos1 pos2 : Array Nat) (skip : Array Bool) (buf : Byt
     while j < size do
       s := s.set! j (s.get! j + lg)
       j := j + p
-  return (s, scanAbove s ctx.threshold size)
+  return s
+
+/-- Logarithmic sieve over `[0, 2M)`; returns the buffer and candidate positions. -/
+def sieve (ctx : Context) (pos1 pos2 : Array Nat) (skip : Array Bool) (buf : ByteArray) :
+    ByteArray × Array Nat :=
+  let size := 2 * ctx.M
+  let s := sieveRange ctx pos1 pos2 skip (ctx.zeros.copySlice 0 buf 0 size) ctx.sieveStart
+    ctx.fb.size
+  (s, scanAbove s ctx.threshold size)
 
 /-- Divide out all factors `p`; returns the cofactor and the exponent. -/
 def stripPrime (u p : Nat) : Nat × Nat := Id.run do
@@ -477,6 +492,12 @@ def siqsBatch (ctx : Context) (batch : Nat) (numA : Nat) :
     buf := buf'
     rels := rels ++ found
     let count := 2 ^ (Bl.size - 1)
+    let size := 2 * ctx.M
+    -- Primes beyond the interval hit at most once per root: they are sieved
+    -- in the same pass that moves their roots.
+    let mut largeStart := ctx.sieveStart
+    while largeStart < ctx.fb.size && ctx.fb[largeStart]! < size do
+      largeStart := largeStart + 1
     for g in [1:count] do
       -- Gray code: bit v flips between g-1 and g.
       let v := (g &&& (2 ^ 64 - g)).log2
@@ -485,20 +506,26 @@ def siqsBatch (ctx : Context) (batch : Nat) (numA : Nat) :
       let bv : Int := (Bl[v]! : Int)
       B := if negate then B - 2 * bv else B + 2 * bv
       let drow := deltas[v]!
+      let mut sv := ctx.zeros.copySlice 0 buf 0 size
       for i in [1:ctx.fb.size] do
         if skip[i]! then continue
         let p := ctx.fb[i]!
         let d := drow[i]!
         let a1 := pos1[i]!
-        if a1 < p then
-          pos1 := pos1.set! i (if negate then (a1 + d) % p else (a1 + p - d) % p)
         let a2 := pos2[i]!
-        if a2 < p then
-          pos2 := pos2.set! i (if negate then (a2 + d) % p else (a2 + p - d) % p)
+        let n1 := if a1 < p then (if negate then (a1 + d) % p else (a1 + p - d) % p) else a1
+        let n2 := if a2 < p then (if negate then (a2 + d) % p else (a2 + p - d) % p) else a2
+        pos1 := pos1.set! i n1
+        pos2 := pos2.set! i n2
+        if i ≥ largeStart then
+          let lg := ctx.logp.get! i
+          if n1 < size then sv := sv.set! n1 (sv.get! n1 + lg)
+          if n2 < size then sv := sv.set! n2 (sv.get! n2 + lg)
+      sv := sieveRange ctx pos1 pos2 skip sv ctx.sieveStart largeStart
       let poly : Poly := { poly0 with B := B, C := (B * B - (ctx.N : Int)) / (A : Int) }
-      let (buf', found) := sievePoly ctx poly pos1 pos2 buf
-      buf := buf'
-      rels := rels ++ found
+      for j in scanAbove sv ctx.threshold size do
+        if let some r := candidateRelation ctx poly pos1 pos2 j then rels := rels.push r
+      buf := sv
   return rels
 
 /-! ## Driver -/

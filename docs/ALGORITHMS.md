@@ -152,7 +152,8 @@ All three use:
 - single and (optionally) double large primes, with union–find cycle counting
   and spanning-forest cycle extraction;
 - parallel collection;
-- singleton removal followed by GMP-bitset Gaussian elimination.
+- structured Gaussian elimination (singleton removal, merging of weight-two
+  columns) followed by GMP-bitset elimination.
 
 ### General number field sieve (`gnfs`)
 The asymptotically fastest known general method, `L_n[1/3, (64/9)^{1/3}]`. Its

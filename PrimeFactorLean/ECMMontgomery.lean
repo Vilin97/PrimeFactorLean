@@ -127,6 +127,8 @@ structure Plan where
   b1 : Nat
   b2 : Nat
   powers : Array Nat
+  /-- The prime underlying each entry of `powers`. -/
+  bases : Array Nat
   isPrime : ByteArray
   d : Nat
   babies : Array Nat
@@ -147,15 +149,18 @@ def mkPlan (b1 b2 : Nat) : Plan := Id.run do
         j := j + i
     i := i + 1
   let mut powers : Array Nat := #[]
+  let mut bases : Array Nat := #[]
   for p in [2:b1 + 1] do
     if sieve.get! p == 1 then
       let mut q := p
       while q * p ≤ b1 do q := q * p
       powers := powers.push q
+      bases := bases.push p
   let mut babies : Array Nat := #[]
   for j in [1:d / 2] do
     if j % 2 == 1 && Nat.gcd j d == 1 then babies := babies.push j
-  return { b1 := b1, b2 := b2, powers := powers, isPrime := sieve, d := d, babies := babies }
+  return { b1 := b1, b2 := b2, powers := powers, bases := bases, isPrime := sieve, d := d,
+           babies := babies }
 
 /-- Stage 2 by the standard continuation. Returns the accumulated product. -/
 def stageTwo (n a24 : Nat) (plan : Plan) (Q : Pt) : Except (Option (ProperFactor n)) Nat := Id.run do
@@ -212,7 +217,31 @@ def stageTwo (n a24 : Nat) (plan : Plan) (Q : Pt) : Except (Option (ProperFactor
       m := m + 1
     return .ok prod
 
-/-- Run one curve: stage 1 then stage 2. -/
+/-- Backtracking when stage 1 annihilated every prime factor at once (`gcd = n`,
+typical when all factors are small): replay with a gcd after each prime power,
+and inside the guilty power after each single prime. -/
+def stageOneReplay (n a24 : Nat) (plan : Plan) (P0 : Pt) : Option (ProperFactor n) := Id.run do
+  let mut P := P0
+  for i in [0:plan.powers.size] do
+    let next := ladder n a24 P plan.powers[i]!
+    let g := Nat.gcd next.z n
+    if g == 1 then
+      P := next
+      continue
+    if let some f := gcdFactor n next.z then return some f
+    -- This prime power killed every factor; step through its prime.
+    let p := plan.bases[i]!
+    let mut R := P
+    let mut k := plan.powers[i]!
+    while k > 1 do
+      R := ladder n a24 R p
+      if let some f := gcdFactor n R.z then return some f
+      if Nat.gcd R.z n == n then break
+      k := k / p
+    return none
+  return none
+
+/-- Run one curve: stage 1 (with backtracking), then stage 2. -/
 def runCurve (n : Nat) (plan : Plan) (σ : Nat) : Option (ProperFactor n) :=
   match suyama n σ with
   | .error f => f
@@ -223,7 +252,7 @@ def runCurve (n : Nat) (plan : Plan) (σ : Nat) : Option (ProperFactor n) :=
     match gcdFactor n P.z with
     | some f => return some f
     | none =>
-      if Nat.gcd P.z n == n then return none
+      if Nat.gcd P.z n == n then return stageOneReplay n a24 plan P0
       if plan.b2 ≤ plan.b1 then return none
       match stageTwo n a24 plan P with
       | .error f => return f

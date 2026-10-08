@@ -64,6 +64,9 @@ def main():
     p.add_argument('--algorithms', nargs='+', default=list(DOMAINS))
     p.add_argument('--tiers', nargs='+', default=['core', 'medium', 'large'])
     p.add_argument('--max-digits', type=int, help='override every domain limit')
+    p.add_argument('--domain', nargs='*', default=[], help='per-algorithm limits, e.g. siqs=80')
+    p.add_argument('--jsonl', type=pathlib.Path, help='append each record here as it completes; '
+                   'records already present are reused (resume)')
     p.add_argument('--timeout', type=float, help='override per-tier timeouts (seconds)')
     p.add_argument('--threads', type=int, default=8, help='Lean tasks per factorization')
     p.add_argument('--jobs', type=int, default=1, help='factorizations run concurrently')
@@ -78,15 +81,34 @@ def main():
         cases = [c for c in cases if c['id'] in a.cases]
     if a.split:
         cases = [c for c in cases if c['factors'] is not None and len(c['factors']) > 1]
+    overrides = {k: int(v) for k, v in (x.split('=') for x in a.domain)}
+    done = {}
+    if a.jsonl and a.jsonl.exists():
+        for line in a.jsonl.read_text().splitlines():
+            r = json.loads(line)
+            done[(r['algorithm'], r['case'])] = r
     jobs = []
     for alg in a.algorithms:
-        limit = a.max_digits if a.max_digits is not None else DOMAINS[alg]
+        limit = a.max_digits if a.max_digits is not None else overrides.get(alg, DOMAINS[alg])
         for c in cases:
             if c['digits'] <= limit:
                 timeout = a.timeout if a.timeout is not None else TIMEOUTS[c['tier']]
                 jobs.append((alg, c, timeout))
+    import threading
+    lock = threading.Lock()
+
+    def work(j):
+        key = (j[0], j[1]['id'])
+        if key in done:
+            return done[key]
+        r = run_case(a.binary, j[0], j[1], j[2], a.threads, a.split)
+        if a.jsonl:
+            with lock, a.jsonl.open('a') as f:
+                f.write(json.dumps(r) + '\n')
+        return r
+
     with ThreadPoolExecutor(max_workers=a.jobs) as pool:
-        records = list(pool.map(lambda j: run_case(a.binary, j[0], j[1], j[2], a.threads, a.split), jobs))
+        records = list(pool.map(work, jobs))
     statuses = ['split', 'miss'] if a.split else ['pass']
     statuses += ['wrong', 'timeout', 'error']
     summary = {}
@@ -99,8 +121,10 @@ def main():
                             median_ms=statistics.median([r['elapsedNs'] / 1e6 for r in ok]) if ok else None,
                             max_digits_ok=max([r['digits'] for r in ok], default=None))
         print(json.dumps(dict(algorithm=alg, **summary[alg])), flush=True)
+    domains = {alg: (a.max_digits if a.max_digits is not None else overrides.get(alg, DOMAINS[alg]))
+               for alg in a.algorithms}
     report = dict(dataset_sha256=hashlib.sha256(raw).hexdigest(), tiers=a.tiers, split=a.split,
-                  threads=a.threads, jobs=a.jobs, domains=DOMAINS, timeouts=TIMEOUTS,
+                  threads=a.threads, jobs=a.jobs, domains=domains, timeouts=TIMEOUTS,
                   platform=platform.platform(), processor=platform.processor(),
                   python=platform.python_version(), summary=summary, records=records,
                   note='Wall time includes process startup; elapsedNs is measured inside Lean. '
