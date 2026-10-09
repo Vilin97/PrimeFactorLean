@@ -15,8 +15,9 @@ field sieve, with kernel-checked proofs of correctness.
   needed dedicated runs longer than the 30-minute benchmark limit (27.6 and
   11.4 minutes). No algorithm ever returned a wrong answer.
 - **Optimized** with measured speedups. On 16 cores, SIQS splits a 71-digit
-  balanced semiprime in 12 s and an 80-digit one in 3 minutes; GNFS, with a
-  special-q lattice sieve, splits a 60-digit one in 2.5 minutes.
+  balanced semiprime in 12 s and an 80-digit one in 3 minutes. It factored
+  **RSA-100** in 6 h 35 min. GNFS, with a special-q lattice sieve, splits a
+  60-digit balanced semiprime in 2.5 minutes.
 
 ```text
 $ lake exe factor --threads 16 auto 3533694129556768659166595001485837031654967793751237916243212402585239551
@@ -125,12 +126,16 @@ dedicated runs without a time limit factored both completely
   `B1 = 3·10⁶` on 16 threads; ECM found the 33-digit factor of the 98-digit
   `P33 · P65`.
 
-**Every Cunningham number and balanced semiprime in the dataset is therefore
-factored correctly.** Plain `siqs` passed every case up to 80 digits
-(577 up to 59 digits, 130 of 60–80 digits). The `p ± 1` methods are
-special-purpose: they succeed only when `p ∓ 1` is smooth. Like every
-algorithm, they still return complete factorizations because of the verified
-fallback.
+**Every case in the dataset has been factored correctly.** That covers:
+
+- 828 cases within the benchmark limits;
+- the two cases above, in dedicated runs;
+- the RSA-100 challenge, in a 6 h 35 min SIQS run (see [Dataset](#dataset)).
+
+Plain `siqs` passed every case up to 80 digits: 577 up to 59 digits and 130
+of 60–80 digits. The `p ± 1` methods are special-purpose: they succeed only
+when `p ∓ 1` is smooth. Like every algorithm, they still return complete
+factorizations because of the verified fallback.
 
 ### Raw splitters
 
@@ -225,9 +230,11 @@ Aurifeuillian L/M lines and implicit probable-prime cofactors, then checked by
 exact multiplication. The hardest is `2²⁷⁷ − 1 = 1121297 · P38 · P40`.
 
 **RSA-100**, the smallest number of the RSA Factoring Challenge (factored
-in 1991), is the challenge tier. It is **not** part of the benchmark runs. With
-a 64,000-prime factor base, SIQS collects 1.3 full and 18.6 partial relations
-per second on 16 cores, which projects to about ten hours.
+in 1991), is the challenge tier. It is not part of the timed benchmark tiers.
+A dedicated run of the verified pipeline (`factor --threads 16 siqs`) factored
+it in **6 h 35 min** on 16 cores with 1.3 GB of memory. The run used a
+64,000-prime factor base, and both 50-digit prime factors carry Pocklington
+certificates (`results/hard-cases.json`).
 
 Seeded balanced semiprimes of 20 to 80 digits (seed `20261007`) are included as
 well. They are the hardest inputs of their size for the general-purpose methods.

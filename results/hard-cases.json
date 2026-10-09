@@ -1,5 +1,5 @@
 {
- "note": "Dedicated runs (no time limit) for the two dataset cases that exceeded the 30-minute benchmark limit; complete factorizations through the verified pipeline, prime leaves certified.",
+ "note": "Dedicated runs (no time limit): the two dataset cases that exceeded the 30-minute benchmark limit, and the RSA-100 challenge. Complete factorizations through the verified pipeline, prime leaves certified.",
  "runs": [
   {
    "case": "cunningham-10-97-minus",
@@ -26,6 +26,18 @@
    ],
    "matches_reference": true,
    "seconds": 686.2
+  },
+  {
+   "case": "rsa-100",
+   "command": "factor --threads 16 siqs RSA-100",
+   "factors": [
+    "37975227936943673922808872755445627854565536638199",
+    "40094690950920881030683735292761468389214899724061"
+   ],
+   "matches_reference": true,
+   "seconds": 23702.9,
+   "wall_clock": "6:35:02",
+   "peak_rss_mb": 1284
   }
  ]
 }
