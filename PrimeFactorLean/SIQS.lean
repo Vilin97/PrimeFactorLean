@@ -110,6 +110,21 @@ theorem uget_bound {s : ByteArray} {k len : USize} (hk : k ≤ len) (h : len.toN
     · exact USize.le_refl len
   s.uset k (s.uget k (uget_bound hk h) + lg) (uget_bound hk h)
 
+/-- Add `lg` at `a` when `a < len`. -/
+@[inline] def hitIf (s : ByteArray) (len a : USize) (lg : UInt8) (h : len.toNat < s.size) :
+    ByteArray :=
+  if hlt : a < len then
+    have hk : a ≤ len := USize.le_of_lt hlt
+    s.uset a (s.uget a (uget_bound hk h) + lg) (uget_bound hk h)
+  else s
+
+theorem size_hitIf (s : ByteArray) (len a : USize) (lg : UInt8) (h : len.toNat < s.size) :
+    (hitIf s len a lg h).size = s.size := by
+  unfold hitIf
+  split
+  · simp [size_uset]
+  · rfl
+
 theorem size_hitClamp (s : ByteArray) (len a : USize) (lg : UInt8) (h : len.toNat < s.size) :
     (hitClamp s len a lg h).size = s.size := by
   simp [hitClamp, size_uset]
@@ -308,10 +323,12 @@ def switchBig (prime delta : Array UInt32) (logp : ByteArray) (add : Bool) (root
     let a := moveRoot add (root1 w) d p
     let b := moveRoot add (root2 w) d p
     let lg := logp.get i (by omega)
-    let t := hitClamp s len a.toUSize lg hs
-    let t := hitClamp t len b.toUSize lg (by rw [size_hitClamp]; exact hs)
+    -- a root beyond the interval is skipped (a branch rather than an update of
+    -- the trash byte: those updates would form one chain through memory)
+    let t := hitIf s len a.toUSize lg hs
+    let t := hitIf t len b.toUSize lg (by rw [size_hitIf]; exact hs)
     let roots' := roots.set i (packRoots a b) (by omega)
-    switchBig prime delta logp add roots' t len (by rw [size_hitClamp, size_hitClamp]; exact hs)
+    switchBig prime delta logp add roots' t len (by rw [size_hitIf, size_hitIf]; exact hs)
       (i + 1) stop h1 h2 h4 (by simp [roots']; omega)
   else (roots, s)
 termination_by stop - i
@@ -358,13 +375,13 @@ structure Params where
 16 threads on the balanced semiprimes of the dataset (`scripts/tune_siqs.py`). -/
 def paramTable : List (Nat × Nat × Nat × Nat × Nat × Nat) :=
   [(20, 60, 2048, 20, 0, 10), (25, 100, 4096, 30, 0, 10), (30, 150, 8192, 30, 0, 10),
-   (35, 220, 16384, 40, 0, 10), (40, 300, 16384, 50, 0, 10), (44, 500, 16384, 50, 0, 12),
-   (48, 800, 16384, 60, 0, 12), (52, 1200, 32768, 60, 0, 12), (56, 1800, 32768, 70, 0, 14),
-   (60, 2400, 32768, 75, 0, 16), (64, 4000, 32768, 80, 0, 16), (68, 5500, 65536, 80, 0, 16),
-   (72, 7000, 65536, 80, 16, 14), (76, 10000, 65536, 90, 16, 12), (80, 15000, 131072, 90, 16, 12),
-   (85, 22000, 131072, 100, 16, 12), (90, 30000, 196608, 110, 16, 12),
-   (95, 40000, 196608, 120, 16, 12), (100, 50000, 262144, 150, 16, 12),
-   (110, 70000, 262144, 150, 16, 12)]
+   (35, 220, 16384, 40, 0, 10), (40, 300, 32768, 60, 0, 8), (44, 500, 32768, 60, 0, 14),
+   (48, 800, 16384, 60, 0, 10), (52, 1200, 32768, 60, 0, 10), (56, 1800, 65536, 60, 0, 10),
+   (60, 2400, 32768, 80, 0, 12), (64, 5500, 65536, 80, 0, 14), (68, 5500, 65536, 80, 0, 16),
+   (72, 6000, 65536, 80, 16, 12), (76, 7000, 65536, 80, 16, 12), (80, 12000, 131072, 90, 16, 10),
+   (85, 17000, 131072, 100, 16, 10), (90, 22000, 196608, 110, 16, 10),
+   (95, 30000, 196608, 120, 16, 10), (100, 40000, 262144, 150, 16, 10),
+   (110, 60000, 262144, 150, 16, 10)]
 
 def chooseParams (digits : Nat) : Params :=
   let e := (paramTable.find? fun e => digits ≤ e.1).getD
