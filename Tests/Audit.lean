@@ -10,6 +10,7 @@ import PrimeFactorLean
 #print axioms PrimeFactorLean.Squares.Relation.toSquares
 #print axioms PrimeFactorLean.Squares.SquareCongruence.factor_isSome
 #print axioms PrimeFactorLean.GNFS.nfs_square
+#print axioms PrimeFactorLean.GNFS.nfs_square_lin
 #print axioms PrimeFactorLean.NFS.eval_mulZ
 
 /- Fail CI on any additional axiom, including sorryAx, in the public specifications. -/
@@ -66,6 +67,7 @@ run_cmd do
     ``PrimeFactorLean.NFS.eval_prodTree,
     ``PrimeFactorLean.NFS.evalMod_modEq,
     ``PrimeFactorLean.GNFS.nfs_square,
+    ``PrimeFactorLean.GNFS.nfs_square_lin,
     ``PrimeFactorLean.GNFS.split_sound,
     ``PrimeFactorLean.SQUFOF.split_sound,
     ``PrimeFactorLean.CFRAC.split_sound,

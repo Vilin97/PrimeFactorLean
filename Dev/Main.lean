@@ -11,6 +11,7 @@ import Dev.LasDebug
 import Dev.Bench8
 import Dev.Stages
 import Dev.MontTest
+import Dev.GnfsPhases
 open PrimeFactorLean
 
 def timed (label : String) (f : Unit → Option Nat) : IO Unit := do
@@ -95,6 +96,7 @@ def main (args : List String) : IO Unit := do
   | ["rb"] => rbMain
   | ["fkunit"] => fkUnit
   | ["las", ns, cnt] => lasDebug ns.toNat! cnt.toNat!
+  | ["las", ns, cnt, fudge, skew] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! skew.toNat!
   | ["laspipe", ns, ts, rounds] => lasPipeline ns.toNat! ts.toNat! rounds.toNat!
   | ["fastlong", ns, ts, fbs, m, lp, dlp, spv, slack] =>
     let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
@@ -121,6 +123,7 @@ def main (args : List String) : IO Unit := do
   | ["bench10"] => Bench10.bench10Main
   | ["stages", ns, ts] => autoStages ns.toNat! ts.toNat!
   | ["monttest"] => montTestMain
+  | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
   | ["ecmbench", ns, b1, c, ts] => ecmBench ns.toNat! b1.toNat! c.toNat! ts.toNat!
   | ["ecm", b1, curves, ns, ts] =>
     let n := ns.toNat!
@@ -128,11 +131,11 @@ def main (args : List String) : IO Unit := do
       (ECMM.split n { b1 := b1.toNat!, curves := curves.toNat!, threads := ts.toNat! }).map (·.val)
   | ["nfsdebug", ns, ts, d, fbB, a, lp, fudge, lines, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0
+    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 100
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfslattice", ns, ts, d, fbB, a, lp, fudge, li, lj, qpt, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0) with }
+    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 100) with }
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfsdebug", ns, ts] =>
     let n := ns.toNat!

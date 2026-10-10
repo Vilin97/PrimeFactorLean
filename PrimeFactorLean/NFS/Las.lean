@@ -186,6 +186,106 @@ def fkResieve (s : ByteArray) (len mask x y d0 d1 : USize) (k : Nat) (pos : USiz
       fkResieve s len mask x y d0 d1 k pos acc fuel
     else acc
 
+/-! ### Machine-word reduction fused with the walks
+
+`fkReduce` above is the reference (and is unit tested against brute force);
+the sieve uses `fkGo`/`fkGoR`, which run the same reduction on `UInt64` in a
+tail-recursive loop and continue directly into the walk, so no basis needs to
+be allocated per ideal. -/
+
+/-- Franke–Kleinjung reduction of `(x, y) = (p, R)` (state `x, b₀, y, b₁`), then
+the sieve walk adding `lg`. -/
+def fkGo (s : ByteArray) (len : USize) (h : len.toNat < s.size) (I : UInt64) (p : UInt64)
+    (lg : UInt8) (x b0 y b1 : UInt64) : Nat → ByteArray
+  | 0 => s
+  | fuel + 1 =>
+    if x < I && y < I then
+      if x == 0 || x + y < I || b0 == 0 || b1 == 0 then s
+      else fkSieve s len h (I - 1).toUSize x.toUSize y.toUSize (b0 * I - x).toUSize
+        (b1 * I + y).toUSize lg (I / 2).toUSize (2 * len.toNat / p.toNat + 4)
+    else if x ≥ y then
+      if y == 0 then s
+      else
+        let k := x / y
+        if x - k * y + y ≥ I then fkGo s len h I p lg (x - k * y) (b0 + k * b1) y b1 fuel
+        else
+          let k' := (x - I) / y + 1
+          fkGo s len h I p lg (x - k' * y) (b0 + k' * b1) y b1 fuel
+    else
+      if x == 0 then s
+      else
+        let k := y / x
+        if y - k * x + x ≥ I then fkGo s len h I p lg x b0 (y - k * x) (b1 + k * b0) fuel
+        else
+          let k' := (y - I) / x + 1
+          fkGo s len h I p lg x b0 (y - k' * x) (b1 + k' * b0) fuel
+
+/-- Resieve walk: record `pos <<< 24 ||| k` at every hit on a marked survivor. -/
+def fkWalkR (lab : ByteArray) (len mask x y d0 d1 : USize) (k : Nat) (pos : USize)
+    (acc : Array Nat) : Nat → Array Nat
+  | 0 => acc
+  | fuel + 1 =>
+    let pos := fkNext mask x y d0 d1 pos
+    if h : pos < len ∧ pos.toNat < lab.size then
+      let acc := if lab.uget pos h.2 != 0 then acc.push ((pos.toNat <<< 24) ||| k) else acc
+      fkWalkR lab len mask x y d0 d1 k pos acc fuel
+    else acc
+
+/-- The reduction of `fkGo`, continuing into the resieve walk. -/
+def fkGoR (lab : ByteArray) (len : USize) (I p : UInt64) (k : Nat) (acc : Array Nat)
+    (x b0 y b1 : UInt64) : Nat → Array Nat
+  | 0 => acc
+  | fuel + 1 =>
+    if x < I && y < I then
+      if x == 0 || x + y < I || b0 == 0 || b1 == 0 then acc
+      else fkWalkR lab len (I - 1).toUSize x.toUSize y.toUSize (b0 * I - x).toUSize
+        (b1 * I + y).toUSize k (I / 2).toUSize acc (2 * len.toNat / p.toNat + 4)
+    else if x ≥ y then
+      if y == 0 then acc
+      else
+        let k1 := x / y
+        if x - k1 * y + y ≥ I then fkGoR lab len I p k acc (x - k1 * y) (b0 + k1 * b1) y b1 fuel
+        else
+          let k' := (x - I) / y + 1
+          fkGoR lab len I p k acc (x - k' * y) (b0 + k' * b1) y b1 fuel
+    else
+      if x == 0 then acc
+      else
+        let k1 := y / x
+        if y - k1 * x + x ≥ I then fkGoR lab len I p k acc x b0 (y - k1 * x) (b1 + k1 * b0) fuel
+        else
+          let k' := (y - I) / x + 1
+          fkGoR lab len I p k acc x b0 (y - k' * x) (b1 + k' * b0) fuel
+
+/-- `a⁻¹ mod p` for `0 < a < p < 2^32` by extended Euclid on 32-bit words (`0` if
+not invertible). -/
+def inv32Loop (r0 r1 : UInt32) (s0 s1 : Int64) : Nat → Int64
+  | 0 => 0
+  | fuel + 1 =>
+    if r1 == 0 then (if r0 == 1 then s0 else 0)
+    else
+      let q := r0 / r1
+      inv32Loop r1 (r0 - q * r1) s1 (s0 - q.toUInt64.toInt64 * s1) fuel
+
+def invMod32 (a p : UInt32) : UInt64 :=
+  let s := inv32Loop p a 0 1 64
+  if s < 0 then (s + p.toUInt64.toInt64).toUInt64 else s.toUInt64
+
+/-- `x mod p` (nonnegative) for an integer `x`. -/
+@[inline] def modW (x : Int) (p : Nat) : UInt64 := (x % (p : Int)).toNat.toUInt64
+
+/-- The lattice root (as `latticeRootU`) from residues of the basis modulo `p`. -/
+@[inline] def latticeRootW (p r ua ub va vb : UInt64) : UInt64 :=
+  let α := if r == p then ub else (ua + p - r * ub % p) % p
+  let β := if r == p then vb else (va + p - r * vb % p) % p
+  if α == 0 then p
+  else
+    let inv := invMod32 α.toUInt32 p.toUInt32
+    if inv == 0 then p
+    else
+      let t := β * inv % p
+      if t == 0 then 0 else p - t
+
 /-! ## Context -/
 
 structure LasParams where
@@ -241,20 +341,34 @@ def mkLasCtx (base : Ctx) (params : LasParams) : LasCtx :=
 
 /-! ## One special-`q` -/
 
-/-- Lattice roots of one side's ideals for the basis `u, v`. -/
-def latticeRoots (side : Side) (ua ub va vb : Int) : Array Nat :=
-  (Array.range side.primes.size).map fun k =>
+/-- Lattice roots of one side's ideals for the basis `u, v` (machine words). -/
+def latticeRoots (side : Side) (ua ub va vb : Int) : Array Nat := Id.run do
+  let mut out : Array Nat := Array.mkEmpty side.primes.size
+  for k in [0:side.primes.size] do
     let p := side.primes[k]!
-    (latticeRootU p.toUInt64 side.roots[k]!.toUInt64 ua ub va vb).toNat
+    let r := side.roots[k]!
+    out := out.push (latticeRootW p.toUInt64 r.toUInt64 (modW ua p) (modW ub p) (modW va p)
+      (modW vb p)).toNat
+  return out
 
-/-- Biased rows: row `j` starts at `128 - thr j` (so a byte reaching `128` passed). -/
-def initBuffer (ctx : LasCtx) (thr : Array Nat) : ByteArray := Id.run do
-  let len := ctx.I * ctx.J
-  let mut buf := ByteArray.mk (Array.replicate (len + 1) 0)
+/-- `n` zero bytes. -/
+def zeroBytes (n : Nat) : ByteArray := Id.run do
+  let mut b := ByteArray.emptyWithCapacity n
+  for _ in [0:n] do b := b.push 0
+  return b
+
+/-- Biased rows: row `j` starts at `128 - thr j` (so a byte reaching `128` passed);
+the trash byte at `I · J` is cleared. Fills `buf` in place. -/
+def fillRows (ctx : LasCtx) (buf : ByteArray) (thr : Array Nat) : ByteArray := Id.run do
+  let mut b := buf
   for j in [0:ctx.J] do
     let bias := 128 - min 127 (thr[j]!)
-    buf := ctx.rowTemplates[bias]!.copySlice 0 buf (j * ctx.I) ctx.I
-  return buf
+    b := ctx.rowTemplates[bias]!.copySlice 0 b (j * ctx.I) ctx.I
+  return b.set! (ctx.I * ctx.J) 0
+
+/-- Biased rows in a fresh buffer. -/
+def initBuffer (ctx : LasCtx) (thr : Array Nat) : ByteArray :=
+  fillRows ctx (zeroBytes (ctx.I * ctx.J + 1)) thr
 
 /-- Sieve one side. -/
 def sieveSide (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray) : ByteArray := Id.run do
@@ -276,47 +390,72 @@ def sieveSide (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray) : B
       if hb' : lenU.toNat < b.size then
         b := lineSieve b lenU hb' p.toUSize r.toUSize I.toUSize ctx.J.toUSize lg count 1 start.toUSize
           ctx.J
-    -- large ideals: Franke–Kleinjung walks from (i, j) = (0, 0)
+    -- large ideals: Franke–Kleinjung reduction and walk from (i, j) = (0, 0)
+    let IU := I.toUInt64
     for k in [side.largeStart:side.primes.size] do
       let p := side.primes[k]!
       let r := R[k]!
       if r ≥ p then continue
-      match fkReduce p r I with
-      | none => continue
-      | some (x, b0, y, b1) =>
-        let lg := side.logs.get! k
-        if hb' : lenU.toNat < b.size then
-          b := fkSieve b lenU hb' (I - 1).toUSize x.toUSize y.toUSize (b0 * I - x).toUSize
-            (b1 * I + y).toUSize lg (I / 2).toUSize (2 * len / p + 4)
+      let lg := side.logs.get! k
+      if hb' : lenU.toNat < b.size then
+        b := fkGo b lenU hb' IU p.toUInt64 lg p.toUInt64 0 r.toUInt64 1 128
     buf := b
   return buf
 
-/-- Per-row thresholds (in bits): the largest norm on the row, sampled at five
-columns, minus the cofactor allowance `2^mfb` and the slack. -/
-def rowThresholds (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (mfb : Nat) (alg : Bool) :
-    Array Nat :=
-  let I : Int := ctx.I
-  let m : Int := ctx.base.sel.m
-  let cs := ctx.base.sel.coeffs
-  (Array.range ctx.J).map fun (j : Nat) =>
-    let jI : Int := j
-    let bits := [-(I / 2), -(I / 4), 0, I / 4, I / 2 - 1].foldl (fun acc (i : Int) =>
-      let a := i * ua + jI * va
-      let b := i * ub + jI * vb
-      let nrm := if alg then (homEval cs a b).natAbs / q else (a - b * m).natAbs
-      max acc (nrm.log2 + 1)) 0
-    if bits > mfb + ctx.params.fudge then bits - mfb - ctx.params.fudge else 0
+/-- `F(a, b)` in floating point (only its logarithm is needed). -/
+def homEvalF (cs : Array Float) (a b : Float) : Float := Id.run do
+  let d := cs.size - 1
+  let mut acc := cs[d]!
+  let mut bp : Float := 1.0
+  for i' in [0:d] do
+    let i := d - 1 - i'
+    bp := bp * b
+    acc := acc * a + cs[i]! * bp
+  return acc
 
-/-- Positions where both sides reached `128`. -/
+/-- Per-row thresholds (in bits): the largest norm on the row, sampled at five
+columns, minus the cofactor allowance `2^mfb` and the slack. Norms are
+evaluated in floating point (a threshold needs only their size). -/
+def rowThresholds (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (mfb : Nat) (alg : Bool) :
+    Array Nat := Id.run do
+  let I : Float := ctx.I.toFloat
+  let m : Float := ctx.base.sel.m.toFloat
+  let y1 : Float := ctx.base.sel.y1.toFloat
+  let cs : Array Float := ctx.base.sel.coeffs.map Float.ofInt
+  let qf := q.toFloat
+  let (uaf, ubf, vaf, vbf) := (Float.ofInt ua, Float.ofInt ub, Float.ofInt va, Float.ofInt vb)
+  let cols : Array Float := #[-(I / 2.0), -(I / 4.0), 0.0, I / 4.0, I / 2.0 - 1.0]
+  let mut out : Array Nat := Array.mkEmpty ctx.J
+  for j in [0:ctx.J] do
+    let jf := j.toFloat
+    let mut best : Float := 1.0
+    for i in cols do
+      let a := i * uaf + jf * vaf
+      let b := i * ubf + jf * vbf
+      let nrm := if alg then (homEvalF cs a b).abs / qf else (y1 * a - b * m).abs
+      if nrm > best then best := nrm
+    let bits := (Float.log2 best).floor.toUInt64.toNat + 1
+    out := out.push (if bits > mfb + ctx.params.fudge then bits - mfb - ctx.params.fudge else 0)
+  return out
+
+/-- Positions where both sides reached `128` (in increasing order): blocks of
+4096 bytes and chunks of 64 are skipped unless both sides' `OR` folds
+(vectorized) have bit 7 set. -/
 def survivors (bufR bufA : ByteArray) (len : Nat) : Array Nat := Id.run do
-  let block := 4096
+  let size := min len (min bufR.size bufA.size)
+  let fold (s : ByteArray) (a b : Nat) : UInt8 := s.foldl (fun acc x => acc ||| x) 0 a b
   let mut out : Array Nat := #[]
   let mut b := 0
-  while b < len do
-    let e := min len (b + block)
-    if bufR.foldl (fun acc x => acc ||| x) 0 b e ≥ 128 then
-      for pos in [b:e] do
-        if bufR.get! pos ≥ 128 && bufA.get! pos ≥ 128 then out := out.push pos
+  while b < size do
+    let e := min size (b + 4096)
+    if fold bufR b e ≥ 128 && fold bufA b e ≥ 128 then
+      let mut c := b
+      while c < e do
+        let ce := min e (c + 64)
+        if fold bufR c ce ≥ 128 && fold bufA c ce ≥ 128 then
+          for pos in [c:ce] do
+            if bufR.get! pos ≥ 128 && bufA.get! pos ≥ 128 then out := out.push pos
+        c := ce
     b := e
   return out
 
@@ -346,7 +485,7 @@ def largePrimes (u lpb mfb : Nat) : Option (List Nat) :=
 /-- Factor one survivor exactly; small ideals are tested by lattice position,
 the others are given by the resieve lists. -/
 def factorSurvivor (ctx : LasCtx) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat)
-    (listR listA : Array Nat) (pos : Nat) : Option Rel := Id.run do
+    (listR listA : List Nat) (pos : Nat) : Option Rel := Id.run do
   let I := ctx.I
   let j := pos / I
   let c := pos % I
@@ -359,7 +498,7 @@ def factorSurvivor (ctx : LasCtx) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Arra
   let bn := b.natAbs
   let sel := ctx.base.sel
   -- rational side
-  let nr : Int := a - b * (sel.m : Int)
+  let nr : Int := sel.ratNorm a b
   if nr == 0 then return none
   let mut u := nr.natAbs
   let mut rat : List (Nat × Nat) := []
@@ -417,34 +556,42 @@ def factorSurvivor (ctx : LasCtx) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Arra
     alg := (L, r, 1) :: alg
   return some ⟨a, bn, rat, decide (nr < 0), alg⟩
 
-/-- A label buffer: zero everywhere except the survivors of the batch, which get
-`128 + k` (the sieve buffers cannot be relabelled in place: positions that
-passed on one side only also hold bytes `≥ 128`). -/
-def labelSurvivors (batch : Array Nat) (len : Nat) : ByteArray := Id.run do
-  let mut b := ByteArray.mk (Array.replicate (len + 1) 0)
-  for k in [0:batch.size] do
-    b := b.set! batch[k]! (if k < 126 then (128 + k).toUInt8 else 255)
-  return b
-
-/-- Large ideals of one side landing on labelled survivors (one resieve pass). -/
-def resieveSide (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray) (count : Nat) :
-    Array (Array Nat) := Id.run do
-  let I := ctx.I
-  let len := I * ctx.J
-  let mut acc : Array (Array Nat) := Array.replicate count #[]
+/-- Large ideals of one side landing on a marked survivor (one resieve pass):
+records `pos <<< 24 ||| k`. -/
+def resieveSide (ctx : LasCtx) (side : Side) (R : Array Nat) (lab : ByteArray) (acc : Array Nat) :
+    Array Nat := Id.run do
+  let I := ctx.I.toUInt64
+  let len := (ctx.I * ctx.J).toUSize
+  let mut acc := acc
   for k in [side.largeStart:side.primes.size] do
     let p := side.primes[k]!
     let r := R[k]!
     if r ≥ p then continue
-    match fkReduce p r I with
-    | none => continue
-    | some (x, b0, y, b1) =>
-      acc := fkResieve buf len.toUSize (I - 1).toUSize x.toUSize y.toUSize (b0 * I - x).toUSize
-        (b1 * I + y).toUSize k (I / 2).toUSize acc (2 * len / p + 4)
+    acc := fkGoR lab len I p.toUInt64 k acc p.toUInt64 0 r.toUInt64 1 128
   return acc
 
-/-- Sieve one special-`q` and return its relations. -/
-def processQ (ctx : LasCtx) (q ρ : Nat) : Array Rel := Id.run do
+/-- Records `pos <<< 24 ||| k` grouped by survivor (`survs` increasing). -/
+def groupRecords (survs : Array Nat) (recs : Array Nat) : Array (List Nat) := Id.run do
+  let mut lists : Array (List Nat) := Array.replicate survs.size []
+  for r in recs do
+    let c := SIQS.findCand survs (r >>> 24)
+    if c < survs.size then lists := lists.modify c ((r &&& 0xFFFFFF) :: ·)
+  return lists
+
+/-- Per-task buffers reused from one special-`q` to the next: the two sieve
+regions and a zero buffer that marks survivors during resieving. -/
+structure Scratch where
+  bufR : ByteArray
+  bufA : ByteArray
+  lab : ByteArray
+
+def Scratch.new (ctx : LasCtx) : Scratch :=
+  let n := ctx.I * ctx.J + 1
+  ⟨zeroBytes n, zeroBytes n, zeroBytes n⟩
+
+/-- Sieve one special-`q` and return its relations, reusing the buffers of `sc`. -/
+def processQWith (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
+  let ⟨b1, b2, lab⟩ := sc
   let (u, v) := reduceLattice q ρ ctx.skew
   let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
   let len := ctx.I * ctx.J
@@ -452,20 +599,22 @@ def processQ (ctx : LasCtx) (q ρ : Nat) : Array Rel := Id.run do
   let Ra := latticeRoots ctx.alg ua ub va vb
   let thrR := rowThresholds ctx q ua ub va vb ctx.params.mfbR false
   let thrA := rowThresholds ctx q ua ub va vb ctx.params.mfbA true
-  let bufR := sieveSide ctx ctx.rat Rr (initBuffer ctx thrR)
-  let bufA := sieveSide ctx ctx.alg Ra (initBuffer ctx thrA)
+  let bufR := sieveSide ctx ctx.rat Rr (fillRows ctx b1 thrR)
+  let bufA := sieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA)
   let surv := survivors bufR bufA len
+  if surv.isEmpty then return (#[], ⟨bufR, bufA, lab⟩)
+  let mut lab := lab
+  for pos in surv do lab := lab.set! pos 1
+  let listsR := groupRecords surv (resieveSide ctx ctx.rat Rr lab #[])
+  let listsA := groupRecords surv (resieveSide ctx ctx.alg Ra lab #[])
+  for pos in surv do lab := lab.set! pos 0
   let mut rels : Array Rel := #[]
-  let mut start := 0
-  while start < surv.size do
-    let batch := surv.extract start (start + 126)
-    let labels := labelSurvivors batch len
-    let listsR := resieveSide ctx ctx.rat Rr labels batch.size
-    let listsA := resieveSide ctx ctx.alg Ra labels batch.size
-    for k in [0:batch.size] do
-      if let some rel := factorSurvivor ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! batch[k]! then
-        rels := rels.push rel
-    start := start + 126
-  return rels
+  for k in [0:surv.size] do
+    if let some rel := factorSurvivor ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+      rels := rels.push rel
+  return (rels, ⟨bufR, bufA, lab⟩)
+
+/-- Sieve one special-`q` with fresh buffers. -/
+def processQ (ctx : LasCtx) (q ρ : Nat) : Array Rel := (processQWith ctx q ρ (Scratch.new ctx)).1
 
 end PrimeFactorLean.NFS.Las

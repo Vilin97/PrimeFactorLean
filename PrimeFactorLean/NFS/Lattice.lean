@@ -71,6 +71,17 @@ def specialQs (sel : Selection) (start count : Nat) : Array (Nat × Nat) := Id.r
       out := out.push (q, ρ)
   return out
 
+/-- Algebraic prime ideals `(q, ρ)` with `lo ≤ q < hi`, for special-`q` sieving. -/
+def specialQsIn (sel : Selection) (lo hi : Nat) : Array (Nat × Nat) := Id.run do
+  let mut out : Array (Nat × Nat) := #[]
+  let cs := sel.coeffs
+  for q in [lo:hi] do
+    if !isProbablePrime q then continue
+    if cs[cs.size - 1]! % (q : Int) == 0 then continue
+    for ρ in ModP.roots q (ModP.ofInts q cs.toList) do
+      out := out.push (q, ρ)
+  return out
+
 /-- Trial-divide the norms of a lattice point. A factor-base prime `p` with a
 nondegenerate progression divides the norm exactly when the position `k` is
 congruent to that row's start (`ratCur`/`algCur`), so most primes cost one
@@ -80,7 +91,7 @@ def verifyLattice (ctx : Ctx) (a : Int) (b : Nat) (q ρ k : Nat)
     (ratR ratCur algR algCur : Array Nat) : Option Rel := Id.run do
   if b == 0 || Nat.gcd a.natAbs b != 1 then return none
   let fb := ctx.fb
-  let v : Int := a - (b : Int) * (ctx.sel.m : Int)
+  let v : Int := ctx.sel.ratNorm a b
   if v == 0 then return none
   let bi : Int := b
   let mut u := v.natAbs
@@ -167,7 +178,7 @@ def sieveSpecialQ (ctx : Ctx) (q ρ I J skew : Nat) : Array Rel := Id.run do
       let i : Int := ((c * chunk + chunk / 2 : Nat) : Int) - (I : Int)
       let a := i * u.1 + (j : Int) * v.1
       let b := i * u.2 + (j : Int) * v.2
-      let rn := (a - b * (ctx.sel.m : Int)).natAbs
+      let rn := (ctx.sel.ratNorm a b).natAbs
       let an := (homEval ctx.sel.coeffs a b).natAbs / q
       thrR := thrR.push (threshold (rn + 1) lpBitsR ctx.fudge)
       thrA := thrA.push (threshold (an + 1) lpBitsA ctx.fudge)
@@ -207,11 +218,32 @@ def sieveSpecialQ (ctx : Ctx) (q ρ I J skew : Nat) : Array Rel := Id.run do
         algCur := algCur.set! k (if c ≥ p then c - p else c)
   return rels
 
-/-- Natural skewness of `F`: balances the leading and constant coefficients. -/
-def skewness (sel : Selection) : Nat :=
-  let d := sel.degree
-  let c0 := (sel.coeffs[0]!).natAbs
-  let cd := (sel.coeffs[d]!).natAbs
-  max 1 (iroot (c0 / max 1 cd) d)
+/-- The squared `L²` norm of `F(x s, y / s)` over the square `[-1, 1]²`:
+`Σ_{i+j even} c_i c_j s^{i+j-d} · 4 / ((i+j+1)(2d-i-j+1))`. -/
+def l2NormSq (cs : Array Float) (s : Float) : Float := Id.run do
+  let d := cs.size - 1
+  let mut acc : Float := 0
+  for i in [0:d + 1] do
+    for j in [0:d + 1] do
+      if (i + j) % 2 == 0 then
+        let k := i + j
+        acc := acc + cs[i]! * cs[j]! * Float.pow s (k.toFloat - d.toFloat) *
+          4.0 / ((k + 1).toFloat * (2 * d - k + 1).toFloat)
+  return acc
+
+/-- The skewness minimizing the `L²` norm (golden-section search on `log s`),
+as CADO-NFS's `skewness`: the sieve region is stretched by it. -/
+def skewness (sel : Selection) : Nat := Id.run do
+  let cs : Array Float := sel.coeffs.map Float.ofInt
+  let f (t : Float) : Float := l2NormSq cs (Float.exp t)
+  let mut lo : Float := 0.0
+  let mut hi : Float := 60.0
+  let phi : Float := 0.6180339887498949
+  for _ in [0:100] do
+    let a := hi - phi * (hi - lo)
+    let b := lo + phi * (hi - lo)
+    if f a < f b then hi := b else lo := a
+  let s := Float.exp ((lo + hi) / 2.0)
+  return max 1 (Float.round s).toUInt64.toNat
 
 end PrimeFactorLean.NFS

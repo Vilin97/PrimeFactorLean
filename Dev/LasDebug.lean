@@ -43,7 +43,7 @@ def fkUnit : IO Unit := do
   IO.println s!"fk tested {tested}, mismatches {bad}"
 
 /-- Sieve a few special-`q` with the lattice siever, time it and check every relation. -/
-def lasDebug (n : Nat) (count : Nat) : IO Unit := do
+def lasDebug (n : Nat) (count : Nat) (fudge : Nat := 4) (skewOverride : Nat := 0) : IO Unit := do
   let params := chooseParams (GNFS.decimalDigits n)
   let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
       (min params.ratBound params.algBound) + 1 }
@@ -53,16 +53,19 @@ def lasDebug (n : Nat) (count : Nat) : IO Unit := do
   let ctx := mkCtx n sel params
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
-      mfbA := params.mfbA }
-  let las := Las.mkLasCtx ctx lasParams
-  IO.println s!"FB rat {las.rat.primes.size} (large from {las.rat.largeStart}) alg {las.alg.primes.size} (large from {las.alg.largeStart}); I={las.I} J={las.J}"
+      mfbA := params.mfbA, fudge := fudge }
+  let las0 := Las.mkLasCtx ctx lasParams
+  let las := if skewOverride > 0 then { las0 with skew := skewOverride } else las0
+  IO.println s!"skew used {las.skew}; FB rat {las.rat.primes.size} (large from {las.rat.largeStart}) alg {las.alg.primes.size} (large from {las.alg.largeStart}); I={las.I} J={las.J}"
   let qs := specialQs sel params.qmin count
   let mut total := 0
   let mut bad := 0
   let mut badIdeal := 0
   let t0 ← IO.monoNanosNow
+  let mut sc := Las.Scratch.new las
   for (q, ρ) in qs do
-    let rels ← IO.lazyPure fun _ => Las.processQ las q ρ
+    let (rels, sc') := Las.processQWith las q ρ sc
+    sc := sc'
     total := total + rels.size
     for r in rels do
       let ratProd := r.rat.foldl (fun acc (p, e) => acc * p ^ e) 1
@@ -99,7 +102,7 @@ def lasPipeline (n : Nat) (threads : Nat) (maxRounds : Nat) : IO Unit := do
   let mut ready := false
   while !ready && round < maxRounds do
     round := round + 1
-    coll ← IO.lazyPure fun _ => GNFS.collectRoundLas las params threads coll
+    coll ← IO.lazyPure fun _ => GNFS.collectRoundLas las params threads 400 coll
     if round % 10 == 0 then
       let rels := coll.rels
       let (rows, numCols) := GNFS.buildRows ctx.fb rels

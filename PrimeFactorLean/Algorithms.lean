@@ -91,6 +91,42 @@ def powerSplitter : Splitter := fun n =>
   | some (r, _) => some ⟨r, Arith.perfectPower_proper h⟩
   | none => none
 
+/-- The divisors of `k` (by trial division up to `√k`). -/
+def divisorsOf (k : Nat) : Array Nat := Id.run do
+  let mut small : Array Nat := #[]
+  let mut large : Array Nat := #[]
+  let mut d := 1
+  while d * d ≤ k do
+    if k % d == 0 then
+      small := small.push d
+      if d * d != k then large := large.push (k / d)
+    d := d + 1
+  return small ++ large.reverse
+
+/-- Algebraic factors of numbers dividing `b^k ± 1` (as YAFU's `factor()` does):
+for small bases `b`, find the least `k` with `b^k ≡ ±1 (mod n)`; then
+`n ∣ b^{2k} - 1 = ∏_{d ∣ 2k} Φ_d(b)`, and `gcd(n, b^d - 1)` for the divisors `d`
+of `2k` split off its cyclotomic pieces. Every reported factor is a checked
+proper divisor (`checkFactor`). -/
+def algebraicSplitter : Splitter := fun n => Id.run do
+  if n < 2 ^ 64 then return none
+  for b in [2, 3, 5, 6, 7, 10, 11, 12] do
+    if n % b == 0 then continue
+    -- `k` up to about three times the exponent of `n` in base `b`
+    let kmax := 3 * (n.log2 / Nat.log2 b) + 64
+    let mut x := b % n
+    let mut k := 1
+    while k ≤ kmax do
+      if x == 1 || x == n - 1 then
+        for d in divisorsOf (2 * k) do
+          if d == 2 * k then continue
+          let g := Nat.gcd n ((Arith.powMod b d n + n - 1) % n)
+          if 1 < g && g < n then return checkFactor n g
+        break
+      x := x * b % n
+      k := k + 1
+  return none
+
 /-- `(B1, curves)` of the automatic ECM pretest: GMP-ECM's t-levels (factors
 of 15, 20, …, 40 digits) up to a target of `4/13` of the digits of `n` (the
 default of YAFU's `factor()`); the level containing the target is run in
@@ -125,6 +161,7 @@ def autoSplitter (cfg : Config) : Splitter := fun n =>
   if n < 4 then none else
   (smallSplitter 4096 n).orElse fun _ =>
   (powerSplitter n).orElse fun _ =>
+  (algebraicSplitter n).orElse fun _ =>
   (if n < 2 ^ 62 then SQUFOF.split n else none).orElse fun _ =>
   (RhoF.split n 8000 1).orElse fun _ =>
   -- `p - 1` pays off only once the quadratic sieve is slow (from about 45 digits)

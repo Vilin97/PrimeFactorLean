@@ -57,6 +57,10 @@ structure Params where
   mfbR : Nat := 0
   mfbA : Nat := 0
   qmin : Nat := 0
+  /-- Threshold slack of the lattice siever, in bits. -/
+  lasFudge : Nat := 12
+  /-- Target average row weight of the merged matrix. -/
+  mergeDensity : Nat := 100
   deriving Repr, Inhabited
 
 /-- `(digits, params)`: line sieving for small inputs, special-`q` lattice
@@ -109,7 +113,21 @@ structure Selection where
   /-- `c_0, …, c_d` with `c_d > 0`. -/
   coeffs : Array Int
   m : Nat
+  /-- The rational polynomial is `Y₁ x - m` (`Y₁ = 1` for base-`m` polynomials;
+  Kleinjung's polynomials have `F(m / Y₁) Y₁^d = ± n`). -/
+  y1 : Nat := 1
   deriving Repr, Inhabited
+
+/-- The rational norm `Y₁ a - m b`. -/
+@[inline] def Selection.ratNorm (sel : Selection) (a b : Int) : Int :=
+  (sel.y1 : Int) * a - (sel.m : Int) * b
+
+/-- The root of `Y₁ x - m` modulo the prime `p` (`p` itself when projective, `p ∣ Y₁`). -/
+def Selection.ratRoot (sel : Selection) (p : Nat) : Nat :=
+  if sel.y1 % p == 0 then p
+  else match Arith.invMod (sel.y1 % p) p with
+    | some inv => sel.m % p * inv % p
+    | none => p
 
 def Selection.degree (s : Selection) : Nat := s.coeffs.size - 1
 
@@ -161,7 +179,7 @@ def regionScore (sel : Selection) (A lines : Nat) : Float := Id.run do
       let a : Int := ((2 * i * A / 9 : Nat) : Int) - (A : Int) + 1
       let b : Int := ((j * lines / 5 : Nat) + 1 : Nat)
       let alg := (homEval sel.coeffs a b).natAbs
-      let rat := (a - b * (sel.m : Int)).natAbs
+      let rat := (sel.ratNorm a b).natAbs
       total := total + Float.log2 (alg.toFloat + 1.0) + Float.log2 (rat.toFloat + 1.0)
       count := count + 1
   return total / count
@@ -175,7 +193,7 @@ def selectPolynomial (n d tries : Nat) (A lines : Nat) : Option Selection := Id.
     let m := iroot (n / lead) d
     if m < 2 then none else
     let cs := baseM n m d
-    if cs[d]! ≤ 0 || homEval cs m 1 != (n : Int) then none else some ⟨cs, m⟩
+    if cs[d]! ≤ 0 || homEval cs m 1 != (n : Int) then none else some { coeffs := cs, m := m }
   let cap := 4 * iroot n (d + 1) + 2
   let mut scored : Array (Float × Selection) := #[]
   let mut lead := 1
@@ -250,7 +268,7 @@ def buildFactorBase (sel : Selection) (params : Params) (lpA : Nat) : FactorBase
   for p in primes do
     if p ≤ params.ratBound then
       ratPrimes := ratPrimes.push p
-      ratRoots := ratRoots.push (sel.m % p)
+      ratRoots := ratRoots.push (sel.ratRoot p)
       ratLogs := ratLogs.push (logByte p)
     if p ≤ params.algBound then
       let f := ModP.ofInts p cs.toList
@@ -332,13 +350,14 @@ def verify (ctx : Ctx) (b j : Nat) : Option Rel := Id.run do
   if Nat.gcd a.natAbs b != 1 then return none
   let fb := ctx.fb
   -- Rational side.
-  let v : Int := a - (b : Int) * (ctx.sel.m : Int)
+  let v : Int := ctx.sel.ratNorm a b
   if v == 0 then return none
   let mut u := v.natAbs
   let mut rat : List (Nat × Nat) := []
   for i in [0:fb.ratPrimes.size] do
     let p := fb.ratPrimes[i]!
-    if j % p == (b % p * fb.ratRoots[i]! + ctx.A) % p then
+    let rr := fb.ratRoots[i]!
+    if (if rr == p then b % p == 0 else j % p == (b % p * rr + ctx.A) % p) then
       let (u', e) := stripPrime u p
       if e > 0 then
         u := u'

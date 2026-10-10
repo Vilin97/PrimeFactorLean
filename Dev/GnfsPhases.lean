@@ -1,0 +1,78 @@
+import PrimeFactorLean.GNFS
+import PrimeFactorLean.Merge
+
+/-! Timed replica of `GNFS.splitCore` (lattice-sieve path). -/
+
+open PrimeFactorLean PrimeFactorLean.NFS PrimeFactorLean.GNFS
+
+def ms (a b : Nat) : Nat := (b - a) / 1000000
+
+def gnfsPhases (n threads : Nat) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let params0 := chooseParams (decimalDigits n)
+  let params := { params0 with lpMult := 2 ^ (max params0.lpbR params0.lpbA) /
+      (min params0.ratBound params0.algBound) + 1 }
+  let some sel ← IO.lazyPure fun _ => selectPolynomial n params.degree params.polyTries
+    params.halfWidth params.expectedLines | IO.println "no poly"
+  let t1 ← IO.monoNanosNow
+  let some st := mkSetup n sel | IO.println "no setup"
+  let ctx ← IO.lazyPure fun _ => mkCtx n sel params
+  let some p := inertPrime st.g 1000003 | IO.println "no inert prime"
+  let t2 ← IO.monoNanosNow
+  IO.println s!"poly {sel.coeffs} skew {skewness sel}: select {ms t0 t1} ms, setup/fb {ms t1 t2} ms (rat {ctx.fb.ratPrimes.size} alg {ctx.fb.algPrimes.size})"
+  let lasParams : Las.LasParams :=
+    { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
+      mfbA := params.mfbA, fudge := params.lasFudge }
+  let las := Las.mkLasCtx ctx lasParams
+  let mut coll : Collection := {}
+  let mut rows := Rows.empty ctx.fb
+  let mut width := 200
+  let mut lastCheck := 0
+  let mut ready := false
+  let mut round := 0
+  let mut tSieve := 0
+  let mut tCheck := 0
+  let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
+  while !ready && round < 3000 do
+    round := round + 1
+    let a ← IO.monoNanosNow
+    let before := coll.rels.size
+    coll ← IO.lazyPure fun _ => collectRoundLas las params threads width coll
+    let b ← IO.monoNanosNow
+    for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
+    if coll.rels.size ≥ base && coll.rels.size * 10 ≥ lastCheck * 11 then
+      lastCheck := coll.rels.size
+      ready ← IO.lazyPure fun _ => rowsReady rows (2 + ctx.fb.chars.size) params.extra
+    let c ← IO.monoNanosNow
+    tSieve := tSieve + (b - a)
+    tCheck := tCheck + (c - b)
+    let gained := coll.rels.size - before
+    if gained > 0 then
+      let want := (base + base / 2 - min (base + base / 2) coll.rels.size) / 5
+      width := max 100 (min 20000 (width * max 1 want / gained))
+  let t3 ← IO.monoNanosNow
+  IO.println s!"rounds {round}, q up to {coll.nextQ}, relations {coll.rels.size}: sieve {tSieve / 1000000} ms, rows+checks {tCheck / 1000000} ms"
+  let rels := coll.rels
+  let numCols := rows.next
+  let matRows ← IO.lazyPure fun _ => (Array.range rels.size).map fun k => fullRow ctx.fb rels[k]! rows.sparse[k]!
+  let t4 ← IO.monoNanosNow
+  let kept := GF2.removeSingletons numCols matRows
+  let t5 ← IO.monoNanosNow
+  let (mrows, hist, mcols) ← IO.lazyPure fun _ => Merge.merge numCols (2 + ctx.fb.chars.size)
+    (kept.map fun i => matRows[i]!) params.mergeDensity 32
+  let t5b ← IO.monoNanosNow
+  let mdeps ← IO.lazyPure fun _ => Lanczos.dependencies mcols mrows 64 threads
+  let deps := (Merge.unmerge kept.size hist mdeps).map fun dep => dep.map fun i => kept[i]!
+  let t6 ← IO.monoNanosNow
+  let wt := mrows.foldl (fun a r => a + r.size) 0
+  IO.println s!"full rows {ms t3 t4} ms, singletons {ms t4 t5} ms (kept {kept.size}), merge {ms t5 t5b} ms -> {mrows.size} x {mcols} (weight {wt / max 1 mrows.size}/row), Lanczos {ms t5b t6} ms ({deps.size} deps)"
+  let mut tried := 0
+  for dep in deps do
+    tried := tried + 1
+    let a ← IO.monoNanosNow
+    let r ← IO.lazyPure fun _ => (congruence st (dep.toList.map fun i => rels[i]!) p).bind (·.factor)
+    let b ← IO.monoNanosNow
+    IO.println s!"dep {tried} ({dep.size} rels): sqrt {ms a b} ms -> {r.map (·.val)}"
+    if r.isSome then break
+  let t7 ← IO.monoNanosNow
+  IO.println s!"total {ms t0 t7} ms"
