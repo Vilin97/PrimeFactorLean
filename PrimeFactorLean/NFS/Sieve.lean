@@ -49,6 +49,14 @@ structure Params where
   latticeJ : Nat := 256
   /-- Special-`q` ideals per task and round. -/
   qPerTask : Nat := 4
+  /-- Franke–Kleinjung lattice siever (`NFS.Las`): `log₂ I` (`0` selects the
+  older sievers), large-prime and cofactor bits per side, first special-`q`. -/
+  lasLogI : Nat := 0
+  lpbR : Nat := 0
+  lpbA : Nat := 0
+  mfbR : Nat := 0
+  mfbA : Nat := 0
+  qmin : Nat := 0
   deriving Repr, Inhabited
 
 /-- `(digits, params)`: line sieving for small inputs, special-`q` lattice
@@ -70,12 +78,26 @@ def paramTable : List (Nat × Params) :=
           latticeI := 4096, latticeJ := 256, qPerTask := 4 }),
    (55, { degree := 4, ratBound := 90000, algBound := 90000, halfWidth := 262144, lpMult := 60,
           latticeI := 4096, latticeJ := 512, qPerTask := 2 }),
-   (60, { degree := 4, ratBound := 120000, algBound := 120000, halfWidth := 262144,
-          lpMult := 60, latticeI := 4096, latticeJ := 1024, qPerTask := 2 }),
-   (65, { degree := 4, ratBound := 150000, algBound := 150000, halfWidth := 262144,
-          lpMult := 70, latticeI := 4096, latticeJ := 1024, qPerTask := 2 }),
-   (70, { degree := 5, ratBound := 250000, algBound := 250000, halfWidth := 524288,
-          lpMult := 80, latticeI := 8192, latticeJ := 1024, qPerTask := 2 })]
+   -- From 60 digits: the Franke–Kleinjung siever (`NFS.Las`) with CADO-NFS-like
+   -- bounds: factor bases, large-prime bits `lpb` and cofactor bits `mfb`.
+   (60, { degree := 4, ratBound := 80000, algBound := 110000, halfWidth := 262144,
+          lasLogI := 10, lpbR := 18, lpbA := 19, mfbR := 18, mfbA := 38, qmin := 62000,
+          qPerTask := 4 }),
+   (65, { degree := 4, ratBound := 160000, algBound := 160000, halfWidth := 262144,
+          lasLogI := 10, lpbR := 19, lpbA := 20, mfbR := 19, mfbA := 40, qmin := 80000,
+          qPerTask := 4 }),
+   (70, { degree := 4, ratBound := 340000, algBound := 245000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 20, lpbA := 21, mfbR := 20, mfbA := 42, qmin := 100000,
+          qPerTask := 2 }),
+   (80, { degree := 4, ratBound := 293000, algBound := 340000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 21, lpbA := 21, mfbR := 41, mfbA := 42, qmin := 66600,
+          qPerTask := 2 }),
+   (90, { degree := 4, ratBound := 404000, algBound := 811000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 23, lpbA := 23, mfbR := 46, mfbA := 46, qmin := 200000,
+          qPerTask := 2 }),
+   (100, { degree := 5, ratBound := 650000, algBound := 800000, halfWidth := 262144,
+           lasLogI := 11, lpbR := 25, lpbA := 26, mfbR := 48, mfbA := 51, qmin := 180000,
+           qPerTask := 2 })]
 
 def chooseParams (digits : Nat) : Params :=
   ((paramTable.find? fun e => digits ≤ e.1).map Prod.snd).getD

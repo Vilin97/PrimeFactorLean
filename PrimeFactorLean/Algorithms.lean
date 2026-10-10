@@ -4,6 +4,7 @@ import PrimeFactorLean.Search
 import PrimeFactorLean.ECM
 import PrimeFactorLean.ECMMontgomery
 import PrimeFactorLean.QS
+import PrimeFactorLean.SIQS
 import PrimeFactorLean.GNFS
 import PrimeFactorLean.SQUFOF
 import PrimeFactorLean.CFRAC
@@ -87,13 +88,21 @@ def powerSplitter : Splitter := fun n =>
   | some (r, _) => some ⟨r, Arith.perfectPower_proper h⟩
   | none => none
 
-/-- `(B1, curves)` for an automatic ECM schedule, by size of `n` in digits. -/
+/-- `(B1, curves)` of the automatic ECM pretest: GMP-ECM's t-levels (factors
+of 15, 20, …, 40 digits) up to a target of `4/13` of the digits of `n` (the
+default of YAFU's `factor()`); the level containing the target is run in
+proportion. -/
 def ecmSchedule (digits : Nat) : List (Nat × Nat) :=
-  if digits ≤ 30 then [(2000, 8)]
-  else if digits ≤ 45 then [(2000, 16), (11000, 32)]
-  else if digits ≤ 60 then [(2000, 25), (11000, 90), (50000, 100)]
-  else if digits ≤ 80 then [(2000, 25), (11000, 90), (50000, 300), (250000, 200)]
-  else [(2000, 25), (11000, 90), (50000, 300), (250000, 700), (1000000, 500)]
+  let levels : List (Nat × Nat × Nat) :=
+    [(15, 2000, 25), (20, 11000, 90), (25, 50000, 300), (30, 250000, 700),
+     (35, 1000000, 1800), (40, 3000000, 5100)]
+  -- target in tenths of a digit
+  let target := 40 * digits / 13
+  levels.filterMap fun (t, b1, curves) =>
+    let lo := 10 * t - 50
+    if target ≤ lo then none
+    else if target ≥ 10 * t then some (b1, curves)
+    else some (b1, max 1 (curves * (target - lo) / 50))
 
 /-- The full GMP-ECM schedule, levels for factors of 15, 20, …, 40 digits, up to
 factors of about half the size of `n` (standalone ECM). -/
@@ -118,7 +127,7 @@ def autoSplitter (cfg : Config) : Splitter := fun n =>
     (fun _ _ h => Search.brent_sound h) n).orElse fun _ =>
   (PMinusOne.splitPMinusOne n 20000).orElse fun _ =>
   (ecmLevels cfg.threads (ecmSchedule (QS.decimalDigits n)) n).orElse fun _ =>
-  QS.split n { variant := .siqs, threads := cfg.threads }
+  SIQS.split n { threads := cfg.threads }
 
 /-- The proof-carrying splitter of each algorithm. -/
 def splitter (algorithm : Algorithm) (cfg : Config := {}) : Splitter :=
@@ -141,7 +150,7 @@ def splitter (algorithm : Algorithm) (cfg : Config := {}) : Splitter :=
   | .cfrac => fun n => CFRAC.split n
   | .qs => fun n => QS.split n { variant := .qs, threads := cfg.threads }
   | .mpqs => fun n => QS.split n { variant := .mpqs, threads := cfg.threads }
-  | .siqs => fun n => QS.split n { variant := .siqs, threads := cfg.threads }
+  | .siqs => fun n => SIQS.split n { threads := cfg.threads }
   | .gnfs => fun n => GNFS.split n { threads := cfg.threads }
   | .auto => autoSplitter cfg
 

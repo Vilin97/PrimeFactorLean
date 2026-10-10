@@ -78,6 +78,17 @@ def import_closure(module):
     return seen, external
 
 
+# Lean 4.24's compiler rewrites `0 - x` to `x` (for `Nat` and fixed-width integers);
+# executed code must not contain the pattern (write `-x` for fixed-width negation).
+ZERO_SUB = re.compile(r'(?<![\w.])0\s*-\s*[A-Za-z(]')
+for path in sorted((ROOT / 'PrimeFactorLean').rglob('*.lean')):
+    if 'Proofs' in path.parts:
+        continue
+    for lineno, line in enumerate(uncomment(path.read_text()).splitlines(), 1):
+        if ZERO_SUB.search(line):
+            raise SystemExit(f'{path}:{lineno}: `0 - x` is miscompiled by Lean 4.24: {line.strip()}')
+print('PASS no `0 - x` in runtime code (miscompiled by Lean 4.24).')
+
 # The factoring executable must not load mathlib or the Lean frontend: its import
 # closure may use only Lean's core library (`Init`) and `Std` containers.
 for exe in ['Main', 'Dev.Main']:

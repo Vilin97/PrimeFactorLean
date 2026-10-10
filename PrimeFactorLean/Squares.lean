@@ -241,11 +241,71 @@ def Relation.absorb {n : Nat} {fb : Array Nat} (r : Relation n fb) (s : Nat)
     push_cast
     grind
 
-/-- Multiply a nonempty list of relations. -/
+/-- Merge two exponent lists sorted by index, adding the exponents of equal
+indices (tail recursive; the accumulator is reversed at the end). The product
+it represents is the product of the two inputs whether or not they are sorted. -/
+def mergeAddAux : List (Nat × Nat) → List (Nat × Nat) → List (Nat × Nat) → List (Nat × Nat)
+  | [], b, acc => acc.reverseAux b
+  | x :: xs, [], acc => acc.reverseAux (x :: xs)
+  | x :: xs, y :: ys, acc =>
+    if x.1 < y.1 then mergeAddAux xs (y :: ys) (x :: acc)
+    else if y.1 < x.1 then mergeAddAux (x :: xs) ys (y :: acc)
+    else mergeAddAux xs ys ((x.1, x.2 + y.2) :: acc)
+termination_by a b _ => a.length + b.length
+
+def mergeAdd (a b : List (Nat × Nat)) : List (Nat × Nat) := mergeAddAux a b []
+
+theorem evalExps_reverseAux (fb : Array Nat) (acc b : List (Nat × Nat)) :
+    evalExps fb (acc.reverseAux b) = evalExps fb acc * evalExps fb b := by
+  rw [List.reverseAux_eq, evalExps_append, evalExps_perm fb (List.reverse_perm acc)]
+
+theorem evalExps_mergeAddAux (fb : Array Nat) (a b acc : List (Nat × Nat)) :
+    evalExps fb (mergeAddAux a b acc) = evalExps fb acc * evalExps fb a * evalExps fb b := by
+  fun_induction mergeAddAux a b acc with
+  | case1 b acc => rw [evalExps_reverseAux]; simp
+  | case2 x xs acc => rw [evalExps_reverseAux]; simp
+  | case3 x xs y ys acc h ih => rw [ih]; simp only [evalExps_cons]; grind
+  | case4 x xs y ys acc h1 h2 ih => rw [ih]; simp only [evalExps_cons]; grind
+  | case5 x xs y ys acc h1 h2 ih =>
+    rw [ih]
+    have he : y.1 = x.1 := by omega
+    simp only [evalExps_cons, he, Int.pow_add]
+    grind
+
+theorem evalExps_mergeAdd (fb : Array Nat) (a b : List (Nat × Nat)) :
+    evalExps fb (mergeAdd a b) = evalExps fb a * evalExps fb b := by
+  rw [mergeAdd, evalExps_mergeAddAux]; simp
+
+/-- The product of two relations, merging their (sorted) exponent lists so that
+products of many relations stay as short as the number of distinct primes. -/
+def Relation.mulMerge {n : Nat} {fb : Array Nat} (r s : Relation n fb) : Relation n fb where
+  x := r.x * s.x % n
+  sq := r.sq * s.sq % n
+  large := r.large * s.large
+  neg := r.neg != s.neg
+  exps := mergeAdd r.exps s.exps
+  valid := by
+    have h := (r.mul s).valid
+    simp only [Relation.mul, rhs] at h ⊢
+    rw [evalExps_mergeAdd, ← evalExps_append]
+    exact h
+
+/-- Balanced product tree of a nonempty array of relations (merging exponents),
+in `O(total · log)` time. -/
+def Relation.prodTree {n : Nat} {fb : Array Nat} (rs : Array (Relation n fb)) (lo hi : Nat) :
+    Relation n fb :=
+  if h : hi ≤ lo + 1 then rs[lo]!
+  else
+    let mid := (lo + hi) / 2
+    (Relation.prodTree rs lo mid).mulMerge (Relation.prodTree rs mid hi)
+termination_by hi - lo
+
+/-- Multiply a nonempty list of relations. Each new (short) relation is
+multiplied on the left, so the exponent lists are appended in linear time. -/
 def Relation.prod {n : Nat} {fb : Array Nat} (r : Relation n fb) :
     List (Relation n fb) → Relation n fb
   | [] => r
-  | s :: rest => (r.mul s).prod rest
+  | s :: rest => (s.mul r).prod rest
 
 /-! ## Congruences of squares -/
 

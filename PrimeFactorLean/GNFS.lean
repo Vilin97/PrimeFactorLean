@@ -2,6 +2,7 @@ import Std.Data.HashMap
 import Std.Data.HashSet
 import PrimeFactorLean.NFS.Sieve
 import PrimeFactorLean.NFS.Lattice
+import PrimeFactorLean.NFS.Las
 import PrimeFactorLean.NFS.Sqrt
 import PrimeFactorLean.Squares
 import PrimeFactorLean.GF2
@@ -272,6 +273,30 @@ def collectRound (ctx : Ctx) (params : Params) (threads : Nat) (st : Collection)
         rels := rels.push rel
   return { st with rels := rels, seen := seen }
 
+/-- One parallel round of Franke–Kleinjung lattice sieving: `threads · qPerTask`
+special-`q` ideals from `st.nextQ` on. -/
+def collectRoundLas (las : Las.LasCtx) (params : Params) (threads : Nat) (st : Collection) :
+    Collection := Id.run do
+  let qs := specialQs las.base.sel (max st.nextQ params.qmin) (threads * params.qPerTask)
+  let tasks := (List.range threads).map fun t =>
+    Task.spawn fun _ => Id.run do
+      let mut out : Array Rel := #[]
+      for k in [t * params.qPerTask:(t + 1) * params.qPerTask] do
+        if h : k < qs.size then
+          let (q, ρ) := qs[k]
+          out := out ++ Las.processQ las q ρ
+      return out
+  let batches := tasks.map Task.get
+  let nextQ := (qs.back?.map (·.1)).getD st.nextQ
+  let mut rels := st.rels
+  let mut seen := st.seen
+  for batch in batches do
+    for rel in batch do
+      if !seen.contains (rel.a, rel.b) then
+        seen := seen.insert (rel.a, rel.b)
+        rels := rels.push rel
+  return { rels := rels, seen := seen, nextB := st.nextB, nextQ := nextQ }
+
 /-- Whether the matrix has enough excess after singleton removal. -/
 def matrixReady (ctx : Ctx) (params : Params) (rels : Array Rel) : Bool :=
   let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
@@ -284,6 +309,12 @@ def matrixReady (ctx : Ctx) (params : Params) (rels : Array Rel) : Bool :=
 /-- Sieve until the matrix has a healthy excess of relations, then try dependencies. -/
 def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run do
   let params := cfg.params.getD (chooseParams (decimalDigits n))
+  -- with the lattice siever, large primes reach `2^lpb`: the quadratic
+  -- characters (chosen above `lpMult · bound`) must lie above them
+  let params := if params.lasLogI > 0 then
+      { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+          (min params.ratBound params.algBound) + 1 }
+    else params
   let some sel := selectPolynomial n params.degree params.polyTries params.halfWidth
     params.expectedLines | return none
   let some st := mkSetup n sel | return none
@@ -299,16 +330,22 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run
   -- The readiness test rebuilds the matrix (single-threaded), so it runs only
   -- after the relation count has grown by a tenth since the previous test.
   let mut lastCheck := 0
+  let lasParams : Las.LasParams :=
+    { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
+      mfbA := params.mfbA }
+  let las := Las.mkLasCtx ctx lasParams
   while !ready && round < cfg.maxRounds do
     round := round + 1
-    coll := collectRound ctx params threads coll
+    coll := if params.lasLogI > 0 then collectRoundLas las params threads coll
+      else collectRound ctx params threads coll
     if coll.rels.size * 10 ≥ lastCheck * 11 then
       lastCheck := coll.rels.size
       ready := matrixReady ctx params coll.rels
   if !ready then return none
   let rels := coll.rels
   let (rows, numCols) := buildRows ctx.fb rels
-  let deps := GF2.dependencies numCols rows 64
+  let deps := Lanczos.dependencies numCols rows 64 threads
+  let deps := if deps.isEmpty then GF2.dependencies numCols rows 64 else deps
   for dep in deps do
     match congruence st (dep.toList.map fun i => rels[i]!) p with
     | none => continue

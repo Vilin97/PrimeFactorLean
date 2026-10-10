@@ -6,6 +6,7 @@ import PrimeFactorLean
 #print axioms PrimeFactorLean.factor_total_correct
 #print axioms PrimeFactorLean.factorSigned_total_correct
 #print axioms PrimeFactorLean.Pocklington.pocklington
+#print axioms PrimeFactorLean.Pocklington.pocklington_cube
 #print axioms PrimeFactorLean.Squares.Relation.toSquares
 #print axioms PrimeFactorLean.Squares.SquareCongruence.factor_isSome
 #print axioms PrimeFactorLean.GNFS.nfs_square
@@ -34,6 +35,7 @@ run_cmd do
     ``PrimeFactorLean.Arith.smallPrime_sound,
     ``PrimeFactorLean.Pocklington.prime_pow_dvd_sub_one,
     ``PrimeFactorLean.Pocklington.pocklington,
+    ``PrimeFactorLean.Pocklington.pocklington_cube,
     ``PrimeFactorLean.Pocklington.Step.check_sound,
     ``PrimeFactorLean.Pocklington.Certificate.check_sound,
     ``PrimeFactorLean.Pocklington.generate_sound,
@@ -124,3 +126,13 @@ example : factorInt trialSplitter 0 = none := by decide
       if fs.prod != n || !(fs.all fun p => decide (Nat.Prime p)) then
         throw (IO.userError s!"invalid prime factorization at {n}")
   IO.println "Core audit: trial and 6-wheel agree and factor all inputs 0..10000; signed edge cases pass."
+
+/- Regression guard for a Lean 4.24 compiler bug: `0 - x` is compiled to `x`
+(for `Nat` and fixed-width integers alike). Runtime code avoids the pattern
+(`scripts/audit_sources.py` rejects it); this records the behavior. -/
+@[noinline] def zeroSubProbe (x : Nat) : Nat := 0 - x
+@[noinline] def negProbe (x : UInt32) : UInt32 := -x
+#eval do
+  if negProbe 1 != 4294967295 then throw (IO.userError "UInt32 negation miscompiled")
+  if zeroSubProbe 5 != 0 then
+    IO.println "note: this Lean compiler rewrites `0 - x` to `x` (known bug); runtime code avoids it"

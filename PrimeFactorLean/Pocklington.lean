@@ -53,13 +53,31 @@ def smallBound : Nat := 2 ^ 32
 def knownPrime (known : List Nat) (q : Nat) : Bool :=
   known.contains q || (decide (q < smallBound) && smallPrime q)
 
-/-- The executable acceptance test for one step. -/
+/-- `s² - 4p` is a nonnegative perfect square, i.e. `t² - s t + p` has
+integer roots. -/
+def squareDiscriminant (s p : Nat) : Bool :=
+  4 * p ≤ s * s && isqrt (s * s - 4 * p) * isqrt (s * s - 4 * p) == s * s - 4 * p
+
+/-- The Brillhart–Lehmer–Selfridge test for `F³ > N` (BLS 1975, Theorem 5):
+with `N - 1 = F R` and `R = c₁ F + c₂`, a composite `N` all of whose prime
+factors are `≡ 1 (mod F)` would be `(aF + 1)(bF + 1)` with `(a + b, ab)` equal
+to `(c₂, c₁)` or `(c₂ + F, c₁ - 1)`; both quadratics must then have integer
+roots. The test passes when neither does. -/
+def cubeTest (N F : Nat) : Bool :=
+  let R := (N - 1) / F
+  let c₁ := R / F
+  let c₂ := R % F
+  !squareDiscriminant c₂ c₁ && (c₁ == 0 || !squareDiscriminant (c₂ + F) (c₁ - 1))
+
+/-- The executable acceptance test for one step: Pocklington (`F² > N`) or
+Brillhart–Lehmer–Selfridge (`F³ > N` and `cubeTest`). -/
 def Step.check (s : Step) (known : List Nat) : Bool :=
   decide (2 ≤ s.n) &&
   decide ((s.witnesses.map Prod.fst).Nodup) &&
   s.witnesses.all (fun t =>
     knownPrime known t.1 && (s.n - 1) % (t.1 ^ t.2.1) == 0 && witnessOK s.n t.1 t.2.2) &&
-  decide (s.n < factoredPart s.witnesses ^ 2)
+  (decide (s.n < factoredPart s.witnesses ^ 2) ||
+    (decide (s.n < factoredPart s.witnesses ^ 3) && cubeTest s.n (factoredPart s.witnesses)))
 
 /-- Verify a dependency-ordered list of steps; the result lists proved primes. -/
 def verifySteps : List Step → List Nat → Option (List Nat)
@@ -95,10 +113,11 @@ def stripFactor (m q : Nat) : Nat × Nat := Id.run do
 def findWitness (n q : Nat) (bound : Nat := 200) : Option Nat :=
   (List.range bound).find? (fun i => witnessOK n q (i + 2)) |>.map (· + 2)
 
-/-- Partially factor `m = n - 1` until the factored part exceeds `√n`.
+/-- Partially factor `m = n - 1` until the factored part `F` has `F^k > n`
+(`k = 3` for the Brillhart–Lehmer–Selfridge test, `k = 2` for Pocklington).
 Returns prime candidates with multiplicities (unproved; the checker decides). -/
 def partialFactor (split : Nat → Option Nat) (smallPrimes : Array Nat)
-    (n : Nat) : Option (List (Nat × Nat)) := Id.run do
+    (n : Nat) (k : Nat := 2) : Option (List (Nat × Nat)) := Id.run do
   let mut m := n - 1
   let mut found : List (Nat × Nat) := []
   let mut part := 1
@@ -109,10 +128,10 @@ def partialFactor (split : Nat → Option Nat) (smallPrimes : Array Nat)
       found := (p, e) :: found
       part := part * p ^ e
     if m == 1 then break
-  -- Peel larger prime factors from the cofactor until F² > n.
+  -- Peel larger prime factors from the cofactor until F^k > n.
   let mut work : List Nat := if m > 1 then [m] else []
   let mut fuel := 64
-  while part * part ≤ n && !work.isEmpty && fuel > 0 do
+  while part ^ k ≤ n && !work.isEmpty && fuel > 0 do
     fuel := fuel - 1
     match work with
     | [] => break
@@ -135,7 +154,7 @@ def partialFactor (split : Nat → Option Nat) (smallPrimes : Array Nat)
             work := a :: b :: work
           else continue
         | none => continue
-  if part * part > n then return some found else return none
+  if part ^ k > n then return some found else return none
 
 /-- Recursively build dependency-ordered Pocklington steps for `n`. -/
 def generateSteps (split : Nat → Option Nat) (smallPrimes : Array Nat) :
@@ -146,24 +165,29 @@ def generateSteps (split : Nat → Option Nat) (smallPrimes : Array Nat) :
       if smallPrime n then some [] else none
     else if !isProbablePrime n then none
     else do
-      let found ← partialFactor split smallPrimes n
-      -- Use the fewest large primes: sort by size and keep a prefix reaching √n.
-      let sorted := found.mergeSort (fun a b => a.1 ≤ b.1)
-      let mut chosen : List (Nat × Nat) := []
-      let mut part := 1
-      for (q, e) in sorted do
-        if part * part > n then break
-        chosen := (q, e) :: chosen
-        part := part * q ^ e
-      let mut steps : List Step := []
-      let mut witnesses : List (Nat × Nat × Nat) := []
-      for (q, e) in chosen.reverse do
-        if q ≥ smallBound then
-          let sub ← generateSteps split smallPrimes fuel q
-          steps := steps ++ sub
-        let a ← findWitness n q
-        witnesses := witnesses ++ [(q, e, a)]
-      return steps ++ [⟨n, witnesses⟩]
+      -- Prefer the cube-root test (less of `n - 1` to factor); fall back to
+      -- the square-root test if its quadratic check happens to fail.
+      let attempt (k : Nat) : Option (List Step) := do
+        let found ← partialFactor split smallPrimes n k
+        -- Use the fewest large primes: sort by size and keep a prefix reaching n^{1/k}.
+        let sorted := found.mergeSort (fun a b => a.1 ≤ b.1)
+        let mut chosen : List (Nat × Nat) := []
+        let mut part := 1
+        for (q, e) in sorted do
+          if part ^ k > n then break
+          chosen := (q, e) :: chosen
+          part := part * q ^ e
+        if k == 3 && part ^ 2 ≤ n && !cubeTest n part then none
+        let mut steps : List Step := []
+        let mut witnesses : List (Nat × Nat × Nat) := []
+        for (q, e) in chosen.reverse do
+          if q ≥ smallBound then
+            let sub ← generateSteps split smallPrimes fuel q
+            steps := steps ++ sub
+          let a ← findWitness n q
+          witnesses := witnesses ++ [(q, e, a)]
+        return steps ++ [⟨n, witnesses⟩]
+      (attempt 3).orElse fun _ => attempt 2
 
 /-- Package steps as a certificate for `n`, accepting it only if it checks. -/
 def checked (n : Nat) (steps : List Step) : Option Certificate :=

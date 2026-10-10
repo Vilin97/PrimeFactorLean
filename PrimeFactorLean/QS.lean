@@ -658,8 +658,9 @@ def combineCycle {n : Nat} {fb : Array Nat} (edges : Array (Found n fb)) (ids : 
   let s := vertices.fold (fun acc v => acc * v) 1
   match rels with
   | [] => return none
-  | r :: rest =>
-    let R := r.prod rest
+  | _ :: _ =>
+    let rs := rels.toArray
+    let R := Relation.prodTree rs 0 rs.size
     if h : R.large = s * s then return some (R.absorb s h) else return none
 
 /-- Collect relations on `threads` parallel tasks until `needed` full relations
