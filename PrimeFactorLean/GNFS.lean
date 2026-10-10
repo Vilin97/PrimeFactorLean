@@ -431,7 +431,9 @@ def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (
       let mut sc := sc0
       for k in [0:(qs.size + T - 1 - t) / T] do
         let (q, ρ) := qs[t + k * T]!
-        let (rels, sc') := Las.processQWith las q ρ sc
+        let (rels, sc') := if las.params.variant == 0 then Las.processQWith las q ρ sc
+          else if las.params.variant == 11 then Las.processQ11 las q ρ sc
+          else Las.processQ10 las las.params.gapSlack q ρ sc
         sc := sc'
         out := out ++ rels
       return (out, sc)

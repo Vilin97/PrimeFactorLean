@@ -1,3 +1,4 @@
+import PrimeFactorLean.Pool
 import PrimeFactorLean.QS
 import PrimeFactorLean.SIQS
 import PrimeFactorLean.ECMMontgomery
@@ -22,6 +23,7 @@ def timed (label : String) (f : Unit → Option Nat) : IO Unit := do
   IO.println s!"{label} -> {r} in {(t1 - t0) / 1000000} ms"
 
 def main (args : List String) : IO Unit := do
+  warmPool 32
   match args with
   | ["micro"] => microMain
   | ["fasttune", ns, fbs, m, lp, dlp, spv, slack, rounds, ts] =>
@@ -97,6 +99,15 @@ def main (args : List String) : IO Unit := do
   | ["cofactor"] => cofactorBench (70000000 + args.length - 1)
   | ["rb"] => rbMain
   | ["fkunit"] => fkUnit
+  | "lasfile" :: path :: q0 :: cnt :: out :: kvs => lasFile path q0.toNat! cnt.toNat! out kvs
+  | "lasstats" :: path :: q0 :: cnt :: kvs => lasStats path q0.toNat! cnt.toNat! kvs
+  | ["taskscaling", n] => taskScaling [1, 2, 4, 8, 16, 32, 4, 8] n.toNat!
+  | ["taskscaling", n, ts] => taskScaling ((ts.splitOn ",").map String.toNat!) n.toNat!
+  | "lasparfile" :: path :: q0 :: per :: kvs =>
+    let ts := (kvs.findSome? fun kv => match kv.splitOn "=" with
+      | ["ts", v] => some ((v.splitOn ",").map String.toNat!)
+      | _ => none).getD [1, 16]
+    lasParFile path q0.toNat! per.toNat! ts kvs
   | ["las", ns, cnt] => lasDebug ns.toNat! cnt.toNat!
   | ["las", ns, cnt, fudge, skew] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! skew.toNat!
   | ["lasq", ns, cnt, fudge, pre, q0] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 pre.toNat! q0.toNat!

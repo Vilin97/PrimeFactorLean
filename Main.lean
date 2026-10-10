@@ -1,4 +1,5 @@
 import PrimeFactorLean.Algorithms
+import PrimeFactorLean.Pool
 
 open PrimeFactorLean
 
@@ -40,12 +41,18 @@ private def parseOptions : List String → Config → List String × Config
     | none => (["--invalid"], cfg)
   | args, cfg => (args, cfg)
 
+/-- Grow the task pool (`PrimeFactorLean.warmPool`) for inputs that may run
+parallel searches (from 30 digits; a millisecond is not worth it below). -/
+private def prepare (cfg : Config) (n : Nat) : IO Unit := do
+  if cfg.threads > 1 && n ≥ 10 ^ 29 then warmPool (2 * cfg.threads)
+
 def main (args : List String) : IO UInt32 := do
   let (args, cfg) := parseOptions args {}
   match args with
   | [mode, input] =>
     match Algorithm.parse mode, input.toInt? with
     | some algorithm, some z =>
+      prepare cfg z.natAbs
       let started ← IO.monoNanosNow
       let factors ← computeFactor algorithm z.natAbs cfg
       let stopped ← IO.monoNanosNow
@@ -65,6 +72,7 @@ def main (args : List String) : IO UInt32 := do
   | ["--split", mode, input] =>
     match Algorithm.parse mode, input.toNat? with
     | some algorithm, some n =>
+      prepare cfg n
       let started ← IO.monoNanosNow
       let result ← computeSplit algorithm n cfg
       let stopped ← IO.monoNanosNow

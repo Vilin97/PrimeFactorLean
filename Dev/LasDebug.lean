@@ -175,3 +175,233 @@ def lasPar (n per : Nat) (ts : List Nat) (jDiv : Nat := 2) : IO Unit := do
     let t1 ← IO.monoNanosNow
     let ms := (t1 - t0) / 1000000
     IO.println s!"tasks {t}: {t * per} special-q, {total} rels in {ms} ms: {ms * t * 1000 / (t * per)} us CPU per q"
+
+/-- Read a polynomial in CADO-NFS format (`n:`, `c0:` …, `Y0:`, `Y1:`). -/
+def readCadoPoly (path : String) : IO (Nat × Selection) := do
+  let lines ← IO.FS.lines path
+  let mut n := 0
+  let mut cs : Array Int := #[]
+  let mut y0 : Int := 0
+  let mut y1 : Nat := 1
+  for l in lines do
+    match l.splitOn ":" with
+    | [k, v] =>
+      let v := v.trim
+      if k == "n" then n := v.toNat!
+      else if k == "Y0" then y0 := v.toInt!
+      else if k == "Y1" then y1 := v.toNat!
+      else if k.startsWith "c" then
+        let i := (k.drop 1).toNat!
+        while cs.size ≤ i do cs := cs.push 0
+        cs := cs.set! i v.toInt!
+    | _ => pure ()
+  return (n, { coeffs := cs, m := (-y0).toNat, y1 := y1 })
+
+/-- Sieve `count` special-`q` from `q0` with a given polynomial (single thread) and
+write the relations as `a,b` lines, for comparison with CADO-NFS's `las`. -/
+def lasFile (path : String) (q0 count : Nat) (out : String) (kvs : List String) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let get (key : String) (d : Nat) : Nat := (kvs.findSome? fun kv => match kv.splitOn "=" with
+    | [k, v] => if k == key then v.toNat? else none
+    | _ => none).getD d
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := get "logI" params.lasLogI, lpbR := get "lpbR" params.lpbR, lpbA := get "lpbA" params.lpbA,
+      mfbR := get "mfbR" params.mfbR, mfbA := get "mfbA" params.mfbA,
+      fudge := get "fudge" params.lasFudge, jDiv := get "jDiv" 2,
+      preSlack := get "pre" 6, sieveFrom := get "from" 30 }
+  let v := get "v" 0
+  let las := Las.mkLasCtx ctx lasParams
+  IO.println s!"FB rat {las.rat.primes.size} alg {las.alg.primes.size} (powers {las.rat.pw.size}, {las.alg.pw.size}); I={las.I} J={las.J} skew {las.skew}"
+  let qs := specialQs sel q0 count
+  let h ← IO.FS.Handle.mk out .write
+  let mut sc := Las.Scratch.new las
+  let mut total := 0
+  let t0 ← IO.monoNanosNow
+  for (q, ρ) in qs do
+    let (rels, sc') := if v == 5 then Las.processQ5 las q ρ sc else
+      if v == 6 then Las.processQ6 las q ρ sc else
+      if v == 7 then Las.processQ7 las q ρ sc else
+      if v == 8 then Las.processQ8 las (get "slack" 2) q ρ sc else
+      if v == 9 then Las.processQ9 las (get "slack" 3) q ρ sc else
+      if v == 10 then Las.processQ10 las (get "slack" 3) q ρ sc else
+      if v == 11 then Las.processQ11 las q ρ sc else Las.processQWith las q ρ sc
+    sc := sc'
+    total := total + rels.size
+    for r in rels do
+      h.putStrLn s!"{r.a},{r.b} {q} {ρ}"
+  let t1 ← IO.monoNanosNow
+  IO.println s!"{qs.size} special-q (last q {qs.back?.map (·.1)}): {total} relations in {(t1 - t0) / 1000000} ms ({(t1 - t0) / 1000 / max 1 qs.size} us per q)"
+
+/-- The cheap checks of `Las.largePrimes` (no factoring): `0` fails, `1` needs no
+split, `2` needs a split. -/
+def lpClass (u lpb mfb lim : Nat) : Nat :=
+  if u == 1 then 1
+  else if u >>> mfb != 0 then 0
+  else if u >>> lpb == 0 then 1
+  else if u < lim * lim then 0
+  else if u >>> 52 == 0 && u % 2 == 1 && SIQS.sprp2 u.toUInt64 then 0
+  else 2
+
+/-- Survivor statistics of one special-`q` (`processQ5` with counters): scan,
+prefilter, cheap cofactor checks on each side, splits needed, relations. -/
+def lasStats (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let get (key : String) (d : Nat) : Nat := (kvs.findSome? fun kv => match kv.splitOn "=" with
+    | [k, v] => if k == key then v.toNat? else none
+    | _ => none).getD d
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := get "logI" params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA,
+      mfbR := params.mfbR, mfbA := params.mfbA, fudge := get "fudge" 4, jDiv := 2,
+      preSlack := get "pre" 6, sieveFrom := get "from" 2 }
+  let ctx := Las.mkLasCtx ctx lasParams
+  let qs := specialQs sel q0 count
+  let mut st : Array Nat := Array.replicate 14 0
+  let mut hist : Array Nat := Array.replicate 41 0
+  let mut histA : Array Nat := Array.replicate 41 0
+  for (q, ρ) in qs do
+    let (u, v) := reduceLattice q ρ ctx.skew
+    let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
+    let len := ctx.I * ctx.J
+    let sc := Las.Scratch.new ctx
+    let Rr := Las.latticeRoots ctx.rat ua ub va vb
+    let Ra := Las.latticeRoots ctx.alg ua ub va vb
+    let Pr := Las.powerRoots ctx.rat ua ub va vb
+    let Pa := Las.powerRoots ctx.alg ua ub va vb
+    let exR := if get "ex" 1 == 1 then Las.rowExtras ctx ctx.rat Rr else #[]
+    let exA := if get "ex" 1 == 1 then Las.rowExtras ctx ctx.alg Ra else #[]
+    let (fR, biasR) := Las.fillSegments ctx sc.bufR false q ua ub va vb ctx.params.mfbR exR
+    let (fA, biasA) := Las.fillSegments ctx sc.bufA true q ua ub va vb ctx.params.mfbA exA
+    let bufR := Las.sieveSide ctx ctx.rat Rr fR
+    let bufA := Las.sieveSide ctx ctx.alg Ra fA
+    let bufR := if get "pw" 1 == 1 then Las.sievePowers ctx ctx.rat Pr bufR else bufR
+    let bufA := if get "pw" 1 == 1 then Las.sievePowers ctx ctx.alg Pa bufA else bufA
+    let surv0 := Las.dropSmallGcd ctx (Las.survivors bufR bufA len)
+    let surv := if get "gap" 0 > 0 then
+        Las.prefilterGap ctx q ua ub va vb bufR bufA biasR biasA (get "gap" 0 - 1) surv0
+      else Las.prefilterExact ctx q ua ub va vb bufR bufA biasR biasA surv0
+    st := st.modify 0 (· + surv0.size)
+    st := st.modify 1 (· + surv.size)
+    let (lab, rowStart) := Las.labelSurvivors ctx (Las.zeroRows ctx bufA) surv
+    let bits := Las.markBits sc.bits surv true
+    let listsR := Las.groupLabelled ctx surv lab rowStart (Las.resieveSideB ctx ctx.rat Rr bits #[])
+    let listsA := Las.groupLabelled ctx surv lab rowStart (Las.resieveSideB ctx ctx.alg Ra bits #[])
+    for k in [0:surv.size] do
+      let pos := surv[k]!
+      let I := ctx.I
+      let j := pos / I
+      let c := pos % I
+      let i : Int := (c : Int) - (I / 2 : Nat)
+      let a0 := i * ua + (j : Int) * va
+      let b0 := i * ub + (j : Int) * vb
+      let (a, b) := if b0 < 0 then (-a0, -b0) else (a0, b0)
+      if b == 0 || Nat.gcd a.natAbs b.natAbs != 1 then
+        st := st.modify 2 (· + 1); continue
+      let mut u := (sel.ratNorm a b).natAbs
+      for kk in Las.smallHits ctx.rat Rr c.toUInt64 j.toUInt64 I.toUInt64 0 ctx.rat.largeStart [] do
+        u := (Las.stripNat u ctx.rat.primes[kk]!).1
+      for kk in listsR[k]! do
+        u := (Las.stripNat u ctx.rat.primes[kk]!).1
+      let cr := lpClass u ctx.params.lpbR ctx.params.mfbR ctx.limR
+      -- the estimate of the prefilter for this survivor
+      let csF := Las.coeffsF ctx
+      let seg := j * (I / 64) + c / 64
+      let estR := Las.normBits false csF (csF.size - 1) (Arith.intF ua) (Arith.intF ub) (Arith.intF va)
+        (Arith.intF vb) (Arith.nf sel.m) (Arith.nf sel.y1) (Arith.nf q) (Arith.nf c - Arith.nf (I / 2))
+        (Arith.nf j) - ((bufR.get! pos).toUInt64.toFloat - (biasR.get! seg).toUInt64.toFloat)
+      let actual := if u == 1 then 0 else u.log2 + 1
+      let diff : Int := (estR.round.toUInt64.toNat : Int) - (actual : Int)
+      if cr == 0 then
+        if u >>> ctx.params.mfbR != 0 then st := st.modify 11 (· + 1)
+        else if u < ctx.limR * ctx.limR then st := st.modify 12 (· + 1)
+        else st := st.modify 13 (· + 1)
+      let mut z := (Las.stripNat (homEval sel.coeffs a b).natAbs q).1
+      for kk in Las.smallHits ctx.alg Ra c.toUInt64 j.toUInt64 I.toUInt64 0 ctx.alg.largeStart [] do
+        z := (Las.stripNat z ctx.alg.primes[kk]!).1
+      for kk in listsA[k]! do
+        z := (Las.stripNat z ctx.alg.primes[kk]!).1
+      let ca := lpClass z ctx.params.lpbA ctx.params.mfbA ctx.limA
+      if cr == 0 then st := st.modify 3 (· + 1)
+      if ca == 0 then st := st.modify 4 (· + 1)
+      if cr != 0 && ca != 0 then
+        st := st.modify 5 (· + 1)
+        if cr == 2 then st := st.modify 6 (· + 1)
+        if ca == 2 then st := st.modify 7 (· + 1)
+        let okR := cr == 1 || (SIQS.splitCofactor u (2 ^ ctx.params.lpbR)).isSome
+        let okA := ca == 1 || (SIQS.splitCofactor z (2 ^ ctx.params.lpbA)).isSome
+        if okR && okA then
+          st := st.modify 8 (· + 1)
+          hist := hist.modify (min 40 (max 0 (diff + 20)).toNat) (· + 1)
+          let estA := Las.normBits true csF (csF.size - 1) (Arith.intF ua) (Arith.intF ub) (Arith.intF va)
+            (Arith.intF vb) (Arith.nf sel.m) (Arith.nf sel.y1) (Arith.nf q) (Arith.nf c - Arith.nf (I / 2))
+            (Arith.nf j) - ((bufA.get! pos).toUInt64.toFloat - (biasA.get! seg).toUInt64.toFloat)
+          let actualA := if z == 1 then 0 else z.log2 + 1
+          let diffA : Int := (estA.round.toUInt64.toNat : Int) - (actualA : Int)
+          histA := histA.modify (min 40 (max 0 (diffA + 20)).toNat) (· + 1)
+        if cr == 2 && !okR then st := st.modify 9 (· + 1)
+        if ca == 2 && !okA then st := st.modify 10 (· + 1)
+  IO.println s!"{qs.size} q: scan {st[0]!}, prefilter {st[1]!}, coprime/b=0 fail {st[2]!}, rat check fail {st[3]!}, alg check fail {st[4]!}, both pass {st[5]!} (rat split {st[6]!}, alg split {st[7]!}), relations {st[8]!}, rat split fail {st[9]!}, alg split fail {st[10]!}; rat fails: too big {st[11]!}, dead zone {st[12]!}, prime {st[13]!}"
+  IO.println s!"relations: estimate - actual (rational, bits, from -20): {hist}"
+  IO.println s!"relations: estimate - actual (algebraic, bits, from -20): {histA}"
+
+/-- Siever throughput with a given polynomial: `T` tasks on disjoint special-`q`
+(each `per` of them), for each `T` in `ts`; `v=8` uses `processQ8`. -/
+def lasParFile (path : String) (q0 per : Nat) (ts : List Nat) (kvs : List String) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let get (key : String) (d : Nat) : Nat := (kvs.findSome? fun kv => match kv.splitOn "=" with
+    | [k, v] => if k == key then v.toNat? else none
+    | _ => none).getD d
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := get "logI" params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA,
+      mfbR := params.mfbR, mfbA := params.mfbA, fudge := get "fudge" params.lasFudge,
+      jDiv := get "jDiv" 2, sieveFrom := get "from" 30 }
+  let las := Las.mkLasCtx ctx lasParams
+  let v := get "v" 0
+  let slack := get "slack" 3
+  let maxT := ts.foldl max 1
+  let all := specialQs sel q0 (per * maxT)
+  for t in ts do
+    let t0 ← IO.monoNanosNow
+    let total ← IO.lazyPure fun _ => ((List.range t).map fun i => Task.spawn fun _ => Id.run do
+      let mut sc := Las.Scratch.new las
+      let mut c := 0
+      for k in [0:per] do
+        let (q, ρ) := all[i * per + k]!
+        let (rels, sc') := if v == 8 then Las.processQ8 las slack q ρ sc else
+          if v == 9 then Las.processQ9 las slack q ρ sc else
+          if v == 10 then Las.processQ10 las slack q ρ sc else
+          if v == 11 then Las.processQ11 las q ρ sc else Las.processQWith las q ρ sc
+        sc := sc'
+        c := c + rels.size
+      return c).foldl (fun acc tk => acc + tk.get) 0
+    let t1 ← IO.monoNanosNow
+    let ms := (t1 - t0) / 1000000
+    IO.println s!"tasks {t}: {t * per} special-q, {total} rels in {ms} ms: {ms * t * 1000 / (t * per)} us CPU per q, {total * 1000 / max 1 ms} rels/s"
+
+/-- A busy loop of `n` steps (machine words). -/
+def busy (seed n : UInt64) : UInt64 := Id.run do
+  let mut x := seed
+  for _ in [0:n.toNat] do
+    x := x * 6364136223846793005 + 1442695040888963407
+  return x
+
+/-- Wall time of `t` tasks each running `busy` (parallelism check). -/
+def taskScaling (ts : List Nat) (n : Nat) : IO Unit := do
+  for t in ts do
+    let t0 ← IO.monoNanosNow
+    let r ← IO.lazyPure fun _ => ((List.range t).map fun i =>
+      Task.spawn fun _ => busy i.toUInt64 n.toUInt64).foldl (fun acc tk => acc ^^^ tk.get) 0
+    let t1 ← IO.monoNanosNow
+    IO.println s!"tasks {t}: {(t1 - t0) / 1000000} ms ({r})"
+

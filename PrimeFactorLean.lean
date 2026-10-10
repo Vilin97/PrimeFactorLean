@@ -1,5 +1,6 @@
 -- The executable algorithms (Lean core only; this is all the `factor` CLI loads).
 import PrimeFactorLean.Algorithms
+import PrimeFactorLean.Pool
 -- Their correctness proofs (mathlib).
 import PrimeFactorLean.Proofs.Core
 import PrimeFactorLean.Proofs.Trial

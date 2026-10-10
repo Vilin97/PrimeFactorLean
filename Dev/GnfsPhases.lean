@@ -56,7 +56,10 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   IO.println s!"poly {sel.coeffs} m {sel.m} y1 {sel.y1} skew {skewness sel}: select {ms t0 t1} ms, setup/fb {ms t1 t2} ms (rat {ctx.fb.ratPrimes.size} alg {ctx.fb.algPrimes.size})"
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
-      mfbA := params.mfbA, fudge := params.lasFudge }
+      mfbA := params.mfbA, fudge := params.lasFudge,
+      variant := (overrides.findSome? fun kv => match kv.splitOn "=" with
+        | ["variant", v] => v.toNat?
+        | _ => none).getD 11 }
   let las := Las.mkLasCtx ctx lasParams
   let mut coll : Collection := {}
   let mut rows := Rows.empty ctx.fb

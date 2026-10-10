@@ -57,7 +57,8 @@ structure Params where
   mfbR : Nat := 0
   mfbA : Nat := 0
   qmin : Nat := 0
-  /-- Threshold slack of the lattice siever, in bits. -/
+  /-- Threshold slack of the lattice siever, in bits (it also covers the primes
+below 30, which are not sieved). -/
   lasFudge : Nat := 8
   /-- Target average row weight of the merged matrix. -/
   mergeDensity : Nat := 100
