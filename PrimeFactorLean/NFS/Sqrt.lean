@@ -68,13 +68,14 @@ def sqrtCandidate (g γ : List Int) (p bits : Nat) : Option (List Int) := Id.run
   return some (centerList P β)
 
 /-- Square root of `γ` in `ℤ[ω]`, verified by exact squaring (`none` if the
-candidate fails, e.g. because `γ` is not a square). -/
-def sqrtZ (g γ : List Int) (p : Nat) : Option (List Int) := Id.run do
+candidate fails, e.g. because `γ` is not a square); the check is returned. -/
+def sqrtZ (g γ : List Int) (p : Nat) : Option {β : List Int // mulZ g β β = normalize γ} :=
+  Id.run do
   let fBits := maxBits g
   let base := maxBits γ / 2 + 2 * (g.length + 1) * (fBits + 1) + 64
   for bits in [base, 2 * base, maxBits γ + 4 * (g.length + 1) * (fBits + 1) + 128] do
     if let some β := sqrtCandidate g γ p bits then
-      if mulZ g β β == normalize γ then return some β
+      if h : mulZ g β β = normalize γ then return some ⟨β, h⟩
   return none
 
 end PrimeFactorLean.NFS

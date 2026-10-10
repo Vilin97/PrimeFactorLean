@@ -34,6 +34,55 @@ theorem prodL_append (a b : List Int) : prodL (a ++ b) = prodL a * prodL b := by
   | nil => simp [prodL]
   | cons x xs ih => simp only [List.cons_append, prodL, ih]; grind
 
+/-- Balanced product of a list of integers (`prodL` multiplies a growing product
+by one factor at a time: quadratic in the size of the result). The two halves
+of the top `depth` levels are computed in parallel tasks. -/
+def prodTreeInt (depth : Nat) (xs : List Int) : Int :=
+  match h : xs.length with
+  | 0 => 1
+  | 1 => xs.head (by intro hx; subst hx; simp at h)
+  | k + 2 =>
+    have h1 : (xs.take ((k + 2) / 2)).length < xs.length := by
+      simp only [List.length_take, h]; omega
+    have h2 : (xs.drop ((k + 2) / 2)).length < xs.length := by
+      simp only [List.length_drop, h]; omega
+    if depth = 0 then
+      prodTreeInt 0 (xs.take ((k + 2) / 2)) * prodTreeInt 0 (xs.drop ((k + 2) / 2))
+    else
+      let left := Task.spawn fun _ => prodTreeInt (depth - 1) (xs.take ((k + 2) / 2))
+      left.get * prodTreeInt (depth - 1) (xs.drop ((k + 2) / 2))
+termination_by xs.length
+
+theorem prodTreeInt_eq_le : ∀ (k depth : Nat) (xs : List Int), xs.length ≤ k →
+    prodTreeInt depth xs = prodL xs := by
+  intro k
+  induction k with
+  | zero =>
+    intro depth xs hk
+    have : xs = [] := List.length_eq_zero_iff.mp (by omega)
+    subst this
+    simp [prodTreeInt, prodL]
+  | succ k ih =>
+    intro depth xs hk
+    rw [prodTreeInt]
+    split
+    · rename_i h
+      rw [List.length_eq_zero_iff.mp h]
+      simp [prodL]
+    · rename_i h
+      obtain ⟨x, rfl⟩ := List.length_eq_one_iff.mp h
+      simp [prodL]
+    · rename_i j h
+      split
+      · rw [ih _ _ (by simp only [List.length_take, h]; omega),
+          ih _ _ (by simp only [List.length_drop, h]; omega), ← prodL_append, List.take_append_drop]
+      · simp only [Task.spawn]
+        rw [ih _ _ (by simp only [List.length_take, h]; omega),
+          ih _ _ (by simp only [List.length_drop, h]; omega), ← prodL_append, List.take_append_drop]
+
+theorem prodTreeInt_eq (depth : Nat) (xs : List Int) : prodTreeInt depth xs = prodL xs :=
+  prodTreeInt_eq_le xs.length depth xs (Nat.le_refl _)
+
 section Eval
 
 variable (r : Int)
@@ -191,13 +240,41 @@ theorem eval_reduce (g xs : List Int) (hroot : ModEq n (eval r g + r ^ g.length)
   rw [reduce, eval_normalize]
   exact eval_reduceFuel r g hroot _ _
 
+/-- The rows `x · ys` of `mulL xs ys` summed as `mulL` does. -/
+def sumRows : List (Task (List Int)) → List Int
+  | [] => []
+  | t :: ts => addL t.get (0 :: sumRows ts)
+
+/-- `mulL` with its rows `x · ys` computed in parallel tasks. -/
+def mulLPar (xs ys : List Int) : List Int :=
+  sumRows (xs.map fun x => Task.spawn fun _ => scaleL x ys)
+
+theorem mulLPar_eq (xs ys : List Int) : mulLPar xs ys = mulL xs ys := by
+  unfold mulLPar
+  induction xs with
+  | nil => rfl
+  | cons x xs ih =>
+    rw [List.map_cons, sumRows, ih]
+    rfl
+
+/-- `mulL`, in parallel once a coefficient of `xs` has `2^16` bits (spawning
+tasks costs more than small products). -/
+def mulLAuto (xs ys : List Int) : List Int :=
+  if xs.any (fun c => c.natAbs.log2 ≥ 65536) then mulLPar xs ys else mulL xs ys
+
+theorem mulLAuto_eq (xs ys : List Int) : mulLAuto xs ys = mulL xs ys := by
+  unfold mulLAuto
+  split
+  · exact mulLPar_eq xs ys
+  · rfl
+
 /-- Multiplication in `ℤ[ω]`. -/
-def mulZ (g xs ys : List Int) : List Int := reduce g (mulL xs ys)
+def mulZ (g xs ys : List Int) : List Int := reduce g (mulLAuto xs ys)
 
 /-- **Evaluation is multiplicative** modulo every `n` at a root `r` of `f`. -/
 theorem eval_mulZ (g xs ys : List Int) (hroot : ModEq n (eval r g + r ^ g.length) 0) :
     ModEq n (eval r (mulZ g xs ys)) (eval r xs * eval r ys) := by
-  rw [mulZ, ← eval_mulL]
+  rw [mulZ, mulLAuto_eq, ← eval_mulL]
   exact eval_reduce r g _ hroot
 
 /-- Balanced product of a list of elements of `ℤ[ω]` (a product tree). -/
@@ -212,6 +289,66 @@ def prodTree (g : List Int) (xs : List (List Int)) : List Int :=
       simp only [List.length_drop, h]; omega
     mulZ g (prodTree g (xs.take ((k + 2) / 2))) (prodTree g (xs.drop ((k + 2) / 2)))
 termination_by xs.length
+
+/-- The recursive case of `prodTree`. -/
+theorem prodTree_split (g : List Int) (xs : List (List Int)) (k : Nat) (h : xs.length = k + 2) :
+    prodTree g xs =
+      mulZ g (prodTree g (xs.take ((k + 2) / 2))) (prodTree g (xs.drop ((k + 2) / 2))) := by
+  conv => lhs; rw [prodTree]
+  split
+  · omega
+  · omega
+  · rename_i j h'
+    have : j = k := by omega
+    subst this
+    rfl
+
+/-- `prodTree` with the two halves of the top `depth` levels computed in
+parallel tasks (`prodTreePar_eq`). -/
+def prodTreePar (g : List Int) (depth : Nat) (xs : List (List Int)) : List Int :=
+  match h : xs.length with
+  | 0 => [1]
+  | 1 => xs.head (by intro hx; subst hx; simp at h)
+  | k + 2 =>
+    have h1 : (xs.take ((k + 2) / 2)).length < xs.length := by
+      simp only [List.length_take, h]; omega
+    have h2 : (xs.drop ((k + 2) / 2)).length < xs.length := by
+      simp only [List.length_drop, h]; omega
+    if depth = 0 then prodTree g xs
+    else
+      let left := Task.spawn fun _ => prodTreePar g (depth - 1) (xs.take ((k + 2) / 2))
+      mulZ g left.get (prodTreePar g (depth - 1) (xs.drop ((k + 2) / 2)))
+termination_by xs.length
+
+theorem prodTreePar_eq_le (g : List Int) : ∀ (k depth : Nat) (xs : List (List Int)),
+    xs.length ≤ k → prodTreePar g depth xs = prodTree g xs := by
+  intro k
+  induction k with
+  | zero =>
+    intro depth xs hk
+    have : xs = [] := List.length_eq_zero_iff.mp (by omega)
+    subst this
+    simp [prodTreePar, prodTree]
+  | succ k ih =>
+    intro depth xs hk
+    rw [prodTreePar]
+    split
+    · rename_i h
+      rw [List.length_eq_zero_iff.mp h]
+      simp [prodTree]
+    · rename_i h
+      obtain ⟨x, rfl⟩ := List.length_eq_one_iff.mp h
+      simp [prodTree]
+    · rename_i j h
+      split
+      · rfl
+      · simp only [Task.spawn]
+        rw [ih _ _ (by simp only [List.length_take, h]; omega),
+          ih _ _ (by simp only [List.length_drop, h]; omega), prodTree_split g xs j h]
+
+theorem prodTreePar_eq (g : List Int) (depth : Nat) (xs : List (List Int)) :
+    prodTreePar g depth xs = prodTree g xs :=
+  prodTreePar_eq_le g xs.length depth xs (Nat.le_refl _)
 
 theorem eval_prodTree_le (g : List Int) (hroot : ModEq n (eval r g + r ^ g.length) 0) :
     ∀ (k : Nat) (xs : List (List Int)), xs.length ≤ k →

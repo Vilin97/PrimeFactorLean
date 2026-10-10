@@ -223,13 +223,17 @@ def congruence {n : Nat} (st : Setup n) (rels : List Rel) (p : Nat) :
     match rationalRoot rels with
     | none => none
     | some Z =>
-      if hrat : prodL (S.map fun ab => (st.sel.y1 : Int) * ab.1 - (st.sel.m : Int) * ab.2) =
+      -- products by balanced trees, the top levels in parallel (`prodL` and
+      -- `prodTree` are what the congruence theorem speaks about)
+      if hrat0 : prodTreeInt 3 (S.map fun ab => (st.sel.y1 : Int) * ab.1 - (st.sel.m : Int) * ab.2) =
           Z * Z then
-        let γ := prodTree st.g (st.fp :: st.fp :: S.map fun ab => [(st.cd : Int) * ab.1, -ab.2])
+        have hrat := (prodTreeInt_eq 3 _).symm.trans hrat0
+        let γ := prodTreePar st.g 3 (st.fp :: st.fp :: S.map fun ab => [(st.cd : Int) * ab.1, -ab.2])
         match sqrtZ st.g γ p with
         | none => none
-        | some β =>
-          if hβ : mulZ st.g β β = γ then
+        | some ⟨β, hβ0⟩ =>
+          if hγ : normalize γ = γ then
+            have hβ := hβ0.trans (hγ.trans (prodTreePar_eq _ _ _))
             some ⟨evalMod n st.r β * powMod st.sel.y1 k n % n,
               evalMod n st.r st.fp * powMod st.cd k n % n * (Z % (n : Int)).toNat % n, by
                 have key := nfs_square_lin st.g st.fp β st.cd st.sel.y1 st.sel.m (st.x0 : Int) S Z k
@@ -447,6 +451,13 @@ def rowsReady (rs : Rows) (dense extra : Nat) : Bool :=
   let kept := GF2.removeSingletons rs.next rs.sparse
   kept.size ≥ activeColumns rs.next rs.sparse kept + dense + extra
 
+/-- The excess (rows minus active columns and `dense`) after singleton removal,
+and whether it reaches `extra`. -/
+def rowsExcess (rs : Rows) (dense extra : Nat) : Int × Bool :=
+  let kept := GF2.removeSingletons rs.next rs.sparse
+  let e : Int := (kept.size : Int) - (activeColumns rs.next rs.sparse kept + dense : Nat)
+  (e, e ≥ extra)
+
 /-- Whether the matrix of `rels` has enough excess after singleton removal. -/
 def matrixReady (ctx : Ctx) (params : Params) (rels : Array Rel) : Bool :=
   let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
@@ -485,6 +496,7 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   -- relations collected so far once the yield is known
   let mut count := 8 * threads
   let mut scratch : List Las.Scratch := []
+  let mut prev : Option (Nat × Int) := none
   let mut rows := Rows.empty ctx.fb
   let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
   while !ready && round < cfg.maxRounds do
@@ -495,15 +507,28 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
       coll := c
       scratch := sc
     else coll := collectRound ctx params threads coll
-    -- readiness is a full singleton removal: run it only once the relation
-    -- count can suffice, and then after every tenth of growth
+    -- readiness is a full singleton removal: run it once the relation count
+    -- can suffice and after every tenth of growth, then after every round once
+    -- an excess has been measured (it grows fast near the end)
     for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
-    if coll.rels.size ≥ base && coll.rels.size * 10 ≥ lastCheck * 11 then
+    let mut target := 0
+    if coll.rels.size ≥ base && (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11) then
       lastCheck := coll.rels.size
-      ready := rowsReady rows (2 + ctx.fb.chars.size) params.extra
+      let (excess, ok) := rowsExcess rows (2 + ctx.fb.chars.size) params.extra
+      ready := ok
+      -- the relations still needed, extrapolated from the last two checks
+      -- (with a tenth more: the excess grows faster than linearly)
+      if let some (r0, e0) := prev then
+        if excess > e0 && coll.rels.size > r0 then
+          let need := ((params.extra : Int) - excess) * ((coll.rels.size - r0 : Nat) : Int) /
+            (excess - e0)
+          target := coll.rels.size + (11 * need.toNat) / 10
+      prev := some (coll.rels.size, excess)
     let gained := coll.rels.size - before
     if params.lasLogI > 0 && gained > 0 then
       count := max (6 * threads) (count * (coll.rels.size / 10 + 1) / gained)
+      if target > coll.rels.size then
+        count := max (6 * threads) (min count ((target - coll.rels.size) * count / gained + 1))
   if !ready then return none
   let rels := coll.rels
   for k in [rows.sparse.size:rels.size] do rows := rows.add rels[k]!

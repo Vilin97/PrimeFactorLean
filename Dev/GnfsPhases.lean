@@ -37,6 +37,7 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   let mut rows := Rows.empty ctx.fb
   let mut count := 8 * threads
   let mut scratch : List Las.Scratch := []
+  let mut prev : Option (Nat × Int) := none
   let mut lastCheck := 0
   let mut ready := false
   let mut round := 0
@@ -52,9 +53,18 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     scratch := sc
     let b ← IO.monoNanosNow
     for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
-    if coll.rels.size ≥ base && coll.rels.size * 10 ≥ lastCheck * 11 then
+    let mut target := 0
+    if coll.rels.size ≥ base && (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11) then
       lastCheck := coll.rels.size
-      ready ← IO.lazyPure fun _ => rowsReady rows (2 + ctx.fb.chars.size) params.extra
+      let (excess, ok) ← IO.lazyPure fun _ => rowsExcess rows (2 + ctx.fb.chars.size) params.extra
+      ready := ok
+      IO.eprintln s!"  check: rels {coll.rels.size} excess {excess}"
+      if let some (r0, e0) := prev then
+        if excess > e0 && coll.rels.size > r0 then
+          let need := ((params.extra : Int) - excess) * ((coll.rels.size - r0 : Nat) : Int) /
+            (excess - e0)
+          target := coll.rels.size + (11 * need.toNat) / 10
+      prev := some (coll.rels.size, excess)
     let c ← IO.monoNanosNow
     tSieve := tSieve + (b - a)
     tCheck := tCheck + (c - b)
@@ -62,6 +72,8 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     IO.eprintln s!"round {round}: {count} special-q, q < {coll.nextQ} gained {gained} total {coll.rels.size} ({(b - a) / 1000000} ms)"
     if gained > 0 then
       count := max (6 * threads) (count * (coll.rels.size / 10 + 1) / gained)
+      if target > coll.rels.size then
+        count := max (6 * threads) (min count ((target - coll.rels.size) * count / gained + 1))
   let t3 ← IO.monoNanosNow
   IO.println s!"rounds {round}, q up to {coll.nextQ}, relations {coll.rels.size}: sieve {tSieve / 1000000} ms, rows+checks {tCheck / 1000000} ms"
   let rels := coll.rels
