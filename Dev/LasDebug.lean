@@ -44,8 +44,8 @@ def fkUnit : IO Unit := do
   IO.println s!"fk tested {tested}, mismatches {bad}"
 
 /-- Sieve a few special-`q` with the lattice siever, time it and check every relation. -/
-def lasDebug (n : Nat) (count : Nat) (fudge : Nat := 4) (skewOverride : Nat := 0) (v3 : Bool := false)
-    (v4 : Bool := false) (preSlack : Nat := 6) (qstart : Nat := 0) : IO Unit := do
+def lasDebug (n : Nat) (count : Nat) (fudge : Nat := 4) (skewOverride : Nat := 0)
+    (preSlack : Nat := 6) (qstart : Nat := 0) : IO Unit := do
   let params := chooseParams (GNFS.decimalDigits n)
   let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
       (min params.ratBound params.algBound) + 1 }
@@ -69,8 +69,7 @@ def lasDebug (n : Nat) (count : Nat) (fudge : Nat := 4) (skewOverride : Nat := 0
   let t0 ← IO.monoNanosNow
   let mut sc := Las.Scratch.new las
   for (q, ρ) in qs do
-    let (rels, sc') := if v4 then Las.processQ4 las q ρ sc else
-      if v3 then Las.processQ3 las q ρ sc else Las.processQWith las q ρ sc
+    let (rels, sc') := Las.processQWith las q ρ sc
     sc := sc'
     total := total + rels.size
     for r in rels do
@@ -108,7 +107,7 @@ def lasPipeline (n : Nat) (threads : Nat) (maxRounds : Nat) : IO Unit := do
   let mut ready := false
   while !ready && round < maxRounds do
     round := round + 1
-    coll ← IO.lazyPure fun _ => GNFS.collectRoundLas las params threads 400 coll
+    coll ← IO.lazyPure fun _ => (GNFS.collectRoundLas las params threads 400 coll []).1
     if round % 10 == 0 then
       let rels := coll.rels
       let (rows, numCols) := GNFS.buildRows ctx.fb rels
@@ -144,8 +143,9 @@ def lasPipeline (n : Nat) (threads : Nat) (maxRounds : Nat) : IO Unit := do
       | some d => IO.println s!"dep {tried}: factor {d.val}"; return
       | none => IO.println s!"dep {tried}: trivial congruence"
 
-/-- Survivor counts per stage (both initializations) on a few special-`q`. -/
-def lasCounts (n : Nat) (count fudge pre : Nat) : IO Unit := do
+/-- Siever throughput with `T` parallel tasks on disjoint special-`q` (each task
+sieves `per` special-`q` with its own buffers). -/
+def lasPar (n per : Nat) (ts : List Nat) : IO Unit := do
   let params := chooseParams (GNFS.decimalDigits n)
   let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
       (min params.ratBound params.algBound) + 1 }
@@ -155,33 +155,20 @@ def lasCounts (n : Nat) (count fudge pre : Nat) : IO Unit := do
   let ctx := mkCtx n sel params
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
-      mfbA := params.mfbA, fudge := fudge, preSlack := pre }
+      mfbA := params.mfbA, fudge := params.lasFudge }
   let las := Las.mkLasCtx ctx lasParams
-  let qs := specialQs sel params.qmin count
-  let len := las.I * las.J
-  let mut tot : Array Nat := #[0, 0, 0, 0, 0, 0, 0, 0]
-  for (q, ρ) in qs do
-    let (u, v) := reduceLattice q ρ las.skew
-    let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
-    let Rr := Las.latticeRoots las.rat ua ub va vb
-    let Ra := Las.latticeRoots las.alg ua ub va vb
-    let thrR := Las.rowThresholds las q ua ub va vb params.mfbR false
-    let thrA := Las.rowThresholds las q ua ub va vb params.mfbA true
-    let z := Las.zeroBytes (len + 1)
-    let oR := Las.sieveSide las las.rat Rr (Las.fillRows las z thrR)
-    let oA := Las.sieveSide las las.alg Ra (Las.fillRows las z thrA)
-    let sR := Las.sieveSide las las.rat Rr (Las.fillSegments las z false q ua ub va vb params.mfbR)
-    let sA := Las.sieveSide las las.alg Ra (Las.fillSegments las z true q ua ub va vb params.mfbA)
-    let cnt (b : ByteArray) : Nat := Id.run do
+  let all := specialQs sel params.qmin (per * 32)
+  for t in ts do
+    let t0 ← IO.monoNanosNow
+    let total ← IO.lazyPure fun _ => ((List.range t).map fun i => Task.spawn fun _ => Id.run do
+      let mut sc := Las.Scratch.new las
       let mut c := 0
-      for i in [0:len] do if b.get! i ≥ 128 then c := c + 1
-      return c
-    let o0 := Las.survivors oR oA len
-    let s0 := Las.survivors sR sA len
-    let o1 := Las.prefilterRows las q ua ub va vb thrR thrA oR oA o0
-    let s1 := Las.prefilterSegs las q ua ub va vb sR sA s0
-    let vals := #[cnt oR, cnt oA, o0.size, o1.size, cnt sR, cnt sA, s0.size, s1.size]
-    tot := (Array.range 8).map fun i => tot[i]! + vals[i]!
-  let k := max 1 qs.size
-  IO.println s!"per q (rows):     R>=128 {tot[0]! / k}  A>=128 {tot[1]! / k}  both {tot[2]! / k}  prefiltered {tot[3]! / k}"
-  IO.println s!"per q (segments): R>=128 {tot[4]! / k}  A>=128 {tot[5]! / k}  both {tot[6]! / k}  prefiltered {tot[7]! / k}"
+      for k in [0:per] do
+        let (q, ρ) := all[i * per + k]!
+        let (rels, sc') := Las.processQWith las q ρ sc
+        sc := sc'
+        c := c + rels.size
+      return c).foldl (fun acc tk => acc + tk.get) 0
+    let t1 ← IO.monoNanosNow
+    let ms := (t1 - t0) / 1000000
+    IO.println s!"tasks {t}: {t * per} special-q, {total} rels in {ms} ms: {ms * t * 1000 / (t * per)} us CPU per q"

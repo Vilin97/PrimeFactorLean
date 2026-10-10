@@ -32,7 +32,8 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0) : IO Uni
   let las := Las.mkLasCtx ctx lasParams
   let mut coll : Collection := {}
   let mut rows := Rows.empty ctx.fb
-  let mut width := 200
+  let mut count := 8 * threads
+  let mut scratch : List Las.Scratch := []
   let mut lastCheck := 0
   let mut ready := false
   let mut round := 0
@@ -43,7 +44,9 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0) : IO Uni
     round := round + 1
     let a ← IO.monoNanosNow
     let before := coll.rels.size
-    coll ← IO.lazyPure fun _ => collectRoundLas las params threads width coll
+    let (c, sc) ← IO.lazyPure fun _ => collectRoundLas las params threads count coll scratch
+    coll := c
+    scratch := sc
     let b ← IO.monoNanosNow
     for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
     if coll.rels.size ≥ base && coll.rels.size * 10 ≥ lastCheck * 11 then
@@ -53,10 +56,9 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0) : IO Uni
     tSieve := tSieve + (b - a)
     tCheck := tCheck + (c - b)
     let gained := coll.rels.size - before
-    IO.eprintln s!"round {round}: width {width} q < {coll.nextQ} gained {gained} total {coll.rels.size} ({(b - a) / 1000000} ms)"
+    IO.eprintln s!"round {round}: {count} special-q, q < {coll.nextQ} gained {gained} total {coll.rels.size} ({(b - a) / 1000000} ms)"
     if gained > 0 then
-      let want := (base + base / 2 - min (base + base / 2) coll.rels.size) / 5
-      width := max 100 (min 20000 (width * max 1 want / gained))
+      count := max (6 * threads) (count * (coll.rels.size / 10 + 1) / gained)
   let t3 ← IO.monoNanosNow
   IO.println s!"rounds {round}, q up to {coll.nextQ}, relations {coll.rels.size}: sieve {tSieve / 1000000} ms, rows+checks {tCheck / 1000000} ms"
   let rels := coll.rels

@@ -407,33 +407,39 @@ def collectRound (ctx : Ctx) (params : Params) (threads : Nat) (st : Collection)
         rels := rels.push rel
   return { st with rels := rels, seen := seen }
 
-/-- One parallel round of Franke–Kleinjung lattice sieving over the special-`q`
-primes of `[st.nextQ, st.nextQ + threads · width)`: each task takes an
-interval of width `width`, finds its special-`q` ideals itself and reuses its
-sieve buffers from one special-`q` to the next. -/
-def collectRoundLas (las : Las.LasCtx) (params : Params) (threads width : Nat) (st : Collection) :
-    Collection := Id.run do
+/-- One parallel round of special-`q` lattice sieving over the next `count`
+special-`q` ideals from `st.nextQ`: they are dealt round-robin to the tasks (so
+that every task gets a similar mix), and each task keeps its sieve buffers
+from one round to the next (`scratch`, consumed and returned). -/
+def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (st : Collection)
+    (scratch : List Las.Scratch) : Collection × List Las.Scratch := Id.run do
   let lo := max st.nextQ params.qmin
-  let tasks := (List.range threads).map fun t =>
+  let mut qs : Array (Nat × Nat) := #[]
+  let mut hi := lo
+  while qs.size < count do
+    qs := qs ++ specialQsIn las.base.sel hi (hi + 512)
+    hi := hi + 512
+  let T := max 1 threads
+  let scs := scratch ++ (List.range (T - min T scratch.length)).map fun _ => Las.Scratch.new las
+  let tasks := (scs.zip (List.range T)).map fun (sc0, t) =>
     Task.spawn fun _ => Id.run do
-      let a := lo + t * width
-      let qs := specialQsIn las.base.sel a (a + width)
       let mut out : Array Rel := #[]
-      let mut sc := Las.Scratch.new las
-      for (q, ρ) in qs do
+      let mut sc := sc0
+      for k in [0:(qs.size + T - 1 - t) / T] do
+        let (q, ρ) := qs[t + k * T]!
         let (rels, sc') := Las.processQWith las q ρ sc
         sc := sc'
         out := out ++ rels
-      return out
-  let batches := tasks.map Task.get
+      return (out, sc)
+  let results := tasks.map Task.get
   let mut rels := st.rels
   let mut seen := st.seen
-  for batch in batches do
+  for (batch, _) in results do
     for rel in batch do
       if !seen.contains (rel.a, rel.b) then
         seen := seen.insert (rel.a, rel.b)
         rels := rels.push rel
-  return { rels := rels, seen := seen, nextB := st.nextB, nextQ := lo + threads * width }
+  return ({ rels := rels, seen := seen, nextB := st.nextB, nextQ := hi }, results.map (·.2))
 
 /-- Whether the matrix has enough excess after singleton removal (on the sparse
 rows; the dense columns are accounted for by `dense`). -/
@@ -489,27 +495,29 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
       mfbA := params.mfbA, fudge := params.lasFudge }
   let las := Las.mkLasCtx ctx lasParams
-  -- special-q interval per task: grows with the measured yield so that rounds
-  -- stay long (a round waits for its slowest task)
-  let mut width := 200
+  -- special-q per round: at least six per task, and about a tenth of the
+  -- relations collected so far once the yield is known
+  let mut count := 8 * threads
+  let mut scratch : List Las.Scratch := []
   let mut rows := Rows.empty ctx.fb
   let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
   while !ready && round < cfg.maxRounds do
     round := round + 1
     let before := coll.rels.size
-    coll := if params.lasLogI > 0 then collectRoundLas las params threads width coll
-      else collectRound ctx params threads coll
+    if params.lasLogI > 0 then
+      let (c, sc) := collectRoundLas las params threads count coll scratch
+      coll := c
+      scratch := sc
+    else coll := collectRound ctx params threads coll
     -- readiness is a full singleton removal: run it only once the relation
     -- count can suffice, and then after every tenth of growth
     for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
     if coll.rels.size ≥ base && coll.rels.size * 10 ≥ lastCheck * 11 then
       lastCheck := coll.rels.size
       ready := rowsReady rows (2 + ctx.fb.chars.size) params.extra
-    -- aim the next round at about a fifth of the relations still missing
     let gained := coll.rels.size - before
     if params.lasLogI > 0 && gained > 0 then
-      let want := (base + base / 2 - min (base + base / 2) coll.rels.size) / 5
-      width := max 100 (min 20000 (width * max 1 want / gained))
+      count := max (6 * threads) (count * (coll.rels.size / 10 + 1) / gained)
   if !ready then return none
   let rels := coll.rels
   for k in [rows.sparse.size:rels.size] do rows := rows.add rels[k]!

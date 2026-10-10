@@ -1,6 +1,5 @@
 import PrimeFactorLean.NFS.Lattice
 import PrimeFactorLean.SIQS
-import PrimeFactorLean.RhoFast
 
 /-!
 # A Franke–Kleinjung lattice siever
@@ -228,7 +227,8 @@ def fkWalkR (lab : ByteArray) (len mask x y d0 d1 : USize) (k : Nat) (pos : USiz
   | fuel + 1 =>
     let pos := fkNext mask x y d0 d1 pos
     if h : pos < len ∧ pos.toNat < lab.size then
-      let acc := if lab.uget pos h.2 != 0 then acc.push ((pos.toNat <<< 24) ||| k) else acc
+      let acc := if lab.uget pos h.2 != 0 then acc.push ((pos.toUInt64 <<< 24) ||| k.toUInt64).toNat
+        else acc
       fkWalkR lab len mask x y d0 d1 k pos acc fuel
     else acc
 
@@ -626,15 +626,21 @@ def groupRecords (survs : Array Nat) (recs : Array Nat) : Array (List Nat) := Id
   return lists
 
 /-- Per-task buffers reused from one special-`q` to the next: the two sieve
-regions and a zero buffer that marks survivors during resieving. -/
+regions (the algebraic one also marks the survivors during resieving). -/
 structure Scratch where
   bufR : ByteArray
   bufA : ByteArray
-  lab : ByteArray
 
 def Scratch.new (ctx : LasCtx) : Scratch :=
   let n := ctx.I * ctx.J + 1
-  ⟨zeroBytes n, zeroBytes n, zeroBytes n⟩
+  ⟨zeroBytes n, zeroBytes n⟩
+
+/-- Zero the region (row by row from the zero template). -/
+def zeroRows (ctx : LasCtx) (buf : ByteArray) : ByteArray := Id.run do
+  let mut b := buf
+  for j in [0:ctx.J] do
+    b := ctx.rowTemplates[0]!.copySlice 0 b (j * ctx.I) ctx.I
+  return b
 
 /-- The survivors whose norms (floating point), less the sieved logarithms (the
 bytes above the row bias), are at most `2^(mfb + preSlack)` on both sides; the
@@ -664,7 +670,7 @@ def prefilterRows (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (thrR thrA : Arra
 
 /-- Sieve one special-`q` and return its relations, reusing the buffers of `sc`. -/
 def processQWith (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
-  let ⟨b1, b2, lab⟩ := sc
+  let ⟨b1, b2⟩ := sc
   let (u, v) := reduceLattice q ρ ctx.skew
   let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
   let len := ctx.I * ctx.J
@@ -675,223 +681,20 @@ def processQWith (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scrat
   let bufR := sieveSide ctx ctx.rat Rr (fillRows ctx b1 thrR)
   let bufA := sieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA)
   let surv := prefilterRows ctx q ua ub va vb thrR thrA bufR bufA (survivors bufR bufA len)
-  if surv.isEmpty then return (#[], ⟨bufR, bufA, lab⟩)
-  let mut lab := lab
+  if surv.isEmpty then return (#[], ⟨bufR, bufA⟩)
+  -- the algebraic region is no longer needed: cleared, it labels the survivors
+  -- for the resieve (a third buffer would only add cache pressure)
+  let mut lab := zeroRows ctx bufA
   for pos in surv do lab := lab.set! pos 1
   let listsR := groupRecords surv (resieveSide ctx ctx.rat Rr lab #[])
   let listsA := groupRecords surv (resieveSide ctx ctx.alg Ra lab #[])
-  for pos in surv do lab := lab.set! pos 0
   let mut rels : Array Rel := #[]
   for k in [0:surv.size] do
     if let some rel := factorSurvivor ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
       rels := rels.push rel
-  return (rels, ⟨bufR, bufA, lab⟩)
+  return (rels, ⟨bufR, lab⟩)
 
 /-- Sieve one special-`q` with fresh buffers. -/
 def processQ (ctx : LasCtx) (q ρ : Nat) : Array Rel := (processQWith ctx q ρ (Scratch.new ctx)).1
-
-/-! ## Per-segment norms and cofactorization (no resieve)
-
-The sieve region is initialized segment by segment (64 columns) from the
-logarithm of the norm at the segment ends, so that a survivor's byte reaches
-`128` exactly when the unexplained part of its norm is below `2^(mfb + fudge)`;
-with such thresholds few survivors remain, and instead of resieving the large
-ideals their prime factors are found by Brent's rho on the cofactor left after
-trial division by the small ideals. -/
-
-/-- Initialize the segments `[s, segs)` of row `j` (tail recursive: `prev` is the
-norm's logarithm at the left end of segment `s`). -/
-def fillRowSegs (ctx : LasCtx) (alg : Bool) (cs : FloatArray) (d : Nat)
-    (uaf ubf vaf vbf mF y1F qF : Float) (mfbF : Float) (j : Nat) (jF : Float) (b : ByteArray)
-    (prev : Float) (s segs : Nat) : ByteArray :=
-  if s < segs then
-    let iF := ((s + 1) * 64).toFloat - (ctx.I / 2).toFloat
-    let next := normBits alg cs d uaf ubf vaf vbf mF y1F qF iF jF
-    let bits := if prev > next then prev else next
-    let t := bits - mfbF
-    let ti : Nat := if t ≤ fc 0 then 0 else if t ≥ fc 127 then 127 else t.toUInt64.toNat
-    let b := ctx.rowTemplates[128 - ti]!.copySlice 0 b (j * ctx.I + s * 64) 64
-    fillRowSegs ctx alg cs d uaf ubf vaf vbf mF y1F qF mfbF j jF b next (s + 1) segs
-  else b
-termination_by segs - s
-
-/-- The whole region, row by row. -/
-def fillSegments (ctx : LasCtx) (buf : ByteArray) (alg : Bool) (q : Nat) (ua ub va vb : Int)
-    (mfb : Nat) : ByteArray := Id.run do
-  let cs := coeffsF ctx
-  let d := cs.size - 1
-  let (uaf, ubf, vaf, vbf) := (Float.ofInt ua, Float.ofInt ub, Float.ofInt va, Float.ofInt vb)
-  let mF := ctx.base.sel.m.toFloat
-  let y1F := ctx.base.sel.y1.toFloat
-  let qF := q.toFloat
-  let mfbF := (mfb + ctx.params.fudge).toFloat
-  let segs := ctx.I / 64
-  let mut b := buf
-  for j in [0:ctx.J] do
-    let jF := j.toFloat
-    let first := normBits alg cs d uaf ubf vaf vbf mF y1F qF (-((ctx.I / 2).toFloat)) jF
-    b := fillRowSegs ctx alg cs d uaf ubf vaf vbf mF y1F qF mfbF j jF b first 0 segs
-  return b.set! (ctx.I * ctx.J) 0
-
-/-- The prime factors of `u` if all are below `2^lpb` (`none` otherwise): Brent's
-rho on fixed-width arithmetic, recursively, with probable-prime leaves. -/
-def smoothFactors (u lpb : Nat) : Nat → Option (List Nat)
-  | 0 => none
-  | fuel + 1 =>
-    if u == 1 then some []
-    else if isProbablePrime u then (if u < 2 ^ lpb then some [u] else none)
-    else
-      let d := [1, 3, 5, 7].foldl (fun acc c =>
-        if 1 < acc && acc < u then acc else RhoF.brent u c 50000) 1
-      if 1 < d && d < u then
-        match smoothFactors d lpb fuel, smoothFactors (u / d) lpb fuel with
-        | some xs, some ys => some (xs ++ ys)
-        | _, _ => none
-      else none
-
-/-- Factor one survivor exactly: small ideals by lattice position, the rest of
-each norm by `smoothFactors`, with at most `2^mfb` beyond the factor bases. -/
-def factorSurvivor3 (ctx : LasCtx) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat)
-    (pos : Nat) : Option Rel := Id.run do
-  let I := ctx.I
-  let j := pos / I
-  let c := pos % I
-  let i : Int := (c : Int) - (I / 2 : Nat)
-  let a0 := i * ua + (j : Int) * va
-  let b0 := i * ub + (j : Int) * vb
-  let (a, b) := if b0 < 0 then (-a0, -b0) else (a0, b0)
-  if b == 0 then return none
-  if Nat.gcd a.natAbs b.natAbs != 1 then return none
-  let bn := b.natAbs
-  let sel := ctx.base.sel
-  let lpbR := ctx.params.lpbR
-  let lpbA := ctx.params.lpbA
-  -- algebraic side first (its cofactor is the larger one)
-  let na := homEval sel.coeffs a b
-  if na == 0 then return none
-  let (z0, eq) := stripNat na.natAbs q
-  if eq == 0 then return none
-  let mut z := z0
-  let mut alg : List (Nat × Nat × Nat) := [(q, ρ, eq)]
-  let sideA := ctx.alg
-  for k in smallHits sideA Ra c.toUInt64 j.toUInt64 I.toUInt64 0 sideA.largeStart [] do
-    let p := sideA.primes[k]!
-    let r := sideA.roots[k]!
-    let ok := Ra[k]! < p ||
-      (if r == p then bn % p == 0 else (a - b * (r : Int)) % (p : Int) == 0)
-    if ok then
-      let (z', e) := stripNat z p
-      if e > 0 then
-        z := z'
-        alg := (p, r, e) :: alg
-  let limA := ctx.base.fb.algPrimes.back?.getD 0
-  if z.log2 ≥ lpbA * 6 then return none
-  let some fa := smoothFactors z lpbA 64 | return none
-  let beyondA := fa.foldl (fun acc p => if p > limA then acc * p else acc) 1
-  if beyondA.log2 ≥ ctx.params.mfbA then return none
-  for p in fa do
-    let r := if bn % p == 0 then p else
-      match invMod (bn % p) p with
-      | some inv => (a % (p : Int)).toNat * inv % p
-      | none => p
-    alg := (p, r, 1) :: alg
-  -- rational side
-  let nr : Int := sel.ratNorm a b
-  if nr == 0 then return none
-  let mut u := nr.natAbs
-  let mut rat : List (Nat × Nat) := []
-  let side := ctx.rat
-  for k in smallHits side Rr c.toUInt64 j.toUInt64 I.toUInt64 0 side.largeStart [] do
-    let p := side.primes[k]!
-    let (u', e) := stripNat u p
-    if e > 0 then
-      u := u'
-      rat := (p, e) :: rat
-  let limR := ctx.base.fb.ratPrimes.back?.getD 0
-  if u.log2 ≥ lpbR * 6 then return none
-  let some fr := smoothFactors u lpbR 64 | return none
-  let beyondR := fr.foldl (fun acc p => if p > limR then acc * p else acc) 1
-  if beyondR.log2 ≥ ctx.params.mfbR then return none
-  for p in fr do rat := (p, 1) :: rat
-  return some ⟨a, bn, rat, decide (nr < 0), alg⟩
-
-/-- Sieve one special-`q` with per-segment norms and no resieve. -/
-def processQ3 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
-  let ⟨b1, b2, lab⟩ := sc
-  let (u, v) := reduceLattice q ρ ctx.skew
-  let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
-  let len := ctx.I * ctx.J
-  let Rr := latticeRoots ctx.rat ua ub va vb
-  let Ra := latticeRoots ctx.alg ua ub va vb
-  let bufR := sieveSide ctx ctx.rat Rr (fillSegments ctx b1 false q ua ub va vb ctx.params.mfbR)
-  let bufA := sieveSide ctx ctx.alg Ra (fillSegments ctx b2 true q ua ub va vb ctx.params.mfbA)
-  let surv := survivors bufR bufA len
-  let mut rels : Array Rel := #[]
-  for pos in surv do
-    if let some rel := factorSurvivor3 ctx q ρ ua ub va vb Rr Ra pos then rels := rels.push rel
-  return (rels, ⟨bufR, bufA, lab⟩)
-
-/-- The bias of a segment initialized by `fillSegments` (`128` minus the bits to
-be explained by the sieve), recomputed from the norms at its two ends. -/
-def segBias (alg : Bool) (cs : FloatArray) (d : Nat) (uaf ubf vaf vbf mF y1F qF mfbF : Float)
-    (I s j : Nat) : Float :=
-  let jF := j.toFloat
-  let l := normBits alg cs d uaf ubf vaf vbf mF y1F qF ((s * 64).toFloat - (I / 2).toFloat) jF
-  let r := normBits alg cs d uaf ubf vaf vbf mF y1F qF (((s + 1) * 64).toFloat - (I / 2).toFloat) jF
-  let bits := if l > r then l else r
-  let t := bits - mfbF
-  let ti : Nat := if t ≤ fc 0 then 0 else if t ≥ fc 127 then 127 else t.toUInt64.toNat
-  (128 - ti).toFloat
-
-/-- `prefilterRows` for regions initialized by `fillSegments`. -/
-def prefilterSegs (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (bufR bufA : ByteArray)
-    (surv0 : Array Nat) : Array Nat := Id.run do
-  let cs := coeffsF ctx
-  let d := cs.size - 1
-  let (uaf, ubf, vaf, vbf) := (Float.ofInt ua, Float.ofInt ub, Float.ofInt va, Float.ofInt vb)
-  let mF := ctx.base.sel.m.toFloat
-  let y1F := ctx.base.sel.y1.toFloat
-  let qF := q.toFloat
-  let I := ctx.I
-  let limR := (ctx.params.mfbR + ctx.params.preSlack).toFloat
-  let limA := (ctx.params.mfbA + ctx.params.preSlack).toFloat
-  let mfbRF := (ctx.params.mfbR + ctx.params.fudge).toFloat
-  let mfbAF := (ctx.params.mfbA + ctx.params.fudge).toFloat
-  return surv0.filter fun pos =>
-    let j := pos / I
-    let c := pos % I
-    let iF := c.toFloat - (I / 2).toFloat
-    let jF := j.toFloat
-    let biasR := segBias false cs d uaf ubf vaf vbf mF y1F qF mfbRF I (c / 64) j
-    let biasA := segBias true cs d uaf ubf vaf vbf mF y1F qF mfbAF I (c / 64) j
-    let estR := normBits false cs d uaf ubf vaf vbf mF y1F qF iF jF -
-      ((bufR.get! pos).toUInt64.toFloat - biasR)
-    let estA := normBits true cs d uaf ubf vaf vbf mF y1F qF iF jF -
-      ((bufA.get! pos).toUInt64.toFloat - biasA)
-    estR ≤ limR && estA ≤ limA
-
-/-- Sieve one special-`q` with per-segment norms, the exact-norm prefilter, the
-resieve of the large ideals and exact trial division. -/
-def processQ4 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
-  let ⟨b1, b2, lab⟩ := sc
-  let (u, v) := reduceLattice q ρ ctx.skew
-  let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
-  let len := ctx.I * ctx.J
-  let Rr := latticeRoots ctx.rat ua ub va vb
-  let Ra := latticeRoots ctx.alg ua ub va vb
-  let bufR := sieveSide ctx ctx.rat Rr (fillSegments ctx b1 false q ua ub va vb ctx.params.mfbR)
-  let bufA := sieveSide ctx ctx.alg Ra (fillSegments ctx b2 true q ua ub va vb ctx.params.mfbA)
-  let surv := prefilterSegs ctx q ua ub va vb bufR bufA (survivors bufR bufA len)
-  if surv.isEmpty then return (#[], ⟨bufR, bufA, lab⟩)
-  let mut lab := lab
-  for pos in surv do lab := lab.set! pos 1
-  let listsR := groupRecords surv (resieveSide ctx ctx.rat Rr lab #[])
-  let listsA := groupRecords surv (resieveSide ctx ctx.alg Ra lab #[])
-  for pos in surv do lab := lab.set! pos 0
-  let mut rels : Array Rel := #[]
-  for k in [0:surv.size] do
-    if let some rel := factorSurvivor ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
-      rels := rels.push rel
-  return (rels, ⟨bufR, bufA, lab⟩)
 
 end PrimeFactorLean.NFS.Las

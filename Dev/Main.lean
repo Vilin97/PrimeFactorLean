@@ -98,11 +98,9 @@ def main (args : List String) : IO Unit := do
   | ["fkunit"] => fkUnit
   | ["las", ns, cnt] => lasDebug ns.toNat! cnt.toNat!
   | ["las", ns, cnt, fudge, skew] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! skew.toNat!
-  | ["las3", ns, cnt, fudge] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 true
-  | ["lascounts", ns, cnt, fudge, pre] => lasCounts ns.toNat! cnt.toNat! fudge.toNat! pre.toNat!
-  | ["las4", ns, cnt, fudge, pre] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 false true pre.toNat!
-  | ["lasq", ns, cnt, fudge, pre, q0] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 false false pre.toNat! q0.toNat!
-  | ["lasold", ns, cnt, fudge, pre] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 false false pre.toNat!
+  | ["lasq", ns, cnt, fudge, pre, q0] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 pre.toNat! q0.toNat!
+  | ["laspar", ns, per] => lasPar ns.toNat! per.toNat! [1, 2, 4, 8, 12, 16]
+  | ["lasold", ns, cnt, fudge, pre] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 pre.toNat!
   | ["laspipe", ns, ts, rounds] => lasPipeline ns.toNat! ts.toNat! rounds.toNat!
   | ["fastlong", ns, ts, fbs, m, lp, dlp, spv, slack] =>
     let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
