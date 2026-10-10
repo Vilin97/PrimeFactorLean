@@ -803,3 +803,39 @@ def siqsPhaseTimes (n threads reps : Nat) : IO Unit := do
         let r ← IO.lazyPure fun _ => (h ▸ PrimeFactorLean.SIQS.extract ctx rels threads : Option (PrimeFactorLean.ProperFactor n))
         let t3 ← IO.monoNanosNow
         IO.println s!"fb {ctx.fb.size} M {ctx.M}: ctx {(t1 - t0) / 1000} us, collect {(t2 - t1) / 1000} us ({rels.size} rels), extract {(t3 - t2) / 1000} us -> {r.map (·.val)}"
+
+/-- Cost per update of the medium-prime sieve kernel on an interval of `len`
+bytes (all primes from 31 up to `len`, both roots, `reps` passes). -/
+def strideBench (len reps : Nat) : IO Unit := do
+  let primes := (PrimeFactorLean.Arith.primesUpTo len).filter (· > 30)
+  let lenU := len.toUSize
+  let mut buf := ByteArray.mk (Array.replicate (len + 1) 0)
+  let t0 ← IO.monoNanosNow
+  let mut updates := 0
+  for r in [0:reps] do
+    if h : lenU.toNat < buf.size then
+      let mut b := buf
+      for p in primes do
+        if hb : lenU.toNat < b.size then
+          let cnt := (len + p - 1) / p
+          b := PrimeFactorLean.SIQS.stride2 b lenU (r % p).toUSize ((r * 7 + 3) % p).toUSize p.toUSize 3 hb
+            cnt.toUSize
+          updates := updates + 2 * cnt
+      buf := b
+  let t1 ← IO.monoNanosNow
+  IO.println s!"len {len}: {updates} updates in {(t1 - t0) / 1000000} ms: {(t1 - t0).toFloat / updates.toFloat} ns/update {buf.get! 5}"
+
+/-- Single-thread SIQS statistics: `as` A-values, their polynomial count, the
+relations (full and partial) and the time per polynomial. -/
+def siqsPolyStats (n as : Nat) (fb M : Nat := 0) : IO Unit := do
+  let params := PrimeFactorLean.SIQS.chooseParams (PrimeFactorLean.QS.decimalDigits n)
+  let params := if fb > 0 then { params with fbSize := fb } else params
+  let params := if M > 0 then { params with M := M } else params
+  let .inl ctx := PrimeFactorLean.SIQS.mkCtx n params | IO.println "small factor"
+  let some ap := PrimeFactorLean.SIQS.mkAPoly ctx 0 | IO.println "no A"
+  let polys := as * 2 ^ (ap.qs.size - 1)
+  let t0 ← IO.monoNanosNow
+  let rels ← IO.lazyPure fun _ => PrimeFactorLean.SIQS.processAs ctx 0 as
+  let t1 ← IO.monoNanosNow
+  let ns := t1 - t0
+  IO.println s!"fb {ctx.fb.size} M {ctx.M} s {ap.qs.size} medEnd {ctx.medEnd}: {as} A, {polys} polys, {rels.size} rels (full+partial) in {ns / 1000000} ms: {ns / 1000 / polys} us/poly, {rels.size * 1000000000 / ns} rels/s"

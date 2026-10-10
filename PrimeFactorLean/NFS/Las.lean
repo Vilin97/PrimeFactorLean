@@ -148,8 +148,13 @@ theorem size_lineSieve (s : ByteArray) (len : USize) (h : len.toNat < s.size) (p
 move by `(-x, b₀)` if `c ≥ x`, by `(y, b₁)` if `c < I - y`, and by their sum
 otherwise (`d₀ = b₀ I - x`, `d₁ = b₁ I + y` in position units). -/
 @[inline] def fkNext (mask x y d0 d1 pos : USize) : USize :=
+  -- branch free (conditional moves): `d₀` when `c ≥ x` or `c + y > I - 1`, `d₁`
+  -- when `c < x`; the three cases above are exactly these combinations
   let c := pos &&& mask
-  if c ≥ x then pos + d0 else if c + y ≤ mask then pos + d1 else pos + d0 + d1
+  let s0 : USize := if c ≥ x then d0 else 0
+  let s0 := if c + y > mask then d0 else s0
+  let s1 : USize := if c < x then d1 else 0
+  pos + s0 + s1
 
 /-- Walk the hits of a large ideal, adding `lg`, until `pos ≥ len`. -/
 def fkSieve (s : ByteArray) (len : USize) (h : len.toNat < s.size) (mask x y d0 d1 : USize)
@@ -257,6 +262,50 @@ def fkGoR (lab : ByteArray) (len : USize) (I p : UInt64) (k : Nat) (acc : Array 
         else
           let k' := (y - I) / x + 1
           fkGoR lab len I p k acc x b0 (y - k' * x) (b1 + k' * b0) fuel
+
+/-- Resieve walk on a survivor bitmap (bit `pos` of `bits`: `len / 8` bytes stay
+in the second-level cache, a byte per position does not): record
+`pos <<< 24 ||| k` at every hit on a survivor. -/
+def fkWalkB (bits : ByteArray) (len mask x y d0 d1 : USize) (k : Nat) (pos : USize)
+    (acc : Array Nat) : Nat → Array Nat
+  | 0 => acc
+  | fuel + 1 =>
+    let pos := fkNext mask x y d0 d1 pos
+    if pos < len then
+      let i := pos >>> 3
+      let acc := if h : i.toNat < bits.size then
+          if ((bits.uget i h).toUInt64 >>> (pos &&& 7).toUInt64) &&& 1 != 0 then
+            acc.push ((pos.toUInt64 <<< 24) ||| k.toUInt64).toNat
+          else acc
+        else acc
+      fkWalkB bits len mask x y d0 d1 k pos acc fuel
+    else acc
+
+/-- The reduction of `fkGo`, continuing into the bitmap resieve walk. -/
+def fkGoB (bits : ByteArray) (len : USize) (I p : UInt64) (k : Nat) (acc : Array Nat)
+    (x b0 y b1 : UInt64) : Nat → Array Nat
+  | 0 => acc
+  | fuel + 1 =>
+    if x < I && y < I then
+      if x == 0 || x + y < I || b0 == 0 || b1 == 0 then acc
+      else fkWalkB bits len (I - 1).toUSize x.toUSize y.toUSize (b0 * I - x).toUSize
+        (b1 * I + y).toUSize k (I / 2).toUSize acc (2 * len.toNat / p.toNat + 4)
+    else if x ≥ y then
+      if y == 0 then acc
+      else
+        let k1 := x / y
+        if x - k1 * y + y ≥ I then fkGoB bits len I p k acc (x - k1 * y) (b0 + k1 * b1) y b1 fuel
+        else
+          let k' := (x - I) / y + 1
+          fkGoB bits len I p k acc (x - k' * y) (b0 + k' * b1) y b1 fuel
+    else
+      if x == 0 then acc
+      else
+        let k1 := y / x
+        if y - k1 * x + x ≥ I then fkGoB bits len I p k acc x b0 (y - k1 * x) (b1 + k1 * b0) fuel
+        else
+          let k' := (y - I) / x + 1
+          fkGoB bits len I p k acc x b0 (y - k' * x) (b1 + k' * b0) fuel
 
 /-- `a⁻¹ mod p` for `0 < a < p < 2^32` by extended Euclid on 32-bit words (`0` if
 not invertible). -/
@@ -632,6 +681,19 @@ def resieveSide (ctx : LasCtx) (side : Side) (R : Array Nat) (lab : ByteArray) (
     acc := fkGoR lab len I p.toUInt64 k acc p.toUInt64 0 r.toUInt64 1 128
   return acc
 
+/-- `resieveSide` on a survivor bitmap. -/
+def resieveSideB (ctx : LasCtx) (side : Side) (R : Array Nat) (bits : ByteArray) (acc : Array Nat) :
+    Array Nat := Id.run do
+  let I := ctx.I.toUInt64
+  let len := (ctx.I * ctx.J).toUSize
+  let mut acc := acc
+  for k in [side.largeStart:side.primes.size] do
+    let p := side.primes[k]!
+    let r := R[k]!
+    if r ≥ p then continue
+    acc := fkGoB bits len I p.toUInt64 k acc p.toUInt64 0 r.toUInt64 1 128
+  return acc
+
 /-- Records `pos <<< 24 ||| k` grouped by survivor (`survs` increasing). -/
 def groupRecords (survs : Array Nat) (recs : Array Nat) : Array (List Nat) := Id.run do
   let mut lists : Array (List Nat) := Array.replicate survs.size []
@@ -678,10 +740,20 @@ regions (the algebraic one also marks the survivors during resieving). -/
 structure Scratch where
   bufR : ByteArray
   bufA : ByteArray
+  /-- The survivor bitmap of the resieve (zero between special-`q`). -/
+  bits : ByteArray
 
 def Scratch.new (ctx : LasCtx) : Scratch :=
   let n := ctx.I * ctx.J + 1
-  ⟨zeroBytes n, zeroBytes n⟩
+  ⟨zeroBytes n, zeroBytes n, zeroBytes (n / 8 + 1)⟩
+
+/-- Set (`on`) or clear the survivors' bits. -/
+def markBits (bits : ByteArray) (surv : Array Nat) (on : Bool) : ByteArray := Id.run do
+  let mut b := bits
+  for pos in surv do
+    let i := pos / 8
+    b := b.set! i (if on then b.get! i ||| ((1 : UInt8) <<< (pos % 8).toUInt8) else 0)
+  return b
 
 /-- Zero the region (row by row from the zero template). -/
 def zeroRows (ctx : LasCtx) (buf : ByteArray) : ByteArray := Id.run do
@@ -718,7 +790,7 @@ def prefilterRows (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (thrR thrA : Arra
 
 /-- Sieve one special-`q` and return its relations, reusing the buffers of `sc`. -/
 def processQWith (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
-  let ⟨b1, b2⟩ := sc
+  let ⟨b1, b2, bits⟩ := sc
   let (u, v) := reduceLattice q ρ ctx.skew
   let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
   let len := ctx.I * ctx.J
@@ -729,17 +801,19 @@ def processQWith (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scrat
   let bufR := sieveSide ctx ctx.rat Rr (fillRows ctx b1 thrR)
   let bufA := sieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA)
   let surv := prefilterRows ctx q ua ub va vb thrR thrA bufR bufA (survivors bufR bufA len)
-  if surv.isEmpty then return (#[], ⟨bufR, bufA⟩)
+  if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   -- the algebraic region is no longer needed: cleared, it labels the survivors
   -- for the resieve (a third buffer would only add cache pressure)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
-  let listsR := groupLabelled ctx surv lab rowStart (resieveSide ctx ctx.rat Rr lab #[])
-  let listsA := groupLabelled ctx surv lab rowStart (resieveSide ctx ctx.alg Ra lab #[])
+  let bits := markBits bits surv true
+  let listsR := groupLabelled ctx surv lab rowStart (resieveSideB ctx ctx.rat Rr bits #[])
+  let listsA := groupLabelled ctx surv lab rowStart (resieveSideB ctx ctx.alg Ra bits #[])
+  let bits := markBits bits surv false
   let mut rels : Array Rel := #[]
   for k in [0:surv.size] do
     if let some rel := factorSurvivor ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
       rels := rels.push rel
-  return (rels, ⟨bufR, lab⟩)
+  return (rels, ⟨bufR, lab, bits⟩)
 
 /-- Sieve one special-`q` with fresh buffers. -/
 def processQ (ctx : LasCtx) (q ρ : Nat) : Array Rel := (processQWith ctx q ρ (Scratch.new ctx)).1
@@ -909,7 +983,7 @@ def prefilterExact (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (bufR bufA biasR
 
 /-- Sieve one special-`q` with per-segment norms and the exact prefilter. -/
 def processQ5 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
-  let ⟨b1, b2⟩ := sc
+  let ⟨b1, b2, bits⟩ := sc
   let (u, v) := reduceLattice q ρ ctx.skew
   let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
   let len := ctx.I * ctx.J
@@ -920,15 +994,17 @@ def processQ5 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch 
   let bufR := sieveSide ctx ctx.rat Rr fR
   let bufA := sieveSide ctx ctx.alg Ra fA
   let surv := prefilterExact ctx q ua ub va vb bufR bufA biasR biasA (survivors bufR bufA len)
-  if surv.isEmpty then return (#[], ⟨bufR, bufA⟩)
+  if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
-  let listsR := groupLabelled ctx surv lab rowStart (resieveSide ctx ctx.rat Rr lab #[])
-  let listsA := groupLabelled ctx surv lab rowStart (resieveSide ctx ctx.alg Ra lab #[])
+  let bits := markBits bits surv true
+  let listsR := groupLabelled ctx surv lab rowStart (resieveSideB ctx ctx.rat Rr bits #[])
+  let listsA := groupLabelled ctx surv lab rowStart (resieveSideB ctx ctx.alg Ra bits #[])
+  let bits := markBits bits surv false
   let mut rels : Array Rel := #[]
   for k in [0:surv.size] do
     if let some rel := factorSurvivor ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
       rels := rels.push rel
-  return (rels, ⟨bufR, lab⟩)
+  return (rels, ⟨bufR, lab, bits⟩)
 
 /-- Segment biases (`J · I / 64` bytes) of row-initialized regions. -/
 def rowBiases (ctx : LasCtx) (thr : Array Nat) : ByteArray := Id.run do
@@ -941,7 +1017,7 @@ def rowBiases (ctx : LasCtx) (thr : Array Nat) : ByteArray := Id.run do
 
 /-- Row-maximum initialization with the exact prefilter. -/
 def processQ6 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
-  let ⟨b1, b2⟩ := sc
+  let ⟨b1, b2, bits⟩ := sc
   let (u, v) := reduceLattice q ρ ctx.skew
   let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
   let len := ctx.I * ctx.J
@@ -953,14 +1029,16 @@ def processQ6 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch 
   let bufA := sieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA)
   let surv := prefilterExact ctx q ua ub va vb bufR bufA (rowBiases ctx thrR) (rowBiases ctx thrA)
     (survivors bufR bufA len)
-  if surv.isEmpty then return (#[], ⟨bufR, bufA⟩)
+  if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
-  let listsR := groupLabelled ctx surv lab rowStart (resieveSide ctx ctx.rat Rr lab #[])
-  let listsA := groupLabelled ctx surv lab rowStart (resieveSide ctx ctx.alg Ra lab #[])
+  let bits := markBits bits surv true
+  let listsR := groupLabelled ctx surv lab rowStart (resieveSideB ctx ctx.rat Rr bits #[])
+  let listsA := groupLabelled ctx surv lab rowStart (resieveSideB ctx ctx.alg Ra bits #[])
+  let bits := markBits bits surv false
   let mut rels : Array Rel := #[]
   for k in [0:surv.size] do
     if let some rel := factorSurvivor ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
       rels := rels.push rel
-  return (rels, ⟨bufR, lab⟩)
+  return (rels, ⟨bufR, lab, bits⟩)
 
 end PrimeFactorLean.NFS.Las

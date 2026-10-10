@@ -128,6 +128,13 @@ def main (args : List String) : IO Unit := do
   | ["bench9"] => Bench9.bench9Main
   | ["bench10"] => Bench10.bench10Main
   | ["stages", ns, ts] => autoStages ns.toNat! ts.toNat!
+  | ["siqsstats", ns, as] => siqsPolyStats ns.toNat! as.toNat!
+  | ["siqsstats", ns, as, fb, m] => siqsPolyStats ns.toNat! as.toNat! fb.toNat! m.toNat!
+  | ["stridebench"] => do
+    strideBench 32768 4000
+    strideBench 65536 2000
+    strideBench 131072 1000
+    strideBench 262144 500
   | ["siqstimes", ns, ts, reps] => siqsPhaseTimes ns.toNat! ts.toNat! reps.toNat!
   | ["monttest"] => montTestMain
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
