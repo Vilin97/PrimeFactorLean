@@ -58,7 +58,7 @@ structure Params where
   mfbA : Nat := 0
   qmin : Nat := 0
   /-- Threshold slack of the lattice siever, in bits. -/
-  lasFudge : Nat := 12
+  lasFudge : Nat := 8
   /-- Target average row weight of the merged matrix. -/
   mergeDensity : Nat := 100
   /-- Kleinjung polynomial search: leading coefficients `psAdStep · [1, psAdCount]`,
@@ -101,7 +101,11 @@ def paramTable : List (Nat × Params) :=
    -- From 60 digits: the Franke–Kleinjung siever (`NFS.Las`) with CADO-NFS's
    -- bounds (factor bases, large-prime bits `lpb`, cofactor bits `mfb`, `log₂ I`,
    -- first special-q) and CADO-NFS's collision polynomial selection parameters
-   -- (`P`, special-q count, leading coefficients; twice its root-optimized pool)
+   -- (`P`, special-q count, leading coefficients; twice its root-optimized pool).
+   -- From 75 digits a single rational large prime (`mfbR ≤ lpbR + 1`) with a
+   -- larger rational factor base: our survivors cost more to process than
+   -- CADO-NFS's, and two rational large primes multiply them (76 digits: sieve
+   -- 18.2 s -> 12.7 s; 80 digits: 29.5 s -> 20.4 s)
    (60, { degree := 4, ratBound := 80000, algBound := 110000, halfWidth := 262144,
           lasLogI := 10, lpbR := 18, lpbA := 19, mfbR := 18, mfbA := 38, qmin := 62000,
           qPerTask := 4, psP := 420, psAdMax := 10000, psKeep := 20 }),
@@ -111,11 +115,11 @@ def paramTable : List (Nat × Params) :=
    (70, { degree := 4, ratBound := 343000, algBound := 244000, halfWidth := 262144,
           lasLogI := 11, lpbR := 20, lpbA := 21, mfbR := 19, mfbA := 42, qmin := 18640,
           qPerTask := 2, psP := 1800, psAdMax := 44000 }),
-   (75, { degree := 4, ratBound := 192000, algBound := 290000, halfWidth := 262144,
-          lasLogI := 11, lpbR := 21, lpbA := 21, mfbR := 41, mfbA := 42, qmin := 100846,
+   (75, { degree := 4, ratBound := 300000, algBound := 290000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 21, lpbA := 21, mfbR := 22, mfbA := 42, qmin := 100846,
           qPerTask := 2, psP := 3600, psAdMax := 84000 }),
-   (80, { degree := 4, ratBound := 293000, algBound := 340000, halfWidth := 262144,
-          lasLogI := 11, lpbR := 21, lpbA := 21, mfbR := 41, mfbA := 42, qmin := 66600,
+   (80, { degree := 4, ratBound := 500000, algBound := 340000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 22, lpbA := 21, mfbR := 23, mfbA := 42, qmin := 66600,
           qPerTask := 2, psP := 10000, psAdMax := 100000 }),
    (85, { degree := 4, ratBound := 393000, algBound := 551000, halfWidth := 262144,
           lasLogI := 11, lpbR := 22, lpbA := 22, mfbR := 44, mfbA := 44, qmin := 146453,

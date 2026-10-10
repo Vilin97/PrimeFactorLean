@@ -760,23 +760,31 @@ best sieved `α` of each `u` are scored by lognorm + sieved `α`, and the 16 bes
 of these are re-scored with the exact `α` (`alphaExact`). -/
 def rootOpt (c : CCand) (margin : Float) (maxU maxV top : Nat) : CCand := Id.run do
   let (n, s) := logNorm c.cs
-  let (ulo0, uhi0) := rotRange c.cs c.l c.m 1 (n + margin) s
-  let ulo := max ulo0 (-((maxU / 2 : Nat) : Int))
-  let uhi := min uhi0 ((maxU / 2 : Nat) : Int)
+  -- quadratic rotations `w x² g` too for degree five and more (at most 9 of them)
+  let (wlo, whi) : Int × Int := if c.cs.size ≥ 6 then
+      let (a, b) := rotRange c.cs c.l c.m 2 (n + margin) s
+      (max a (-4), min b 4)
+    else (0, 0)
   let mut short : Array (Float × Array Int) := #[]
-  for ui in [0:(uhi - ulo + 1).toNat] do
-    let u : Int := ulo + ui
-    let base := rotJ c.cs c.l c.m u 1
-    let (vlo0, vhi0) := rotRange base c.l c.m 0 (n + margin) s
-    let vlo := max vlo0 (-((maxV / 2 : Nat) : Int))
-    let vhi := min vhi0 ((maxV / 2 : Nat) : Int)
-    if vhi < vlo then continue
-    let len := (vhi - vlo + 1).toNat
-    let arr := alphaSieve c.cs c.l c.m u vlo len
-    let idx := ((Array.range arr.size).qsort fun a b => arr.get! a < arr.get! b).extract 0 top
-    for t in idx do
-      let cs := rotJ base c.l c.m (vlo + (t : Int)) 0
-      short := short.push ((logNorm cs).1 + arr.get! t, cs)
+  for wi in [0:(whi - wlo + 1).toNat] do
+    let w : Int := wlo + wi
+    let cw := rotJ c.cs c.l c.m w 2
+    let (ulo0, uhi0) := rotRange cw c.l c.m 1 (n + margin) s
+    let ulo := max ulo0 (-((maxU / 2 : Nat) : Int))
+    let uhi := min uhi0 ((maxU / 2 : Nat) : Int)
+    for ui in [0:(uhi - ulo + 1).toNat] do
+      let u : Int := ulo + ui
+      let base := rotJ cw c.l c.m u 1
+      let (vlo0, vhi0) := rotRange base c.l c.m 0 (n + margin) s
+      let vlo := max vlo0 (-((maxV / 2 : Nat) : Int))
+      let vhi := min vhi0 ((maxV / 2 : Nat) : Int)
+      if vhi < vlo then continue
+      let len := (vhi - vlo + 1).toNat
+      let arr := alphaSieve cw c.l c.m u vlo len
+      let idx := ((Array.range arr.size).qsort fun a b => arr.get! a < arr.get! b).extract 0 top
+      for t in idx do
+        let cs := rotJ base c.l c.m (vlo + (t : Int)) 0
+        short := short.push ((logNorm cs).1 + arr.get! t, cs)
   let mut best := c
   let mut bestScore := n + alphaExact c.cs 200
   for (_, cs) in (short.qsort fun a b => a.1 < b.1).extract 0 16 do

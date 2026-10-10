@@ -148,7 +148,7 @@ def lasPipeline (n : Nat) (threads : Nat) (maxRounds : Nat) : IO Unit := do
 
 /-- Siever throughput with `T` parallel tasks on disjoint special-`q` (each task
 sieves `per` special-`q` with its own buffers). -/
-def lasPar (n per : Nat) (ts : List Nat) : IO Unit := do
+def lasPar (n per : Nat) (ts : List Nat) (jDiv : Nat := 2) : IO Unit := do
   let params := chooseParams (GNFS.decimalDigits n)
   let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
       (min params.ratBound params.algBound) + 1 }
@@ -158,7 +158,7 @@ def lasPar (n per : Nat) (ts : List Nat) : IO Unit := do
   let ctx := mkCtx n sel params
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
-      mfbA := params.mfbA, fudge := params.lasFudge }
+      mfbA := params.mfbA, fudge := params.lasFudge, jDiv := jDiv }
   let las := Las.mkLasCtx ctx lasParams
   let all := specialQs sel params.qmin (per * 32)
   for t in ts do

@@ -352,6 +352,8 @@ structure LasParams where
   fudge : Nat := 4
   /-- Slack of the survivor prefilter in bits. -/
   preSlack : Nat := 6
+  /-- `J = I / jDiv` rows per special-`q`. -/
+  jDiv : Nat := 2
   deriving Repr, Inhabited
 
 /-- One side's factor base: ideals `(p, r)` (`r = p` projective) with logarithms. -/
@@ -397,7 +399,7 @@ def mkLasCtx (base : Ctx) (params : LasParams) : LasCtx :=
   { base := base, params := params,
     rat := mkSide fb.ratPrimes fb.ratRoots fb.ratLogs I params.sieveFrom,
     alg := mkSide fb.algPrimes fb.algRoots fb.algLogs I params.sieveFrom,
-    I := I, J := I / 2, skew := skewness base.sel,
+    I := I, J := I / max 1 params.jDiv, skew := skewness base.sel,
     rowTemplates := (Array.range 256).map fun v => ByteArray.mk (Array.replicate I v.toUInt8),
     limR := fb.ratPrimes.back?.getD 0, limA := fb.algPrimes.back?.getD 0 }
 

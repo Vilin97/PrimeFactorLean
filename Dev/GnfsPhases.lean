@@ -131,9 +131,16 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   for dep in deps do
     tried := tried + 1
     let a ← IO.monoNanosNow
-    let r ← IO.lazyPure fun _ => (congruence st (dep.toList.map fun i => rels[i]!) p).bind (·.factor)
+    let c ← IO.lazyPure fun _ => congruence st (dep.toList.map fun i => rels[i]!) p
+    let r := c.bind (·.factor)
     let b ← IO.monoNanosNow
-    IO.println s!"dep {tried} ({dep.size} rels): sqrt {ms a b} ms -> {r.map (·.val)}"
+    -- why a dependency fails: no congruence (odd rational exponents or no
+    -- square root in ℤ[ω]: missing characters) or a trivial gcd
+    let why := if r.isSome then "" else if c.isSome then " (trivial gcd)" else
+      match rationalRoot (dep.toList.map fun i => rels[i]!) with
+      | none => " (rational product not a square)"
+      | some _ => " (no square root in Z[w])"
+    IO.println s!"dep {tried} ({dep.size} rels): sqrt {ms a b} ms -> {r.map (·.val)}{why}"
     if r.isSome then break
   let t7 ← IO.monoNanosNow
   IO.println s!"total {ms t0 t7} ms"
