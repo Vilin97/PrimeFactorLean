@@ -13,6 +13,13 @@ correctness theorem depends on their answers.
 
 namespace PrimeFactorLean.Arith
 
+/-! ## Floating-point constants for hot loops -/
+
+/-- A float constant by integer conversion: a float literal in a loop may be
+rebuilt by `Float.ofScientific` on every iteration (common-subexpression
+elimination can merge its arguments with run-time values). -/
+@[inline] def fc (n : UInt64) : Float := n.toFloat
+
 /-! ## Modular exponentiation -/
 
 /-- Right-to-left binary powering, tail recursive: `acc * base ^ exp % m`. -/

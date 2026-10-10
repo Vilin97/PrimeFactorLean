@@ -950,11 +950,13 @@ def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf :
   let M64 := ctx.M.toUInt64
   let mut rels := rels
   let biasF := ctx.bias.toNat.toFloat
+  let B2f := if ctx.q2 then Bf else fc 2 * Bf
+  let pre8F := ctx.pre8.toFloat
   for c in [0:cands.size] do
     let j := cands[c]!
     let x := j.toFloat - Mf
-    let vf := ((Af * x + (if ctx.q2 then Bf else 2.0 * Bf)) * x + Cf).abs
-    let l8v := if vf < 2.0 then 0.0 else 8.0 * Float.log2 vf
+    let vf := ((Af * x + B2f) * x + Cf).abs
+    let l8v := if vf < fc 2 then fc 0 else fc 8 * Float.log2 vf
     let x64 := j.toUInt64 - M64
     let v64 := (A64 * x64 + B64) * x64 + C64
     let e2 : Nat := if v64 == 0 then 64 else (v64 &&& (-v64)).toNat.log2
@@ -967,8 +969,8 @@ def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf :
         smallTest ap.logp ctx.log8 ctx.pinv ctx.lim roots j.toUInt32 1 ctx.spv h.1 h.2.1 h.2.2.1
           h.2.2.2.1 h.2.2.2.2 [] (8 * e2)
       else ([], 8 * e2)
-    let sieved := ((buf.get! j).toNat.toFloat - biasF) * ctx.scale * 8.0
-    if l8v > lt.toFloat + sieved + ctx.pre8.toFloat then continue
+    let sieved := ((buf.get! j).toUInt64.toFloat - biasF) * ctx.scale * fc 8
+    if l8v > lt.toFloat + sieved + pre8F then continue
     let (hits, l8) :=
       if h : ctx.smallEnd ≤ ap.logp.size ∧ ctx.smallEnd ≤ ctx.log8.size ∧ ctx.smallEnd ≤ ctx.pinv.size ∧
           ctx.smallEnd ≤ ctx.lim.size ∧ ctx.smallEnd ≤ roots.size then

@@ -461,8 +461,13 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run
   -- Kleinjung-style polynomials (rational side `Y₁ x - m`) for the lattice
   -- siever, base-`m` polynomials for the line sievers
   let sel? := if params.lasLogI > 0 then
-      PolySelect.select n params.degree params.psAdStep params.psAdCount 2 params.psQlo
-        params.psQhi 3 params.psRotV (max 1 cfg.threads)
+      if params.psP > 0 then
+        PolySelect.selectCollision n params.degree params.psP params.psNq params.psIncr
+          params.psAdMax params.psKeep 16 100000 params.lpbR params.lpbA
+          (Float.exp2 (2 * params.lasLogI - 1).toFloat * params.qmin.toFloat) (max 1 cfg.threads)
+      else
+        PolySelect.select n params.degree params.psAdStep params.psAdCount 2 params.psQlo
+          params.psQhi 3 params.psRotV (max 1 cfg.threads)
     else none
   let some sel := sel?.orElse fun _ =>
     selectPolynomial n params.degree params.polyTries params.halfWidth params.expectedLines

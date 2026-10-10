@@ -98,6 +98,11 @@ def main (args : List String) : IO Unit := do
   | ["fkunit"] => fkUnit
   | ["las", ns, cnt] => lasDebug ns.toNat! cnt.toNat!
   | ["las", ns, cnt, fudge, skew] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! skew.toNat!
+  | ["las3", ns, cnt, fudge] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 true
+  | ["lascounts", ns, cnt, fudge, pre] => lasCounts ns.toNat! cnt.toNat! fudge.toNat! pre.toNat!
+  | ["las4", ns, cnt, fudge, pre] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 false true pre.toNat!
+  | ["lasq", ns, cnt, fudge, pre, q0] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 false false pre.toNat! q0.toNat!
+  | ["lasold", ns, cnt, fudge, pre] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 false false pre.toNat!
   | ["laspipe", ns, ts, rounds] => lasPipeline ns.toNat! ts.toNat! rounds.toNat!
   | ["fastlong", ns, ts, fbs, m, lp, dlp, spv, slack] =>
     let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
@@ -126,6 +131,18 @@ def main (args : List String) : IO Unit := do
   | ["monttest"] => montTestMain
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
   | ["gnfsphases", ns, ts, li, dens] => gnfsPhases ns.toNat! ts.toNat! li.toNat! dens.toNat!
+  | ["alphacheck"] =>
+    alphaCheck #[-14032843145855478, -67002930025814, 56665726855, 74132416, 36000] 188406130907
+      34604927877503215 10000
+  | ["polystats", ns, d, P, nq, incr, admax, lr, la, area] =>
+    polyStats ns.toNat! d.toNat! P.toNat! nq.toNat! incr.toNat! admax.toNat! lr.toNat! la.toNat!
+      (Float.exp2 area.toNat!.toFloat)
+  | ["rootstats", ns, d, P, nq, incr, admax, keep, u, v, lr, la, area] =>
+    rootStats ns.toNat! d.toNat! P.toNat! nq.toNat! incr.toNat! admax.toNat! keep.toNat! u.toNat!
+      v.toNat! lr.toNat! la.toNat! (Float.exp2 area.toNat!.toFloat)
+  | ["polysel2", ns, d, P, nq, incr, admax, keep, u, v, lr, la, area] =>
+    polyDebug2 ns.toNat! d.toNat! P.toNat! nq.toNat! incr.toNat! admax.toNat! keep.toNat! u.toNat!
+      v.toNat! lr.toNat! la.toNat! (Float.exp2 area.toNat!.toFloat)
   | ["polysel", ns, d, st, cnt, ell, qlo, qhi, u, v] => polyDebug ns.toNat! d.toNat! st.toNat! cnt.toNat! ell.toNat! qlo.toNat! qhi.toNat! u.toNat! v.toNat!
   | ["ecmbench", ns, b1, c, ts] => ecmBench ns.toNat! b1.toNat! c.toNat! ts.toNat!
   | ["ecm", b1, curves, ns, ts] =>
@@ -134,11 +151,11 @@ def main (args : List String) : IO Unit := do
       (ECMM.split n { b1 := b1.toNat!, curves := curves.toNat!, threads := ts.toNat! }).map (·.val)
   | ["nfsdebug", ns, ts, d, fbB, a, lp, fudge, lines, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 100 60 300 2000 20000 100
+    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 100 60 300 2000 20000 100 0 64 60 0 40
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfslattice", ns, ts, d, fbB, a, lp, fudge, li, lj, qpt, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 100 60 300 2000 20000 100) with }
+    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 100 60 300 2000 20000 100 0 64 60 0 40) with }
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfsdebug", ns, ts] =>
     let n := ns.toNat!

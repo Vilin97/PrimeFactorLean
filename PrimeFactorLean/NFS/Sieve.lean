@@ -68,6 +68,15 @@ structure Params where
   psQlo : Nat := 2000
   psQhi : Nat := 20000
   psRotV : Nat := 100
+  /-- Collision polynomial selection (Kleinjung 2008, CADO-NFS `polyselect`):
+  primes of `[psP, 2 psP]`, `psNq` special-`q`, leading coefficients up to
+  `psAdMax` in steps of `psIncr`; the `psKeep` best are root-optimized (`psP = 0`
+  selects the search above). -/
+  psP : Nat := 0
+  psNq : Nat := 64
+  psIncr : Nat := 60
+  psAdMax : Nat := 0
+  psKeep : Nat := 40
   deriving Repr, Inhabited
 
 /-- `(digits, params)`: line sieving for small inputs, special-`q` lattice
@@ -91,39 +100,47 @@ def paramTable : List (Nat × Params) :=
           latticeI := 4096, latticeJ := 512, qPerTask := 2 }),
    -- From 60 digits: the Franke–Kleinjung siever (`NFS.Las`) with CADO-NFS's
    -- bounds (factor bases, large-prime bits `lpb`, cofactor bits `mfb`, `log₂ I`,
-   -- first special-q) and Kleinjung polynomials with `Y₁` a product of two
-   -- primes of `[P, 2P]`
+   -- first special-q) and CADO-NFS's collision polynomial selection parameters
+   -- (`P`, special-q count, leading coefficients; twice its root-optimized pool)
    (60, { degree := 4, ratBound := 80000, algBound := 110000, halfWidth := 262144,
           lasLogI := 10, lpbR := 18, lpbA := 19, mfbR := 18, mfbA := 38, qmin := 62000,
-          qPerTask := 4, psAdCount := 300, psQlo := 2000, psQhi := 20000 }),
+          qPerTask := 4, psP := 420, psAdMax := 10000, psKeep := 20 }),
    (65, { degree := 4, ratBound := 280000, algBound := 230000, halfWidth := 262144,
           lasLogI := 11, lpbR := 19, lpbA := 20, mfbR := 18, mfbA := 40, qmin := 36000,
-          qPerTask := 4, psAdCount := 360, psQlo := 2000, psQhi := 20000 }),
+          qPerTask := 4, psP := 950, psAdMax := 22000, psKeep := 30 }),
    (70, { degree := 4, ratBound := 343000, algBound := 244000, halfWidth := 262144,
           lasLogI := 11, lpbR := 20, lpbA := 21, mfbR := 19, mfbA := 42, qmin := 18640,
-          qPerTask := 2, psAdCount := 600, psQlo := 3600, psQhi := 36000 }),
+          qPerTask := 2, psP := 1800, psAdMax := 44000 }),
    (75, { degree := 4, ratBound := 192000, algBound := 290000, halfWidth := 262144,
           lasLogI := 11, lpbR := 21, lpbA := 21, mfbR := 41, mfbA := 42, qmin := 100846,
-          qPerTask := 2, psAdCount := 800, psQlo := 3600, psQhi := 36000 }),
+          qPerTask := 2, psP := 3600, psAdMax := 84000 }),
    (80, { degree := 4, ratBound := 293000, algBound := 340000, halfWidth := 262144,
           lasLogI := 11, lpbR := 21, lpbA := 21, mfbR := 41, mfbA := 42, qmin := 66600,
-          qPerTask := 2, psAdCount := 1000, psQlo := 10000, psQhi := 20000 }),
+          qPerTask := 2, psP := 10000, psAdMax := 100000 }),
    (85, { degree := 4, ratBound := 393000, algBound := 551000, halfWidth := 262144,
           lasLogI := 11, lpbR := 22, lpbA := 22, mfbR := 44, mfbA := 44, qmin := 146453,
-          qPerTask := 2, psAdCount := 800, psQlo := 10000, psQhi := 20000 }),
+          qPerTask := 2, psP := 10000, psNq := 256, psAdMax := 50000 }),
    (90, { degree := 4, ratBound := 404000, algBound := 811000, halfWidth := 262144,
           lasLogI := 11, lpbR := 23, lpbA := 23, mfbR := 46, mfbA := 46, qmin := 200000,
-          qPerTask := 2, psAdCount := 1000, psQlo := 10000, psQhi := 20000 }),
+          qPerTask := 2, psP := 10000, psNq := 256, psAdMax := 100000 }),
    (95, { degree := 4, ratBound := 450000, algBound := 550000, halfWidth := 262144,
           lasLogI := 11, lpbR := 24, lpbA := 25, mfbR := 47, mfbA := 48, qmin := 100000,
-          qPerTask := 2, psAdCount := 1000, psQlo := 11000, psQhi := 22000 }),
+          qPerTask := 2, psP := 11000, psNq := 65536, psIncr := 12, psAdMax := 288 }),
    (100, { degree := 5, ratBound := 650000, algBound := 800000, halfWidth := 262144,
            lasLogI := 11, lpbR := 25, lpbA := 26, mfbR := 48, mfbA := 51, qmin := 180000,
-           qPerTask := 2, psAdCount := 1000, psQlo := 7000, psQhi := 14000 })]
+           qPerTask := 2, psP := 7000, psNq := 15625, psIncr := 30, psAdMax := 1680 })]
 
 def chooseParams (digits : Nat) : Params :=
-  ((paramTable.find? fun e => digits ≤ e.1).map Prod.snd).getD
-    ((paramTable.getLast?.map Prod.snd).getD default)
+  if digits ≥ 58 then
+    -- as CADO-NFS: the nearest size (ties to the larger one)
+    let dist (e : Nat) : Nat := if e ≥ digits then 2 * (e - digits) else 2 * (digits - e) + 1
+    let lattice := paramTable.filter (·.1 ≥ 60)
+    ((lattice.foldl (fun best e => match best with
+        | none => some e
+        | some b => if dist e.1 < dist b.1 then some e else some b) none).map Prod.snd).getD default
+  else
+    ((paramTable.find? fun e => digits ≤ e.1).map Prod.snd).getD
+      ((paramTable.getLast?.map Prod.snd).getD default)
 
 /-! ## Polynomial selection -/
 

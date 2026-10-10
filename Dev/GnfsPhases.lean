@@ -15,8 +15,9 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0) : IO Uni
   let params0 := if density > 0 then { params0 with mergeDensity := density } else params0
   let params := { params0 with lpMult := 2 ^ (max params0.lpbR params0.lpbA) /
       (min params0.ratBound params0.algBound) + 1 }
-  let some sel ← IO.lazyPure fun _ => (PolySelect.select n params.degree params.psAdStep
-    params.psAdCount 2 params.psQlo params.psQhi 3 params.psRotV threads).orElse fun _ =>
+  let some sel ← IO.lazyPure fun _ => (PolySelect.selectCollision n params.degree params.psP
+    params.psNq params.psIncr params.psAdMax params.psKeep 16 100000 params.lpbR params.lpbA
+    (Float.exp2 (2 * params.lasLogI - 1).toFloat * params.qmin.toFloat) threads).orElse fun _ =>
       selectPolynomial n params.degree params.polyTries params.halfWidth params.expectedLines
     | IO.println "no poly"
   let t1 ← IO.monoNanosNow
@@ -52,6 +53,7 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0) : IO Uni
     tSieve := tSieve + (b - a)
     tCheck := tCheck + (c - b)
     let gained := coll.rels.size - before
+    IO.eprintln s!"round {round}: width {width} q < {coll.nextQ} gained {gained} total {coll.rels.size} ({(b - a) / 1000000} ms)"
     if gained > 0 then
       let want := (base + base / 2 - min (base + base / 2) coll.rels.size) / 5
       width := max 100 (min 20000 (width * max 1 want / gained))
