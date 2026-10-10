@@ -1,5 +1,6 @@
 import PrimeFactorLean.NFS.Las
 import PrimeFactorLean.GNFS
+import PrimeFactorLean.NFS.PolySelect
 open PrimeFactorLean PrimeFactorLean.NFS
 
 /-- Brute-force check of the Franke–Kleinjung walk: for random `p ≥ I` and `R`,
@@ -47,9 +48,11 @@ def lasDebug (n : Nat) (count : Nat) (fudge : Nat := 4) (skewOverride : Nat := 0
   let params := chooseParams (GNFS.decimalDigits n)
   let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
       (min params.ratBound params.algBound) + 1 }
-  let some sel := selectPolynomial n params.degree params.polyTries params.halfWidth
-    params.expectedLines | IO.println "no poly"
-  IO.println s!"poly {sel.coeffs} m={sel.m} skew={skewness sel}"
+  let some sel := (PolySelect.select n params.degree params.psAdStep params.psAdCount 2
+    params.psQlo params.psQhi 3 params.psRotV 16).orElse fun _ =>
+      selectPolynomial n params.degree params.polyTries params.halfWidth params.expectedLines
+    | IO.println "no poly"
+  IO.println s!"poly {sel.coeffs} m={sel.m} y1={sel.y1} skew={skewness sel}"
   let ctx := mkCtx n sel params
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
@@ -70,7 +73,7 @@ def lasDebug (n : Nat) (count : Nat) (fudge : Nat := 4) (skewOverride : Nat := 0
     for r in rels do
       let ratProd := r.rat.foldl (fun acc (p, e) => acc * p ^ e) 1
       let algProd := r.alg.foldl (fun acc (p, _, e) => acc * p ^ e) 1
-      let nr := (r.a - (r.b : Int) * (sel.m : Int)).natAbs
+      let nr := (sel.ratNorm r.a (r.b : Int)).natAbs
       let na := (homEval sel.coeffs r.a r.b).natAbs
       if ratProd != nr || algProd != na then bad := bad + 1
       for (p, root, _) in r.alg do

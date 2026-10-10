@@ -1,5 +1,6 @@
 import PrimeFactorLean.GNFS
 import PrimeFactorLean.Merge
+import PrimeFactorLean.NFS.PolySelect
 
 /-! Timed replica of `GNFS.splitCore` (lattice-sieve path). -/
 
@@ -7,19 +8,23 @@ open PrimeFactorLean PrimeFactorLean.NFS PrimeFactorLean.GNFS
 
 def ms (a b : Nat) : Nat := (b - a) / 1000000
 
-def gnfsPhases (n threads : Nat) : IO Unit := do
+def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0) : IO Unit := do
   let t0 ← IO.monoNanosNow
   let params0 := chooseParams (decimalDigits n)
+  let params0 := if logI > 0 then { params0 with lasLogI := logI } else params0
+  let params0 := if density > 0 then { params0 with mergeDensity := density } else params0
   let params := { params0 with lpMult := 2 ^ (max params0.lpbR params0.lpbA) /
       (min params0.ratBound params0.algBound) + 1 }
-  let some sel ← IO.lazyPure fun _ => selectPolynomial n params.degree params.polyTries
-    params.halfWidth params.expectedLines | IO.println "no poly"
+  let some sel ← IO.lazyPure fun _ => (PolySelect.select n params.degree params.psAdStep
+    params.psAdCount 2 params.psQlo params.psQhi 3 params.psRotV threads).orElse fun _ =>
+      selectPolynomial n params.degree params.polyTries params.halfWidth params.expectedLines
+    | IO.println "no poly"
   let t1 ← IO.monoNanosNow
   let some st := mkSetup n sel | IO.println "no setup"
   let ctx ← IO.lazyPure fun _ => mkCtx n sel params
   let some p := inertPrime st.g 1000003 | IO.println "no inert prime"
   let t2 ← IO.monoNanosNow
-  IO.println s!"poly {sel.coeffs} skew {skewness sel}: select {ms t0 t1} ms, setup/fb {ms t1 t2} ms (rat {ctx.fb.ratPrimes.size} alg {ctx.fb.algPrimes.size})"
+  IO.println s!"poly {sel.coeffs} m {sel.m} y1 {sel.y1} skew {skewness sel}: select {ms t0 t1} ms, setup/fb {ms t1 t2} ms (rat {ctx.fb.ratPrimes.size} alg {ctx.fb.algPrimes.size})"
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
       mfbA := params.mfbA, fudge := params.lasFudge }

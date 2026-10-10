@@ -7,6 +7,7 @@ import PrimeFactorLean.NFS.Sqrt
 import PrimeFactorLean.Squares
 import PrimeFactorLean.GF2
 import PrimeFactorLean.Merge
+import PrimeFactorLean.NFS.PolySelect
 
 /-!
 # The general number field sieve
@@ -457,8 +458,15 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run
       { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
           (min params.ratBound params.algBound) + 1 }
     else params
-  let some sel := selectPolynomial n params.degree params.polyTries params.halfWidth
-    params.expectedLines | return none
+  -- Kleinjung-style polynomials (rational side `Y₁ x - m`) for the lattice
+  -- siever, base-`m` polynomials for the line sievers
+  let sel? := if params.lasLogI > 0 then
+      PolySelect.select n params.degree params.psAdStep params.psAdCount 2 params.psQlo
+        params.psQhi 3 params.psRotV (max 1 cfg.threads)
+    else none
+  let some sel := sel?.orElse fun _ =>
+    selectPolynomial n params.degree params.polyTries params.halfWidth params.expectedLines
+    | return none
   let some st := mkSetup n sel | return none
   let ctx := mkCtx n sel params
   -- A factor-base prime dividing n is a factor.
@@ -501,7 +509,13 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run
   let rels := coll.rels
   for k in [rows.sparse.size:rels.size] do rows := rows.add rels[k]!
   let numCols := rows.next
-  let matRows := (Array.range rels.size).map fun k => fullRow ctx.fb rels[k]! rows.sparse[k]!
+  -- the character columns cost a Jacobi symbol each: rows in parallel chunks
+  let chunk := (rels.size + threads - 1) / threads
+  let rowTasks := (List.range threads).map fun t => Task.spawn fun _ =>
+    (Array.range (min rels.size ((t + 1) * chunk) - min rels.size (t * chunk))).map fun i =>
+      let k := t * chunk + i
+      fullRow ctx.fb rels[k]! rows.sparse[k]!
+  let matRows := rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
   -- filtering: merge light columns into a smaller, denser matrix (the sign,
   -- parity and character columns are dense and never eliminated)
   let kept := GF2.removeSingletons numCols matRows
@@ -510,13 +524,15 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run
   let mdeps := Lanczos.dependencies mcols mrows 64 threads
   let deps := (Merge.unmerge kept.size hist mdeps).map fun dep => dep.map fun i => kept[i]!
   let deps := if deps.isEmpty then GF2.dependencies numCols matRows 64 else deps
-  for dep in deps do
-    match congruence st (dep.toList.map fun i => rels[i]!) p with
-    | none => continue
-    | some sc =>
-      match sc.factor with
-      | some d => return some d
-      | none => continue
+  -- each dependency splits `n` with probability about 1/2: square roots in
+  -- parallel batches of four
+  let mut i := 0
+  while i < deps.size do
+    let batch := (deps.extract i (i + 4)).toList.map fun dep => Task.spawn fun _ =>
+      (congruence st (dep.toList.map fun j => rels[j]!) p).bind (·.factor)
+    for tk in batch do
+      if let some d := tk.get then return some d
+    i := i + 4
   return none
 
 /-- The public splitter: even numbers and perfect powers are handled first. -/

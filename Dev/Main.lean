@@ -12,6 +12,7 @@ import Dev.Bench8
 import Dev.Stages
 import Dev.MontTest
 import Dev.GnfsPhases
+import Dev.PolyDebug
 open PrimeFactorLean
 
 def timed (label : String) (f : Unit → Option Nat) : IO Unit := do
@@ -124,6 +125,8 @@ def main (args : List String) : IO Unit := do
   | ["stages", ns, ts] => autoStages ns.toNat! ts.toNat!
   | ["monttest"] => montTestMain
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
+  | ["gnfsphases", ns, ts, li, dens] => gnfsPhases ns.toNat! ts.toNat! li.toNat! dens.toNat!
+  | ["polysel", ns, d, st, cnt, ell, qlo, qhi, u, v] => polyDebug ns.toNat! d.toNat! st.toNat! cnt.toNat! ell.toNat! qlo.toNat! qhi.toNat! u.toNat! v.toNat!
   | ["ecmbench", ns, b1, c, ts] => ecmBench ns.toNat! b1.toNat! c.toNat! ts.toNat!
   | ["ecm", b1, curves, ns, ts] =>
     let n := ns.toNat!
@@ -131,11 +134,11 @@ def main (args : List String) : IO Unit := do
       (ECMM.split n { b1 := b1.toNat!, curves := curves.toNat!, threads := ts.toNat! }).map (·.val)
   | ["nfsdebug", ns, ts, d, fbB, a, lp, fudge, lines, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 100
+    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 100 60 300 2000 20000 100
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfslattice", ns, ts, d, fbB, a, lp, fudge, li, lj, qpt, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 100) with }
+    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 100 60 300 2000 20000 100) with }
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfsdebug", ns, ts] =>
     let n := ns.toNat!

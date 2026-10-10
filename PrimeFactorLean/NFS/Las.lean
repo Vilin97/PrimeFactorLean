@@ -300,6 +300,8 @@ structure LasParams where
   sieveFrom : Nat := 30
   /-- Threshold slack in bits. -/
   fudge : Nat := 4
+  /-- Slack of the survivor prefilter in bits. -/
+  preSlack : Nat := 6
   deriving Repr, Inhabited
 
 /-- One side's factor base: ideals `(p, r)` (`r = p` projective) with logarithms. -/
@@ -311,6 +313,10 @@ structure Side where
   largeStart : Nat
   /-- First index with `p ≥ sieveFrom`. -/
   sieveStart : Nat
+  /-- `p⁻¹ mod 2^32` and `⌊(2^32 - 1)/p⌋` for the small ideals: `p ∣ y` iff
+  `y p⁻¹ ≤ lim (mod 2^32)` for `y < 2^32`. -/
+  pinv : Array UInt32
+  lim : Array UInt32
 
 structure LasCtx where
   base : Ctx
@@ -328,7 +334,9 @@ def mkSide (primes roots : Array Nat) (logs : ByteArray) (I sieveFrom : Nat) : S
   while largeStart < primes.size && primes[largeStart]! < I do largeStart := largeStart + 1
   let mut sieveStart := 0
   while sieveStart < primes.size && primes[sieveStart]! < sieveFrom do sieveStart := sieveStart + 1
-  return { primes, roots, logs, largeStart, sieveStart }
+  let small := (primes.extract 0 largeStart).map (·.toUInt32)
+  return { primes, roots, logs, largeStart, sieveStart, pinv := small.map SIQS.inv32,
+           lim := small.map fun p => if p == 0 then 0 else (0xFFFFFFFF : UInt32) / p }
 
 def mkLasCtx (base : Ctx) (params : LasParams) : LasCtx :=
   let I := 2 ^ params.logI
@@ -459,6 +467,23 @@ def survivors (bufR bufA : ByteArray) (len : Nat) : Array Nat := Id.run do
     b := e
   return out
 
+/-- Indices `k < stop` of the small ideals whose progression `i ≡ j R (mod p)`
+contains the column `c` of row `j` (`y = c + I p - I/2 - j R` is divisible by
+`p`, tested by multiplication with `p⁻¹ mod 2^32`), and of the degenerate or
+projective ideals (`R ≥ p`), which the caller tests on the norm. -/
+def smallHits (side : Side) (R : Array Nat) (c j I : UInt64) (k stop : Nat) (acc : List Nat) :
+    List Nat :=
+  if k < stop then
+    let p := side.primes[k]!.toUInt64
+    let r := R[k]!.toUInt64
+    let hit := if r ≥ p then true else
+      let y := c + I * p - I / 2 - j * r
+      -- the inverse trick needs an odd p
+      if p == 2 then y &&& 1 == 0 else y.toUInt32 * side.pinv[k]! ≤ side.lim[k]!
+    smallHits side R c j I (k + 1) stop (if hit then k :: acc else acc)
+  else acc
+termination_by stop - k
+
 /-- Divide `u` by `p` as often as possible. -/
 def stripNat (u p : Nat) : Nat × Nat := Id.run do
   let mut u := u
@@ -503,15 +528,12 @@ def factorSurvivor (ctx : LasCtx) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Arra
   let mut u := nr.natAbs
   let mut rat : List (Nat × Nat) := []
   let side := ctx.rat
-  for k in [0:side.largeStart] do
+  for k in smallHits side Rr c.toUInt64 j.toUInt64 I.toUInt64 0 side.largeStart [] do
     let p := side.primes[k]!
-    let R := Rr[k]!
-    let hit := if R ≥ p then u % p == 0 else (c + p * j + p - (I / 2) % p) % p == (j * R) % p
-    if hit then
-      let (u', e) := stripNat u p
-      if e > 0 then
-        u := u'
-        rat := (p, e) :: rat
+    let (u', e) := stripNat u p
+    if e > 0 then
+      u := u'
+      rat := (p, e) :: rat
   for k in listR do
     let p := side.primes[k]!
     let (u', e) := stripNat u p
@@ -528,15 +550,13 @@ def factorSurvivor (ctx : LasCtx) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Arra
   let mut z := z0
   let mut alg : List (Nat × Nat × Nat) := [(q, ρ, eq)]
   let sideA := ctx.alg
-  for k in [0:sideA.largeStart] do
+  for k in smallHits sideA Ra c.toUInt64 j.toUInt64 I.toUInt64 0 sideA.largeStart [] do
     let p := sideA.primes[k]!
     let r := sideA.roots[k]!
-    let R := Ra[k]!
-    let hit :=
-      if R ≥ p then
-        (if r == p then bn % p == 0 else (a - b * (r : Int)) % (p : Int) == 0) && z % p == 0
-      else (c + p * j + p - (I / 2) % p) % p == (j * R) % p
-    if hit then
+    -- degenerate or projective progressions: test the ideal itself
+    let ok := Ra[k]! < p ||
+      (if r == p then bn % p == 0 else (a - b * (r : Int)) % (p : Int) == 0)
+    if ok then
       let (z', e) := stripNat z p
       if e > 0 then
         z := z'
@@ -601,7 +621,28 @@ def processQWith (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scrat
   let thrA := rowThresholds ctx q ua ub va vb ctx.params.mfbA true
   let bufR := sieveSide ctx ctx.rat Rr (fillRows ctx b1 thrR)
   let bufA := sieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA)
-  let surv := survivors bufR bufA len
+  let surv0 := survivors bufR bufA len
+  -- prefilter: the norms at the survivor (floating point) against the sieved
+  -- logarithms (its bytes above the row bias); the unsieved small primes and the
+  -- rounding are covered by `preSlack` bits
+  let cs : Array Float := ctx.base.sel.coeffs.map Float.ofInt
+  let (uaf, ubf, vaf, vbf) := (Float.ofInt ua, Float.ofInt ub, Float.ofInt va, Float.ofInt vb)
+  let mF := ctx.base.sel.m.toFloat
+  let y1F := ctx.base.sel.y1.toFloat
+  let qF := q.toFloat
+  let I := ctx.I
+  let slack := ctx.params.preSlack.toFloat
+  let surv := surv0.filter fun pos =>
+    let j := pos / I
+    let iF := (pos % I).toFloat - (I / 2).toFloat
+    let jF := j.toFloat
+    let a := iF * uaf + jF * vaf
+    let b := iF * ubf + jF * vbf
+    let biasR := (128 - min 127 thrR[j]!).toFloat
+    let biasA := (128 - min 127 thrA[j]!).toFloat
+    let estR := Float.log2 ((y1F * a - mF * b).abs + 1.0) - ((bufR.get! pos).toNat.toFloat - biasR)
+    let estA := Float.log2 ((homEvalF cs a b).abs / qF + 1.0) - ((bufA.get! pos).toNat.toFloat - biasA)
+    estR ≤ ctx.params.mfbR.toFloat + slack && estA ≤ ctx.params.mfbA.toFloat + slack
   if surv.isEmpty then return (#[], ⟨bufR, bufA, lab⟩)
   let mut lab := lab
   for pos in surv do lab := lab.set! pos 1

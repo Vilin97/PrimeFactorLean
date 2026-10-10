@@ -61,6 +61,13 @@ structure Params where
   lasFudge : Nat := 12
   /-- Target average row weight of the merged matrix. -/
   mergeDensity : Nat := 100
+  /-- Kleinjung polynomial search: leading coefficients `psAdStep · [1, psAdCount]`,
+  moduli from two primes of `[psQlo, psQhi)`, rotations up to `psRotV`. -/
+  psAdStep : Nat := 60
+  psAdCount : Nat := 300
+  psQlo : Nat := 2000
+  psQhi : Nat := 20000
+  psRotV : Nat := 100
   deriving Repr, Inhabited
 
 /-- `(digits, params)`: line sieving for small inputs, special-`q` lattice
@@ -82,26 +89,37 @@ def paramTable : List (Nat × Params) :=
           latticeI := 4096, latticeJ := 256, qPerTask := 4 }),
    (55, { degree := 4, ratBound := 90000, algBound := 90000, halfWidth := 262144, lpMult := 60,
           latticeI := 4096, latticeJ := 512, qPerTask := 2 }),
-   -- From 60 digits: the Franke–Kleinjung siever (`NFS.Las`) with CADO-NFS-like
-   -- bounds: factor bases, large-prime bits `lpb` and cofactor bits `mfb`.
+   -- From 60 digits: the Franke–Kleinjung siever (`NFS.Las`) with CADO-NFS's
+   -- bounds (factor bases, large-prime bits `lpb`, cofactor bits `mfb`, `log₂ I`,
+   -- first special-q) and Kleinjung polynomials with `Y₁` a product of two
+   -- primes of `[P, 2P]`
    (60, { degree := 4, ratBound := 80000, algBound := 110000, halfWidth := 262144,
           lasLogI := 10, lpbR := 18, lpbA := 19, mfbR := 18, mfbA := 38, qmin := 62000,
-          qPerTask := 4 }),
-   (65, { degree := 4, ratBound := 160000, algBound := 160000, halfWidth := 262144,
-          lasLogI := 10, lpbR := 19, lpbA := 20, mfbR := 19, mfbA := 40, qmin := 80000,
-          qPerTask := 4 }),
-   (70, { degree := 4, ratBound := 340000, algBound := 245000, halfWidth := 262144,
-          lasLogI := 11, lpbR := 20, lpbA := 21, mfbR := 20, mfbA := 42, qmin := 100000,
-          qPerTask := 2 }),
+          qPerTask := 4, psAdCount := 300, psQlo := 2000, psQhi := 20000 }),
+   (65, { degree := 4, ratBound := 280000, algBound := 230000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 19, lpbA := 20, mfbR := 18, mfbA := 40, qmin := 36000,
+          qPerTask := 4, psAdCount := 360, psQlo := 2000, psQhi := 20000 }),
+   (70, { degree := 4, ratBound := 343000, algBound := 244000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 20, lpbA := 21, mfbR := 19, mfbA := 42, qmin := 18640,
+          qPerTask := 2, psAdCount := 600, psQlo := 3600, psQhi := 36000 }),
+   (75, { degree := 4, ratBound := 192000, algBound := 290000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 21, lpbA := 21, mfbR := 41, mfbA := 42, qmin := 100846,
+          qPerTask := 2, psAdCount := 800, psQlo := 3600, psQhi := 36000 }),
    (80, { degree := 4, ratBound := 293000, algBound := 340000, halfWidth := 262144,
           lasLogI := 11, lpbR := 21, lpbA := 21, mfbR := 41, mfbA := 42, qmin := 66600,
-          qPerTask := 2 }),
+          qPerTask := 2, psAdCount := 1000, psQlo := 10000, psQhi := 20000 }),
+   (85, { degree := 4, ratBound := 393000, algBound := 551000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 22, lpbA := 22, mfbR := 44, mfbA := 44, qmin := 146453,
+          qPerTask := 2, psAdCount := 800, psQlo := 10000, psQhi := 20000 }),
    (90, { degree := 4, ratBound := 404000, algBound := 811000, halfWidth := 262144,
           lasLogI := 11, lpbR := 23, lpbA := 23, mfbR := 46, mfbA := 46, qmin := 200000,
-          qPerTask := 2 }),
+          qPerTask := 2, psAdCount := 1000, psQlo := 10000, psQhi := 20000 }),
+   (95, { degree := 4, ratBound := 450000, algBound := 550000, halfWidth := 262144,
+          lasLogI := 11, lpbR := 24, lpbA := 25, mfbR := 47, mfbA := 48, qmin := 100000,
+          qPerTask := 2, psAdCount := 1000, psQlo := 11000, psQhi := 22000 }),
    (100, { degree := 5, ratBound := 650000, algBound := 800000, halfWidth := 262144,
            lasLogI := 11, lpbR := 25, lpbA := 26, mfbR := 48, mfbA := 51, qmin := 180000,
-           qPerTask := 2 })]
+           qPerTask := 2, psAdCount := 1000, psQlo := 7000, psQhi := 14000 })]
 
 def chooseParams (digits : Nat) : Params :=
   ((paramTable.find? fun e => digits ≤ e.1).map Prod.snd).getD
