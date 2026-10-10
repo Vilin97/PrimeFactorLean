@@ -24,6 +24,11 @@ def applyOverrides (p : Params) (kvs : List String) : Params :=
       | "fudge" => { p with lasFudge := x }
       | "qmin" => { p with qmin := x }
       | "logI" => { p with lasLogI := x }
+      | "psP" => { p with psP := x }
+      | "psNq" => { p with psNq := x }
+      | "psIncr" => { p with psIncr := x }
+      | "psAdMax" => { p with psAdMax := x }
+      | "psKeep" => { p with psKeep := x }
       | _ => p
     | _ => p) p
 

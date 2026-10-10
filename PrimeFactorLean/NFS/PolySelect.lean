@@ -256,16 +256,124 @@ hashing) give `ℓ`. The pairs are then size-optimized (local descent over
 translations and rotations by `x^j (ℓ x - m)`, `j ≤ d - 2`), rotated by
 `(u x + v)(ℓ x - m)` to improve `α`, and ranked by Murphy's `E`. -/
 
+/-- `b^e mod m` on machine words (`m < 2^32`). -/
+def powModW (b e m : UInt64) : UInt64 := go (b % m) e 1 64
+where
+  go (b e acc : UInt64) : Nat → UInt64
+    | 0 => acc
+    | fuel + 1 =>
+      if e == 0 then acc
+      else go (b * b % m) (e >>> 1) (if e &&& 1 == 1 then acc * b % m else acc) fuel
+
+/-- `a⁻¹ mod m` for `m < 2^62` by extended Euclid on signed words (`0` if not
+invertible). -/
+def invModW (a m : UInt64) : UInt64 := Id.run do
+  let mut r0 : Int64 := m.toInt64
+  let mut r1 : Int64 := (a % m).toInt64
+  let mut s0 : Int64 := 0
+  let mut s1 : Int64 := 1
+  for _ in [0:128] do
+    if r1 == 0 then break
+    let q := r0 / r1
+    let r2 := r0 - q * r1
+    let s2 := s0 - q * s1
+    r0 := r1
+    r1 := r2
+    s0 := s1
+    s1 := s2
+  if r0 != 1 then return 0
+  return (if s0 < 0 then s0 + m.toInt64 else s0).toUInt64
+
+/-- A square root of the quadratic residue `a` modulo the odd prime `p < 2^31`
+(Tonelli–Shanks). -/
+def sqrtModW (a p : UInt64) : UInt64 := Id.run do
+  let a := a % p
+  if a == 0 then return 0
+  if p % 4 == 3 then return powModW a ((p + 1) / 4) p
+  -- p - 1 = q 2^e
+  let mut q := p - 1
+  let mut e : Nat := 0
+  while q % 2 == 0 do
+    q := q / 2
+    e := e + 1
+  -- a non-residue
+  let mut z : UInt64 := 2
+  while powModW z ((p - 1) / 2) p != p - 1 do z := z + 1
+  let mut m := e
+  let mut c := powModW z q p
+  let mut t := powModW a q p
+  let mut r := powModW a ((q + 1) / 2) p
+  for _ in [0:64] do
+    if t == 1 then break
+    -- the least i with t^(2^i) = 1
+    let mut i := 0
+    let mut t2 := t
+    while t2 != 1 && i < m do
+      t2 := t2 * t2 % p
+      i := i + 1
+    if i == m then return 0
+    let mut b := c
+    for _ in [0:m - i - 1] do b := b * b % p
+    m := i
+    c := b * b % p
+    t := t * c % p
+    r := r * b % p
+  return r
+
+/-- The roots of `x^d ≡ c (mod p)` (`p` prime below `2^31`): there are `0` or
+`g = gcd(d, p - 1)` of them, decided by `c^((p-1)/g)`. One root `r₀` is
+`c^(d⁻¹ mod (p-1)/g)` when `d` is prime to `(p-1)/g`, two square roots for
+`d = 4`; the others are `r₀ ζ^i` for a primitive `g`-th root of unity `ζ`.
+The remaining cases fall back to the generic root finder. -/
+def binomialRoots (d c p : Nat) : Array Nat := Id.run do
+  let generic (_ : Unit) : Array Nat :=
+    ModP.roots p (ModP.ofInts p (((-((c % p : Nat) : Int)) :: List.replicate (d - 1) (0 : Int)) ++ [1]))
+  let pw := p.toUInt64
+  let cw := (c % p).toUInt64
+  if cw == 0 || p < 3 then return generic ()
+  let g := Nat.gcd d (p - 1)
+  let m := (p - 1) / g
+  if g == 1 then
+    return #[(powModW cw (invModW d.toUInt64 (p - 1).toUInt64) pw).toNat]
+  if powModW cw m.toUInt64 pw != 1 then return #[]
+  let r0 : UInt64 :=
+    if Nat.gcd d m == 1 then powModW cw (invModW d.toUInt64 m.toUInt64) pw
+    else if d == 4 then
+      -- c = x₀⁴: s = ±x₀² and -s are both squares here (or p ≡ 3 mod 4: one is)
+      let s := sqrtModW cw pw
+      let s := if powModW s ((p - 1) / 2).toUInt64 pw == 1 then s else pw - s
+      sqrtModW s pw
+    else 0
+  if r0 == 0 || powModW r0 d.toUInt64 pw != cw then return generic ()
+  -- a primitive g-th root of unity (g ∈ {2, 3, 4, 5, 6} for d ≤ 6)
+  let mut zeta : UInt64 := 0
+  for h in [2:200] do
+    let z := powModW h.toUInt64 m.toUInt64 pw
+    -- order exactly g: z^(g/q) ≠ 1 for each prime q ∣ g
+    let ok := (g % 2 != 0 || powModW z (g / 2).toUInt64 pw != 1) &&
+      (g % 3 != 0 || powModW z (g / 3).toUInt64 pw != 1) &&
+      (g % 5 != 0 || powModW z (g / 5).toUInt64 pw != 1)
+    if ok then
+      zeta := z
+      break
+  if zeta == 0 then return generic ()
+  let mut out : Array Nat := #[]
+  let mut r := r0
+  for _ in [0:g] do
+    out := out.push r.toNat
+    r := r * zeta % pw
+  return out
+
 /-- The roots `r ≠ 0` of `x^d ≡ c (mod p)` lifted to roots modulo `p²` (Hensel),
 returned as the residues of `r - m₀` modulo `p²`. -/
 def liftedRoots (d c m0 p : Nat) : Array Nat := Id.run do
   let pp := p * p
   let cp := c % pp
-  let f := ModP.ofInts p (((-((cp % p : Nat) : Int)) :: List.replicate (d - 1) (0 : Int)) ++ [1])
   let mut out : Array Nat := #[]
-  for r in ModP.roots p f do
+  for r in binomialRoots d cp p do
     if r == 0 then continue
-    let some inv := invMod (d * powMod r (d - 1) p % p) p | continue
+    let inv := (invModW (d * powMod r (d - 1) p % p).toUInt64 p.toUInt64).toNat
+    if inv == 0 then continue
     let t := (cp + pp - powMod r d pp) % pp
     let rr := r + t / p * inv % p * p
     out := out.push ((rr + pp - m0 % pp) % pp)
@@ -279,7 +387,8 @@ def specialQPrimes : List Nat :=
 
 /-- `x` with `x ≡ a (mod ma)`, `x ≡ b (mod mb)` (coprime moduli), in `[0, ma mb)`. -/
 def crt2 (a ma b mb : Nat) : Nat :=
-  let inv := (invMod (ma % mb) mb).getD 0
+  let inv := if mb >>> 62 == 0 then (invModW (ma % mb).toUInt64 mb.toUInt64).toNat
+    else (invMod (ma % mb) mb).getD 0
   a + ma * (((b + mb - a % mb) % mb) * inv % mb)
 
 /-- The next `k`-subset of `[0, n)` in lexicographic order. -/
@@ -341,6 +450,59 @@ def collide (prs : Array (Nat × Array Nat)) (invs : Array Nat) (rQ M : Nat) :
         | none => h := h.insert i p
         i := i + (pp : Int)
   return out
+
+/-- The slot of `key` in an open-addressing table, or the first slot without a
+current entry (`gen` tags the current entries): tail recursive, no allocation. -/
+def findSlot (t : Array Nat) (mask g key h : UInt64) : Nat → UInt64
+  | 0 => h
+  | fuel + 1 =>
+    let e := t[h.toNat]!.toUInt64
+    if e >>> 44 != g || (e >>> 14) &&& 1073741823 == key then h
+    else findSlot t mask g key ((h + 1) &&& mask) fuel
+
+/-- The keys `key, key + pp, … ≤ top` of the prime with index `k`: each is
+inserted, or reported with the prime already stored under it. -/
+def collideKeys (prs : Array (Nat × Array Nat)) (t : Array Nat) (out : Array (Int × Nat × Nat))
+    (mask g top ppw M p k : UInt64) (key : UInt64) : Nat → Array Nat × Array (Int × Nat × Nat)
+  | 0 => (t, out)
+  | fuel + 1 =>
+    if key > top then (t, out)
+    else
+      let h := findSlot t mask g key (((key * 2654435761) >>> 16) &&& mask) t.size
+      let e := t[h.toNat]!.toUInt64
+      if e >>> 44 == g then
+        let p' := prs[(e &&& 16383).toNat]!.1
+        let out := if p'.toUInt64 != p then
+            out.push ((key.toNat : Int) - (M.toNat : Int), p', p.toNat) else out
+        collideKeys prs t out mask g top ppw M p k (key + ppw) fuel
+      else
+        collideKeys prs (t.set! h.toNat ((g <<< 44) ||| (key <<< 14) ||| k).toNat) out mask g top
+          ppw M p k (key + ppw) fuel
+
+/-- `collide` with an open-addressing table (`2^14` slots, reused across calls):
+an entry is `gen <<< 44 ||| (i + M) <<< 14 ||| k` (`k` the prime's index), so a
+slot from an earlier call (another `gen`) counts as empty and the table is never
+cleared. Requires `2 M < 2^30` and fewer than `2^14` primes. -/
+def collideTab (prs : Array (Nat × Array Nat)) (invs : Array Nat) (rQ M : Nat) (tbl : Array Nat)
+    (gen : Nat) : Array (Int × Nat × Nat) × Array Nat := Id.run do
+  let mask := (tbl.size - 1).toUInt64
+  let g := gen.toUInt64
+  let top := (2 * M).toUInt64
+  let mut t := tbl
+  let mut out : Array (Int × Nat × Nat) := #[]
+  for k in [0:prs.size] do
+    let (p, rs) := prs[k]!
+    let inv := invs[k]!
+    if inv == 0 then continue
+    let pp := p * p
+    let rq := rQ % pp
+    for rp in rs do
+      let u := (rp + pp - rq) % pp * inv % pp
+      let (t', out') := collideKeys prs t out mask g top pp.toUInt64 M.toUInt64 p.toUInt64 k.toUInt64
+        ((M + u) % pp).toUInt64 (2 * M / pp + 2)
+      t := t'
+      out := out'
+  return (out, t)
 
 /-- The pair of `m̃` and `ℓ` (Lemma 2.1 with modulus `ℓ` after fixing
 `a_d = ad` and the centered `a_{d-1} ≡ m̃ / ℓ (mod d a_d)`): the coefficients and
@@ -701,6 +863,9 @@ def collisionSearch (n d P nq incr adLo adHi keep : Nat) : Array CCand := Id.run
   let mut best : Array CCand := #[]
   let primesP := (primesUpTo (2 * P)).filter (· ≥ P)
   let M := 4 * P * P
+  let useTab := 2 * M < 1073741824 && primesP.size < 16384
+  let mut tbl : Array Nat := Array.replicate 16384 0
+  let mut gen := 0
   let mut ad := (adLo + incr - 1) / incr * incr
   if ad == 0 then ad := incr
   while ad < adHi do
@@ -730,9 +895,16 @@ def collisionSearch (n d P nq incr adLo adHi keep : Nat) : Array CCand := Id.run
       k := k + 1
     for (Q, rsQ) in specialQList sq (max 1 (min k 8)) nq do
       let QQ := Q * Q
-      let invs := prs.map fun (p, _) => (invMod (QQ % (p * p)) (p * p)).getD 0
+      let invs := prs.map fun (p, _) => (invModW (QQ % (p * p)).toUInt64 (p * p).toUInt64).toNat
       for rQ in rsQ do
-        for (i, p1, p2) in collide prs invs rQ M do
+        gen := gen + 1
+        if gen ≥ 524288 then
+          tbl := Array.replicate 16384 0
+          gen := 1
+        let (cols, t) := if useTab then collideTab prs invs rQ M tbl gen
+          else (collide prs invs rQ M, tbl)
+        tbl := t
+        for (i, p1, p2) in cols do
           let mt : Int := (m0 : Int) + (rQ : Int) + i * (QQ : Int)
           let l := p1 * p2 * Q
           match fromCollision n d ad mt l with

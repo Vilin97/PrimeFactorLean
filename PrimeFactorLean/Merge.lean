@@ -49,10 +49,23 @@ def containsSorted (a : Array Nat) (x : Nat) : Bool := Id.run do
     if a[mid]! < x then lo := mid + 1 else hi := mid
   return lo < a.size && a[lo]! == x
 
-/-- Insertion sort for the (short) column lists of a row; removes duplicate
-pairs (a column appearing twice cancels over GF(2)). -/
+/-- Insertion sort of a short array of naturals (direct comparisons: `Array.qsort`
+here called its comparator through a boxed closure, half of the merge's time). -/
+def sortNat (a : Array Nat) : Array Nat := Id.run do
+  let mut a := a
+  for i in [1:a.size] do
+    let x := a[i]!
+    let mut j := i
+    while j > 0 && a[j - 1]! > x do
+      a := a.set! j a[j - 1]!
+      j := j - 1
+    a := a.set! j x
+  return a
+
+/-- Sorted column lists of a row; removes duplicate pairs (a column appearing
+twice cancels over GF(2)). -/
 def normalize (r : Array Nat) : Array Nat := Id.run do
-  let s := r.qsort (· < ·)
+  let s := sortNat r
   let mut out : Array Nat := Array.mkEmpty s.size
   let mut i := 0
   while i < s.size do
