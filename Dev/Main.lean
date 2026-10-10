@@ -131,6 +131,11 @@ def main (args : List String) : IO Unit := do
   | ["bench9"] => Bench9.bench9Main
   | ["bench10"] => Bench10.bench10Main
   | ["stages", ns, ts] => autoStages ns.toNat! ts.toNat!
+  | ["trace", ns, ts] => do
+    let t0 ← IO.monoNanosNow
+    let fs ← traceFactor { threads := ts.toNat! } 200 0 ns.toNat!
+    let t1 ← IO.monoNanosNow
+    IO.println s!"factors {fs} total {(t1 - t0).toFloat / 1.0e6} ms"
   | ["siqsstats", ns, as] => siqsPolyStats ns.toNat! as.toNat!
   | ["siqsstats", ns, as, fb, m] => siqsPolyStats ns.toNat! as.toNat! fb.toNat! m.toNat!
   | ["stridebench"] => do
@@ -142,6 +147,9 @@ def main (args : List String) : IO Unit := do
   | ["monttest"] => montTestMain
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
   | "gnfsover" :: ns :: ts :: kvs => gnfsPhases ns.toNat! ts.toNat! 0 0 none kvs
+  | "snfsover" :: ns :: ts :: b :: k :: sgn :: d :: kvs =>
+    let sel := GNFS.snfsSelection b.toNat! k.toNat! d.toNat! (sgn == "+")
+    gnfsPhases ns.toNat! ts.toNat! 0 0 (some (sel, GNFS.decimalDigits (b.toNat! ^ k.toNat!))) kvs
   | ["snfsphases", ns, ts, b, k, sgn, d] =>
     let sel := GNFS.snfsSelection b.toNat! k.toNat! d.toNat! (sgn == "+")
     gnfsPhases ns.toNat! ts.toNat! 0 0 (some (sel, GNFS.decimalDigits (b.toNat! ^ k.toNat!)))
@@ -160,6 +168,10 @@ def main (args : List String) : IO Unit := do
       v.toNat! lr.toNat! la.toNat! (Float.exp2 area.toNat!.toFloat)
   | ["polysel", ns, d, st, cnt, ell, qlo, qhi, u, v] => polyDebug ns.toNat! d.toNat! st.toNat! cnt.toNat! ell.toNat! qlo.toNat! qhi.toNat! u.toNat! v.toNat!
   | ["ecmbench", ns, b1, c, ts] => ecmBench ns.toNat! b1.toNat! c.toNat! ts.toNat!
+  | ["ecmf", b1, curves, ns, ts] =>
+    let n := ns.toNat!
+    timed s!"ecmf B1={b1} curves={curves}" fun _ =>
+      (ECMF.split n { b1 := b1.toNat!, curves := curves.toNat!, threads := ts.toNat! }).map (·.val)
   | ["ecm", b1, curves, ns, ts] =>
     let n := ns.toNat!
     timed s!"ecm B1={b1} n={n}" fun _ =>

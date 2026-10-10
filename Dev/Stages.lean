@@ -25,3 +25,22 @@ def autoStages (n threads : Nat) : IO Unit := do
   stageTime "siqs" fun _ => (SIQS.split n { threads := threads }).map (·.val)
   stageTime "primeOracle(n)" fun _ => if primeOracle cfg n then some 1 else none
   stageTime "full factor auto" fun _ => (factor .auto n cfg).map (·.length)
+
+/-- The automatic factorization with the time of every certificate and split. -/
+def traceFactor (cfg : Config) : Nat → Nat → Nat → IO (List Nat)
+  | 0, _, n => return [n]
+  | fuel + 1, depth, n => do
+    if n ≤ 1 then return []
+    let pad := "".pushn ' ' (2 * depth)
+    let t0 ← IO.monoNanosNow
+    let prime ← IO.lazyPure fun _ => primeOracle cfg n
+    let t1 ← IO.monoNanosNow
+    IO.println s!"{pad}oracle {QS.decimalDigits n}d: {prime} in {(t1 - t0).toFloat / 1.0e6} ms"
+    if prime then return [n]
+    let d ← IO.lazyPure fun _ => (autoSplitter cfg n).map (·.val)
+    let t2 ← IO.monoNanosNow
+    IO.println s!"{pad}split {QS.decimalDigits n}d -> {d} in {(t2 - t1).toFloat / 1.0e6} ms"
+    match d with
+    | some d =>
+      return (← traceFactor cfg fuel (depth + 1) d) ++ (← traceFactor cfg fuel (depth + 1) (n / d))
+    | none => return [n]

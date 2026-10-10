@@ -609,14 +609,19 @@ def snfsSelection (b k d : Nat) (plus : Bool) : Selection :=
       (one * ((b ^ (d - r) : Nat) : Int))
     { coeffs := cs, m := b ^ (t + 1) }
 
-/-- The special number field sieve for a divisor `n` of `b^k ± 1`: degree 4
-below 90 digits of `b^k`, 5 below 125, 6 beyond; parameters of the general
-number field sieve at `7/10` of the digits (at least 60), with that degree. -/
+/-- The degree and parameters of the special number field sieve for `b^k ± 1`
+with `digits` decimal digits: degree 4 below 70 digits, 5 below 125, 6 beyond
+(degree 5 measured faster from 78 digits: 2^257 - 1 3.9 s -> 3.5 s,
+2^293 - 1 20.2 s -> 8.2 s), with the parameters of the general number field
+sieve at `7/10` of the digits plus two (at least 60). -/
+def snfsParams (digits : Nat) : Params :=
+  let d := if digits < 70 then 4 else if digits < 125 then 5 else 6
+  { chooseParams (max 60 (7 * digits / 10 + 2)) with degree := d }
+
+/-- The special number field sieve for a divisor `n` of `b^k ± 1`. -/
 def splitSNFS (n b k : Nat) (plus : Bool) (cfg : Config := {}) : Option (ProperFactor n) :=
-  let digits := decimalDigits (b ^ k)
-  let d := if digits < 90 then 4 else if digits < 125 then 5 else 6
-  let params := { (cfg.params.getD (chooseParams (max 60 (7 * digits / 10)))) with degree := d }
-  splitWith n (snfsSelection b k d plus) params cfg
+  let params := cfg.params.getD (snfsParams (decimalDigits (b ^ k)))
+  splitWith n (snfsSelection b k params.degree plus) params cfg
 
 /-- The public splitter: even numbers and perfect powers are handled first. -/
 def split (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) :=

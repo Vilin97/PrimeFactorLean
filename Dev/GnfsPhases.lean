@@ -30,9 +30,14 @@ def applyOverrides (p : Params) (kvs : List String) : Params :=
 def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     (snfs : Option (Selection × Nat) := none) (overrides : List String := []) : IO Unit := do
   let t0 ← IO.monoNanosNow
+  let eff := overrides.findSome? fun kv => match kv.splitOn "=" with
+    | ["eff", v] => v.toNat?
+    | _ => none
   let params0 := match snfs with
-    | some (sel, digits) => { chooseParams (max 60 (7 * digits / 10)) with degree := sel.degree }
-    | none => chooseParams (decimalDigits n)
+    | some (sel, digits) => match eff with
+      | some e => { chooseParams e with degree := sel.degree }
+      | none => { GNFS.snfsParams digits with degree := sel.degree }
+    | none => chooseParams (eff.getD (decimalDigits n))
   let params0 := applyOverrides params0 overrides
   let params0 := if logI > 0 then { params0 with lasLogI := logI } else params0
   let params0 := if density > 0 then { params0 with mergeDensity := density } else params0
