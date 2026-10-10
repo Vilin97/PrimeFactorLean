@@ -3,6 +3,9 @@ import PrimeFactorLean.Trial
 import PrimeFactorLean.Search
 import PrimeFactorLean.ECM
 import PrimeFactorLean.ECMMontgomery
+import PrimeFactorLean.ECMFast
+import PrimeFactorLean.PMinusOneFast
+import PrimeFactorLean.RhoFast
 import PrimeFactorLean.QS
 import PrimeFactorLean.SIQS
 import PrimeFactorLean.GNFS
@@ -115,7 +118,7 @@ def ecmScheduleFull (digits : Nat) : List (Nat × Nat) :=
 /-- ECM over a list of `(B1, curves)` levels; the first factor wins. -/
 def ecmLevels (threads : Nat) (levels : List (Nat × Nat)) : Splitter := fun n =>
   levels.foldl (fun acc (b1, curves) => acc.orElse fun _ =>
-    ECMM.split n { b1 := b1, curves := curves, threads := threads }) none
+    ECMF.split n { b1 := b1, curves := curves, threads := threads }) none
 
 /-- The automatic portfolio: cheap methods first, then ECM, then SIQS. -/
 def autoSplitter (cfg : Config) : Splitter := fun n =>
@@ -123,9 +126,9 @@ def autoSplitter (cfg : Config) : Splitter := fun n =>
   (smallSplitter 4096 n).orElse fun _ =>
   (powerSplitter n).orElse fun _ =>
   (if n < 2 ^ 62 then SQUFOF.split n else none).orElse fun _ =>
-  (ofSound (fun m => Search.brent m { cfg.search with rhoSteps := 20000, rhoRestarts := 2 })
-    (fun _ _ h => Search.brent_sound h) n).orElse fun _ =>
-  (PMinusOne.splitPMinusOne n 20000).orElse fun _ =>
+  (RhoF.split n 8000 1).orElse fun _ =>
+  -- `p - 1` pays off only once the quadratic sieve is slow (from about 45 digits)
+  (if n < 10 ^ 44 then none else PM1F.split n 20000).orElse fun _ =>
   (ecmLevels cfg.threads (ecmSchedule (QS.decimalDigits n)) n).orElse fun _ =>
   SIQS.split n { threads := cfg.threads }
 
@@ -145,7 +148,7 @@ def splitter (algorithm : Algorithm) (cfg : Config := {}) : Splitter :=
       (fun _ _ h => ECM.split_sound h)
   | .ecm => fun n =>
       if cfg.ecmB1 > 0 then
-        ECMM.split n { b1 := cfg.ecmB1, curves := max 1 cfg.ecmCurves, threads := cfg.threads }
+        ECMF.split n { b1 := cfg.ecmB1, curves := max 1 cfg.ecmCurves, threads := cfg.threads }
       else ecmLevels cfg.threads (ecmScheduleFull (QS.decimalDigits n)) n
   | .cfrac => fun n => CFRAC.split n
   | .qs => fun n => QS.split n { variant := .qs, threads := cfg.threads }

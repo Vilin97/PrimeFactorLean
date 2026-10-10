@@ -8,6 +8,9 @@ import Dev.QSDebug
 import Dev.Micro
 import Dev.RB
 import Dev.LasDebug
+import Dev.Bench8
+import Dev.Stages
+import Dev.MontTest
 open PrimeFactorLean
 
 def timed (label : String) (f : Unit → Option Nat) : IO Unit := do
@@ -23,14 +26,61 @@ def main (args : List String) : IO Unit := do
     let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
                                   dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat! }
     fastTune ns.toNat! params rounds.toNat! ts.toNat!
+  | ["tune2", ns, fbs, m, lp, dlp, spv, slack, fslack, sb, rounds, ts] =>
+    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
+                                  dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat!,
+                                  filterSlack := fslack.toNat!, smallBound := sb.toNat! }
+    fastTune ns.toNat! params rounds.toNat! ts.toNat!
+  | ["siqs3", ns, ts, fbs, m, lp, dlp, spv, slack, fslack, sb, pre] =>
+    let n := ns.toNat!
+    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
+                                  dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat!,
+                                  filterSlack := fslack.toNat!, smallBound := sb.toNat!,
+                                  preSlack := pre.toNat! }
+    timed s!"fast siqs n={n} digits={QS.decimalDigits n}" fun _ =>
+      (SIQS.split n { threads := ts.toNat!, params := some params }).map (·.val)
+  | ["siqs2", ns, ts, fbs, m, lp, dlp, spv, slack, fslack, sb] =>
+    let n := ns.toNat!
+    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
+                                  dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat!,
+                                  filterSlack := fslack.toNat!, smallBound := sb.toNat! }
+    timed s!"fast siqs n={n} digits={QS.decimalDigits n}" fun _ =>
+      (SIQS.split n { threads := ts.toNat!, params := some params }).map (·.val)
   | ["fastcheck", ns, fbs, m, lp, spv, seed] =>
     let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
                                   spv := spv.toNat! }
+    fastCheck ns.toNat! params seed.toNat!
+  | ["fastcheck", ns, fbs, m, lp, spv, seed, slack, fslack] =>
+    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
+                                  spv := spv.toNat!, slack := slack.toNat!, filterSlack := fslack.toNat! }
     fastCheck ns.toNat! params seed.toNat!
   | ["fastprofile", ns, fbs, m, lp, dlp, spv, slack, seed] =>
     let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
                                   dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat! }
     fastProfile ns.toNat! params seed.toNat!
+  | ["laonly", ns, ts, reps, fbs, m] =>
+    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := 75, spv := 30,
+                                  slack := 16, filterSlack := 12, smallBound := 16384 }
+    laOnly ns.toNat! params ts.toNat! reps.toNat!
+  | ["graycheck", ns, fbs, m, lp, spv, slack, fslack, seed, steps] =>
+    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
+                                  spv := spv.toNat!, slack := slack.toNat!, filterSlack := fslack.toNat! }
+    grayCheck ns.toNat! params seed.toNat! steps.toNat!
+  | ["spread", ns, ts, rounds, fbs, m, lp, dlp, spv, slack, fslack, sb] =>
+    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
+                                  dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat!,
+                                  filterSlack := fslack.toNat!, smallBound := sb.toNat! }
+    taskSpread ns.toNat! params ts.toNat! rounds.toNat!
+  | ["ctimed", ns, ts, fbs, m, lp, dlp, spv, slack, fslack, sb] =>
+    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
+                                  dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat!,
+                                  filterSlack := fslack.toNat!, smallBound := sb.toNat! }
+    collectTimed ns.toNat! params ts.toNat!
+  | ["phases2", ns, ts, fbs, m, lp, dlp, spv, slack, fslack, sb] =>
+    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
+                                  dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat!,
+                                  filterSlack := fslack.toNat!, smallBound := sb.toNat! }
+    fastPhases ns.toNat! params ts.toNat!
   | ["fastphases", ns, ts, fbs, m, lp, dlp, spv, slack] =>
     let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
                                   dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat! }
@@ -41,7 +91,7 @@ def main (args : List String) : IO Unit := do
   | ["lanczosunit"] => lanczosUnit
   | ["mulacc"] => mulAccBench
   | ["mula"] => mulABench
-  | ["cofactor"] => cofactorBench
+  | ["cofactor"] => cofactorBench (70000000 + args.length - 1)
   | ["rb"] => rbMain
   | ["fkunit"] => fkUnit
   | ["las", ns, cnt] => lasDebug ns.toNat! cnt.toNat!
@@ -66,6 +116,12 @@ def main (args : List String) : IO Unit := do
   | ["micro5"] => micro5Main
   | ["micro6"] => micro6Main
   | ["micro7"] => micro7Main
+  | ["bench8"] => Bench8.bench8Main
+  | ["bench9"] => Bench9.bench9Main
+  | ["bench10"] => Bench10.bench10Main
+  | ["stages", ns, ts] => autoStages ns.toNat! ts.toNat!
+  | ["monttest"] => montTestMain
+  | ["ecmbench", ns, b1, c, ts] => ecmBench ns.toNat! b1.toNat! c.toNat! ts.toNat!
   | ["ecm", b1, curves, ns, ts] =>
     let n := ns.toNat!
     timed s!"ecm B1={b1} n={n}" fun _ =>

@@ -104,7 +104,7 @@ structure Plan where
   babies : Array Nat
 
 def mkPlan (b1 b2 : Nat) : Plan := Id.run do
-  let d := if b2 > 2 * 10 ^ 6 then 2310 else 210
+  let d := if b2 > 200000 then 2310 else 210
   let limit := b2 + d + 1
   let mut sieve : ByteArray := ByteArray.emptyWithCapacity limit
   for _ in [0:limit] do sieve := sieve.push 1

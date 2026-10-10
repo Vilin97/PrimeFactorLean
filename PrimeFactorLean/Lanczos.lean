@@ -22,107 +22,138 @@ waste time.
 
 namespace PrimeFactorLean.Lanczos
 
-/-! ## Blocks of 64-bit words -/
+/-! ## Blocks of 64-bit words
 
-/-- `n` words stored as `2n` 32-bit halves. -/
-structure Block where
-  data : Array UInt32
+A 64-bit word is stored as two `UInt32` halves of an `Array UInt32`: small
+scalars are unboxed in Lean arrays, whereas every element of an
+`Array UInt64` would be a heap object (and `FloatArray` cannot carry arbitrary
+bit patterns: NaN payloads are canonicalized). -/
+
+/-- Packed words: word `k` is `d[2k] + 2^32 d[2k+1]`. -/
+structure Words where
+  d : Array UInt32
   deriving Inhabited
 
-def Block.zero (n : Nat) : Block := ⟨Array.replicate (2 * n) 0⟩
+def Words.zeros (n : Nat) : Words := ⟨Array.replicate (2 * n) 0⟩
 
-@[inline] def Block.get (b : Block) (k : Nat) : UInt64 :=
-  b.data[2 * k]!.toUInt64 ||| (b.data[2 * k + 1]!.toUInt64 <<< 32)
+@[inline] def Words.get (w : Words) (k : Nat) : UInt64 :=
+  w.d[2 * k]!.toUInt64 ||| (w.d[2 * k + 1]!.toUInt64 <<< 32)
 
-@[inline] def Block.set (b : Block) (k : Nat) (w : UInt64) : Block :=
-  ⟨(b.data.set! (2 * k) w.toUInt32).set! (2 * k + 1) (w >>> 32).toUInt32⟩
+@[inline] def Words.set (w : Words) (k : Nat) (x : UInt64) : Words :=
+  ⟨(w.d.set! (2 * k) x.toUInt32).set! (2 * k + 1) (x >>> 32).toUInt32⟩
 
-def Block.size (b : Block) : Nat := b.data.size / 2
+@[inline] def Words.push (w : Words) (x : UInt64) : Words :=
+  ⟨(w.d.push x.toUInt32).push (x >>> 32).toUInt32⟩
+
+def Words.size (w : Words) : Nat := w.d.size / 2
+
+/-- `n` words, one per row of a block of 64 vectors of length `n`. -/
+structure Block where
+  data : Words
+  deriving Inhabited
+
+def Block.zero (n : Nat) : Block := ⟨Words.zeros n⟩
+
+@[inline] def Block.get (b : Block) (k : Nat) : UInt64 := b.data.get k
+
+@[inline] def Block.set (b : Block) (k : Nat) (w : UInt64) : Block := ⟨b.data.set k w⟩
+
+def Block.size (b : Block) : Nat := b.data.size
 
 /-- A 64 × 64 matrix over GF(2): row `i` is a word. -/
-abbrev Mat := Array UInt64
+structure Mat where
+  d : Words
+  deriving Inhabited
+
+@[inline] def Mat.get (m : Mat) (i : Nat) : UInt64 := m.d.get i
+@[inline] def Mat.set (m : Mat) (i : Nat) (w : UInt64) : Mat := ⟨m.d.set i w⟩
+
+instance : GetElem Mat Nat UInt64 (fun _ i => i < 64) where
+  getElem m i _ := m.get i
+
+instance : GetElem? Mat Nat UInt64 (fun _ i => i < 64) where
+  getElem? m i := if i < 64 then some (m.get i) else none
+  getElem! m i := m.get i
+
+def Mat.ofFn (f : Nat → UInt64) : Mat := Id.run do
+  let mut a : Words := ⟨Array.mkEmpty 128⟩
+  for i in [0:64] do a := a.push (f i)
+  return ⟨a⟩
 
 def bit (j : Nat) : UInt64 := (1 : UInt64) <<< j.toUInt64
 
-def Mat.zero : Mat := Array.replicate 64 0
-def Mat.identity : Mat := (Array.range 64).map bit
+def Mat.zero : Mat := ⟨Words.zeros 64⟩
+def Mat.identity : Mat := Mat.ofFn bit
+
+/-- `⊕_{j ∈ w} N[j]` over the bits `j ≥ j₀` of `w` (tail recursive: a `while`
+loop with several mutable variables would allocate its state every step). -/
+def Mat.rowTimes (N : Mat) (w : UInt64) (j : Nat) (acc : UInt64) : Nat → UInt64
+  | 0 => acc
+  | fuel + 1 =>
+    if w == 0 then acc
+    else Mat.rowTimes N (w >>> 1) (j + 1) (if w &&& 1 == 1 then acc ^^^ N.get j else acc) fuel
 
 /-- `(M N)[i] = ⊕_{j ∈ M[i]} N[j]`. -/
-def Mat.mul (M N : Mat) : Mat := Id.run do
-  let mut out : Mat := Array.replicate 64 0
-  for i in [0:64] do
-    let mut acc : UInt64 := 0
-    let mut w := M[i]!
-    let mut j := 0
-    while w != 0 && j < 64 do
-      if w &&& 1 == 1 then acc := acc ^^^ N[j]!
-      w := w >>> 1
-      j := j + 1
-    out := out.set! i acc
-  return out
+def Mat.mul (M N : Mat) : Mat := Mat.ofFn fun i => Mat.rowTimes N (M.get i) 0 0 64
 
-def Mat.andMask (M : Mat) (m : UInt64) : Mat := M.map (· &&& m)
-def Mat.xor (M N : Mat) : Mat := (Array.range 64).map fun i => M[i]! ^^^ N[i]!
-def Mat.isZero (M : Mat) : Bool := M.all (· == 0)
+def Mat.andMask (M : Mat) (m : UInt64) : Mat := Mat.ofFn fun i => M.get i &&& m
+def Mat.xor (M N : Mat) : Mat := Mat.ofFn fun i => M.get i ^^^ N.get i
+def Mat.isZero (M : Mat) : Bool := (List.range 64).all fun i => M.get i == 0
 
 /-! ## Products with blocks -/
 
 /-- Eight byte-indexed tables of `⊕` combinations of the rows of `M`, so that
-`w · M` costs eight lookups: `table[8 b + v]` for byte `b` of value `v`. -/
-def tables (M : Mat) : Array UInt64 := Id.run do
-  let mut t : Array UInt64 := Array.replicate (8 * 256) 0
+`w · M` costs eight lookups: `table[256 b + v]` for byte `b` of value `v`. -/
+def tables (M : Mat) : Words := Id.run do
+  let mut t := Words.zeros 2048
   for b in [0:8] do
     for v in [1:256] do
       -- lowest set bit of v: reuse the entry without it
       let low := v &&& (256 - v)
       let j := (Nat.log2 low) + 8 * b
-      t := t.set! (256 * b + v) (t[256 * b + (v - low)]! ^^^ M[j]!)
+      let x := t.get (256 * b + (v - low)) ^^^ M.get j
+      t := t.set (256 * b + v) x
   return t
 
-@[inline] def applyTables (t : Array UInt64) (w : UInt64) : UInt64 :=
-  t[(w &&& 255).toNat]! ^^^ t[256 + ((w >>> 8) &&& 255).toNat]! ^^^
-  t[512 + ((w >>> 16) &&& 255).toNat]! ^^^ t[768 + ((w >>> 24) &&& 255).toNat]! ^^^
-  t[1024 + ((w >>> 32) &&& 255).toNat]! ^^^ t[1280 + ((w >>> 40) &&& 255).toNat]! ^^^
-  t[1536 + ((w >>> 48) &&& 255).toNat]! ^^^ t[1792 + (w >>> 56).toNat]!
+@[inline] def applyTables (t : Words) (w : UInt64) : UInt64 :=
+  t.get (w &&& 255).toNat ^^^ t.get (256 + ((w >>> 8) &&& 255).toNat) ^^^
+  t.get (512 + ((w >>> 16) &&& 255).toNat) ^^^ t.get (768 + ((w >>> 24) &&& 255).toNat) ^^^
+  t.get (1024 + ((w >>> 32) &&& 255).toNat) ^^^ t.get (1280 + ((w >>> 40) &&& 255).toNat) ^^^
+  t.get (1536 + ((w >>> 48) &&& 255).toNat) ^^^ t.get (1792 + (w >>> 56).toNat)
 
 /-- `acc ⊕ V M` (an `n × 64` block times a 64 × 64 matrix). -/
 def mulAcc (V : Block) (M : Mat) (acc : Block) : Block := Id.run do
   let t := tables M
-  let mut acc := acc
+  let mut a := acc.data
   for k in [0:V.size] do
     let w := V.get k
-    if w != 0 then acc := acc.set k (acc.get k ^^^ applyTables t w)
-  return acc
+    if w != 0 then
+      let x := a.get k ^^^ applyTables t w
+      a := a.set k x
+  return ⟨a⟩
 
-/-- `Vᵀ W` (64 × 64) by accumulating `W[k]` into byte tables of `V[k]`
-(as unboxed 32-bit halves). -/
+/-- `Vᵀ W` (64 × 64) by accumulating `W[k]` into byte tables of `V[k]`. -/
 def inner (V W : Block) : Mat := Id.run do
-  -- acc[2 (256 b + v)], acc[2 (256 b + v) + 1] = ⊕ of W[k] over k whose byte b of V[k] is v
-  let mut acc : Array UInt32 := Array.replicate (2 * 8 * 256) 0
+  -- acc[256 b + v] = ⊕ of W[k] over k whose byte b of V[k] is v
+  let mut acc := Words.zeros 2048
   for k in [0:V.size] do
     let v := V.get k
     if v == 0 then continue
-    let wlo := W.data[2 * k]!
-    let whi := W.data[2 * k + 1]!
+    let w := W.get k
     for b in [0:8] do
       let byte := ((v >>> (8 * b).toUInt64) &&& 255).toNat
       if byte != 0 then
-        let idx := 2 * (256 * b + byte)
-        let l := acc[idx]! ^^^ wlo
-        let h := acc[idx + 1]! ^^^ whi
-        acc := (acc.set! idx l).set! (idx + 1) h
+        let idx := 256 * b + byte
+        let x := acc.get idx ^^^ w
+        acc := acc.set idx x
   -- row i of the result: ⊕ of acc[256 b + v] over v with bit (i mod 8) set, b = i / 8
-  let mut out : Mat := Array.replicate 64 0
-  for i in [0:64] do
+  return Mat.ofFn fun i => Id.run do
     let b := i / 8
     let m := i % 8
     let mut r : UInt64 := 0
     for v in [1:256] do
-      if (v >>> m) % 2 == 1 then
-        let idx := 2 * (256 * b + v)
-        r := r ^^^ (acc[idx]!.toUInt64 ||| (acc[idx + 1]!.toUInt64 <<< 32))
-    out := out.set! i r
-  return out
+      if (v >>> m) % 2 == 1 then r := r ^^^ acc.get (256 * b + v)
+    return r
 
 /-! ## The matrix -/
 
@@ -159,28 +190,32 @@ def Sparse.mk' (nrows : Nat) (cols : Array (Array Nat)) : Sparse := Id.run do
   return { nrows := nrows, ncols := cols.size, colPtr, colIdx, rowPtr, rowIdx }
 
 /-- `⊕ x[idx[k]]` for `k ∈ [lo, hi)`. -/
-def gather (x : Block) (idx : Array UInt32) (lo hi : Nat) (acc : UInt64) : UInt64 :=
-  if lo < hi then gather x idx (lo + 1) hi (acc ^^^ x.get idx[lo]!.toNat) else acc
+def gather (x : Words) (idx : Array UInt32) (lo hi : Nat) (acc : UInt64) : UInt64 :=
+  if h : lo < hi ∧ lo < idx.size then
+    gather x idx (lo + 1) hi (acc ^^^ x.get idx[lo].toNat)
+  else acc
 termination_by hi - lo
 
 /-- Rows `[lo, hi)` of a compressed product. -/
-def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (lo hi : Nat) :
-    Array UInt32 := Id.run do
-  let mut out : Array UInt32 := Array.mkEmpty (2 * (hi - lo))
+def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (lo hi : Nat) : Words :=
+  Id.run do
+  let mut out : Words := ⟨Array.mkEmpty (2 * (hi - lo))⟩
   for r in [lo:hi] do
-    let acc := gather x idx ptr[r]! ptr[r + 1]! 0
-    out := (out.push acc.toUInt32).push (acc >>> 32).toUInt32
+    out := out.push (gather x.data idx ptr[r]! ptr[r + 1]! 0)
   return out
 
-/-- A compressed product, split over `threads` tasks. -/
+/-- A compressed product, split over `threads` tasks (one task for small products). -/
 def mulCompressed (x : Block) (ptr : Array Nat) (idx : Array UInt32) (count threads : Nat) :
     Block := Id.run do
+  -- below about 100000 nonzeros a single task is faster than spawning
+  let threads := if idx.size < 100000 then 1 else threads
+  if threads ≤ 1 then return ⟨gatherRange x ptr idx 0 count⟩
   let chunk := (count + threads - 1) / threads
   let tasks := (List.range threads).map fun t =>
     Task.spawn fun _ => gatherRange x ptr idx (min count (t * chunk)) (min count ((t + 1) * chunk))
   let mut data : Array UInt32 := Array.mkEmpty (2 * count)
-  for task in tasks do data := data ++ task.get
-  return ⟨data⟩
+  for task in tasks do data := data ++ task.get.d
+  return ⟨⟨data⟩⟩
 
 /-- `B x` for a block over the columns (gathering along each row). -/
 def mulB (B : Sparse) (x : Block) (threads : Nat) : Block :=
@@ -200,8 +235,8 @@ first the columns not chosen last time; returns the inverse (embedded in a
 64 × 64 matrix), the chosen columns and their mask, or `none`. -/
 def selectColumns (T : Mat) (lastS : Array Nat) : Option (Mat × Array Nat × UInt64) := Id.run do
   -- M = [T | I]
-  let mut m0 : Array UInt64 := T
-  let mut m1 : Array UInt64 := Mat.identity
+  let mut m0 : Mat := T
+  let mut m1 : Mat := Mat.identity
   -- order: columns not in lastS first, then those in lastS
   let mut lastMask : UInt64 := 0
   for c in lastS do lastMask := lastMask ||| bit c
@@ -217,41 +252,53 @@ def selectColumns (T : Mat) (lastS : Array Nat) : Option (Mat × Array Nat × UI
     let mut found := false
     for j in [i:64] do
       let sj := order[j]!
-      if m0[sj]! &&& mask != 0 then
+      if m0.get sj &&& mask != 0 then
         -- swap rows si and sj
-        let a0 := m0[si]!
-        let a1 := m1[si]!
-        m0 := (m0.set! si m0[sj]!).set! sj a0
-        m1 := (m1.set! si m1[sj]!).set! sj a1
+        let a0 := m0.get si
+        let a1 := m1.get si
+        let b0 := m0.get sj
+        let b1 := m1.get sj
+        m0 := (m0.set si b0).set sj a0
+        m1 := (m1.set si b1).set sj a1
         found := true
         break
     if found then
+      let p0 := m0.get si
+      let p1 := m1.get si
       for j in [0:64] do
         let sj := order[j]!
-        if sj != si && m0[sj]! &&& mask != 0 then
-          m0 := m0.set! sj (m0[sj]! ^^^ m0[si]!)
-          m1 := m1.set! sj (m1[sj]! ^^^ m1[si]!)
+        if sj != si && m0.get sj &&& mask != 0 then
+          let x0 := m0.get sj
+          let x1 := m1.get sj
+          m0 := m0.set sj (x0 ^^^ p0)
+          m1 := m1.set sj (x1 ^^^ p1)
       s := s.push si
     else
       -- use the right half to compensate for the missing pivot
       let mut found2 := false
       for j in [i:64] do
         let sj := order[j]!
-        if m1[sj]! &&& mask != 0 then
-          let a0 := m0[si]!
-          let a1 := m1[si]!
-          m0 := (m0.set! si m0[sj]!).set! sj a0
-          m1 := (m1.set! si m1[sj]!).set! sj a1
+        if m1.get sj &&& mask != 0 then
+          let a0 := m0.get si
+          let a1 := m1.get si
+          let b0 := m0.get sj
+          let b1 := m1.get sj
+          m0 := (m0.set si b0).set sj a0
+          m1 := (m1.set si b1).set sj a1
           found2 := true
           break
       if !found2 then return none
+      let p0 := m0.get si
+      let p1 := m1.get si
       for j in [0:64] do
         let sj := order[j]!
-        if sj != si && m1[sj]! &&& mask != 0 then
-          m0 := m0.set! sj (m0[sj]! ^^^ m0[si]!)
-          m1 := m1.set! sj (m1[sj]! ^^^ m1[si]!)
-      m0 := m0.set! si 0
-      m1 := m1.set! si 0
+        if sj != si && m1.get sj &&& mask != 0 then
+          let x0 := m0.get sj
+          let x1 := m1.get sj
+          m0 := m0.set sj (x0 ^^^ p0)
+          m1 := m1.set sj (x1 ^^^ p1)
+      m0 := m0.set si 0
+      m1 := m1.set si 0
   if s.isEmpty then return none
   let mut mask : UInt64 := 0
   for c in s do mask := mask ||| bit c
@@ -270,24 +317,26 @@ def splitmix (s : UInt64) : UInt64 :=
 /-- A deterministic pseudo-random block (SplitMix64: its multiplications make
 the bits non-linear over GF(2); a linear generator such as xorshift yields
 blocks whose 64 bit-columns are dependent). -/
-def randomBlock (n seed : Nat) : Block :=
-  ⟨(Array.range (2 * n)).map fun k =>
-    let z := splitmix ((seed * 2 * n + k / 2 + 1).toUInt64 * 0x9E3779B97F4A7C15)
-    if k % 2 == 0 then z.toUInt32 else (z >>> 32).toUInt32⟩
+def randomBlock (n seed : Nat) : Block := Id.run do
+  let mut a : Words := ⟨Array.mkEmpty (2 * n)⟩
+  for k in [0:n] do
+    a := a.push (splitmix ((seed * n + k + 1).toUInt64 * 0x9E3779B97F4A7C15))
+  return ⟨a⟩
 
-def Block.xor (a b : Block) : Block := ⟨(Array.range a.data.size).map fun i => a.data[i]! ^^^ b.data[i]!⟩
+def Block.xor (a b : Block) : Block :=
+  ⟨⟨(Array.range a.data.d.size).map fun i => a.data.d[i]! ^^^ b.data.d[i]!⟩⟩
 
 def Block.andMask (a : Block) (m : UInt64) : Block := Id.run do
   let lo := m.toUInt32
   let hi := (m >>> 32).toUInt32
-  let mut d := a.data
+  let mut d := a.data.d
   for k in [0:a.size] do
     -- read both halves before writing: reading the old array after a `set!`
     -- would keep it alive and force a copy of the whole array per element
     let l := d[2 * k]! &&& lo
     let h := d[2 * k + 1]! &&& hi
     d := (d.set! (2 * k) l).set! (2 * k + 1) h
-  return ⟨d⟩
+  return ⟨⟨d⟩⟩
 
 /-- The recurrence state after step `i`. -/
 structure LState where
@@ -371,27 +420,37 @@ null space of that row basis. Returns the corresponding sets of relations. -/
 def combine (B : Sparse) (U V : Block) (threads maxDeps : Nat) : Array (Array Nat) := Id.run do
   let BU := mulB B U threads
   let BV := mulB B V threads
-  let mut basis : Array (UInt64 × UInt64 × Nat) := #[]
+  -- the reduced basis: 128-bit rows (lo, hi) with pivot bp
+  let mut blo : Words := ⟨Array.mkEmpty 256⟩
+  let mut bhi : Words := ⟨Array.mkEmpty 256⟩
+  let mut bps : Array Nat := #[]
   for r in [0:B.nrows] do
     let mut lo := BU.get r
     let mut hi := BV.get r
-    for (blo, bhi, bp) in basis do
-      if test128 lo hi bp then
-        lo := lo ^^^ blo
-        hi := hi ^^^ bhi
+    for k in [0:bps.size] do
+      if test128 lo hi bps[k]! then
+        lo := lo ^^^ blo.get k
+        hi := hi ^^^ bhi.get k
     if lo != 0 || hi != 0 then
       let p := lowest128 lo hi
-      basis := basis.map fun (blo, bhi, bp) =>
-        if test128 blo bhi p then (blo ^^^ lo, bhi ^^^ hi, bp) else (blo, bhi, bp)
-      basis := basis.push (lo, hi, p)
+      for k in [0:bps.size] do
+        let xl := blo.get k
+        let xh := bhi.get k
+        if test128 xl xh p then
+          blo := blo.set k (xl ^^^ lo)
+          bhi := bhi.set k (xh ^^^ hi)
+      blo := blo.push lo
+      bhi := bhi.push hi
+      bps := bps.push p
   let mut deps : Array (Array Nat) := #[]
   for f in [0:128] do
     if deps.size ≥ maxDeps then break
-    if basis.any (fun (_, _, bp) => bp == f) then continue
+    if bps.contains f then continue
     let mut clo : UInt64 := if f < 64 then bit f else 0
     let mut chi : UInt64 := if f < 64 then 0 else bit (f - 64)
-    for (blo, bhi, bp) in basis do
-      if test128 blo bhi f then
+    for k in [0:bps.size] do
+      if test128 (blo.get k) (bhi.get k) f then
+        let bp := bps[k]!
         if bp < 64 then clo := clo ||| bit bp else chi := chi ||| bit (bp - 64)
     let mut dep : Array Nat := #[]
     for c in [0:B.ncols] do
