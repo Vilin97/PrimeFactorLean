@@ -132,11 +132,11 @@ def mulAcc (V : Block) (M : Mat) (acc : Block) : Block := Id.run do
       a := a.set k x
   return ⟨a⟩
 
-/-- `Vᵀ W` (64 × 64) by accumulating `W[k]` into byte tables of `V[k]`. -/
-def inner (V W : Block) : Mat := Id.run do
-  -- acc[256 b + v] = ⊕ of W[k] over k whose byte b of V[k] is v
-  let mut acc := Words.zeros 2048
-  for k in [0:V.size] do
+/-- `acc ⊕` the byte tables of `Vᵀ W` over the rows `[lo, hi)`: entry
+`256 b + v` accumulates `W[k]` over the `k` whose byte `b` of `V[k]` is `v`. -/
+def innerAcc (V W : Block) (lo hi : Nat) (acc : Words) : Words := Id.run do
+  let mut acc := acc
+  for k in [lo:hi] do
     let v := V.get k
     if v == 0 then continue
     let w := W.get k
@@ -146,14 +146,25 @@ def inner (V W : Block) : Mat := Id.run do
         let idx := 256 * b + byte
         let x := acc.get idx ^^^ w
         acc := acc.set idx x
-  -- row i of the result: ⊕ of acc[256 b + v] over v with bit (i mod 8) set, b = i / 8
-  return Mat.ofFn fun i => Id.run do
+  return acc
+
+/-- The 64 × 64 matrix of accumulated byte tables: row `i` is the `⊕` of
+`acc[256 b + v]` over the `v` with bit `i mod 8` set, `b = i / 8`. -/
+def tablesMat (acc : Words) : Mat :=
+  Mat.ofFn fun i => Id.run do
     let b := i / 8
     let m := i % 8
     let mut r : UInt64 := 0
     for v in [1:256] do
       if (v >>> m) % 2 == 1 then r := r ^^^ acc.get (256 * b + v)
     return r
+
+/-- `Vᵀ W` (64 × 64). -/
+def inner (V W : Block) : Mat := tablesMat (innerAcc V W 0 V.size (Words.zeros 2048))
+
+/-- Elementwise `⊕`. -/
+def Words.xor (a b : Words) : Words :=
+  ⟨(Array.range a.d.size).map fun i => a.d[i]! ^^^ b.d[i]!⟩
 
 /-! ## The matrix -/
 
@@ -204,15 +215,26 @@ def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (lo hi : Nat)
     out := out.push (gather x.data idx ptr[r]! ptr[r + 1]! 0)
   return out
 
+/-- The first `r ∈ [lo, hi]` with `ptr[r] ≥ target` (binary search; `ptr` nondecreasing). -/
+def firstAtLeast (ptr : Array Nat) (target lo hi : Nat) : Nat :=
+  if lo < hi then
+    let mid := (lo + hi) / 2
+    if ptr[mid]! < target then firstAtLeast ptr target (mid + 1) hi else firstAtLeast ptr target lo mid
+  else lo
+termination_by hi - lo
+
 /-- A compressed product, split over `threads` tasks (one task for small products). -/
 def mulCompressed (x : Block) (ptr : Array Nat) (idx : Array UInt32) (count threads : Nat) :
     Block := Id.run do
   -- below about 100000 nonzeros a single task is faster than spawning
   let threads := if idx.size < 100000 then 1 else threads
   if threads ≤ 1 then return ⟨gatherRange x ptr idx 0 count⟩
-  let chunk := (count + threads - 1) / threads
-  let tasks := (List.range threads).map fun t =>
-    Task.spawn fun _ => gatherRange x ptr idx (min count (t * chunk)) (min count ((t + 1) * chunk))
+  -- chunks of equal numbers of entries (the dense rows of small primes and
+  -- characters would otherwise all fall into the first chunk)
+  let nnz := ptr[count]!
+  let bounds := (List.range (threads + 1)).map fun t => firstAtLeast ptr (t * nnz / threads) 0 count
+  let tasks := (bounds.zip bounds.tail).map fun (lo, hi) =>
+    Task.spawn fun _ => gatherRange x ptr idx lo hi
   let mut data : Array UInt32 := Array.mkEmpty (2 * count)
   for task in tasks do data := data ++ task.get.d
   return ⟨⟨data⟩⟩
@@ -351,13 +373,43 @@ structure LState where
   s1 : Array Nat
   mask1 : UInt64
 
+/-- Rows `[lo, hi)` of `(A V ∧ mask) ⊕ V D ⊕ V₁ E ⊕ V₂ F` (tables of `D, E, F`). -/
+def nextRange (v v1 v2 av : Block) (mask : UInt64) (tD tE tF : Words) (lo hi : Nat) : Words := Id.run do
+  let mut out : Words := ⟨Array.mkEmpty (2 * (hi - lo))⟩
+  for k in [lo:hi] do
+    out := out.push ((av.get k &&& mask) ^^^ applyTables tD (v.get k) ^^^
+      applyTables tE (v1.get k) ^^^ applyTables tF (v2.get k))
+  return out
+
+/-- Rows `[lo, hi)` of `X ⊕ V W` (table of `W`). -/
+def xRange (x v : Block) (tW : Words) (lo hi : Nat) : Words := Id.run do
+  let mut out : Words := ⟨Array.mkEmpty (2 * (hi - lo))⟩
+  for k in [lo:hi] do
+    out := out.push (x.get k ^^^ applyTables tW (v.get k))
+  return out
+
+/-- The row ranges of `n` rows split over `tasks` chunks. -/
+def chunks (n tasks : Nat) : List (Nat × Nat) :=
+  let c := (n + tasks - 1) / max 1 tasks
+  (List.range tasks).map fun t => (min n (t * c), min n ((t + 1) * c))
+
 /-- One step of the recurrence; `none` when `VᵀAV = 0` (converged) or the
-column selection fails (`some false` / `none` distinguish the two). -/
+column selection fails (`some false` / `none` distinguish the two). The three
+inner products and the two block updates each run as one parallel pass over
+row chunks. -/
 def step (B : Sparse) (threads : Nat) (v0 : Block) (st : LState) : Except Bool LState :=
   let av := mulA B st.v threads
-  let vtav := inner st.v av
+  let n := st.v.size
+  let tasks := if n < 4096 then 1 else threads
+  let z := Words.zeros 2048
+  -- each task reduces its rows to 64 × 64 matrices (`tablesMat` is linear)
+  let parts := (chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
+    (tablesMat (innerAcc st.v av lo hi z), tablesMat (innerAcc av av lo hi z),
+      tablesMat (innerAcc st.v v0 lo hi z))
+  let (vtav, vta2v, vtv0) := parts.foldl (fun (x1, x2, x3) tk =>
+    let (y1, y2, y3) := tk.get
+    (x1.xor y1, x2.xor y2, x3.xor y3)) (Mat.zero, Mat.zero, Mat.zero)
   if vtav.isZero then .error true else
-  let vta2v := inner av av
   match selectColumns vtav st.s1 with
   | none => .error false
   | some (winv, s, mask0) =>
@@ -368,11 +420,15 @@ def step (B : Sparse) (threads : Nat) (v0 : Block) (st : LState) : Except Bool L
     -- f = Winv₂ (I - VᵀAV₁ Winv₁) (VᵀA²V₁ S₁S₁ᵀ + VᵀAV₁) S Sᵀ
     let f := ((st.winv2.mul ((st.vtav1.mul st.winv1).xor Mat.identity)).mul
       (((st.vta2v1.andMask st.mask1).xor st.vtav1).andMask mask0))
-    -- x += V Winv Vᵀ V₀
-    let x := mulAcc st.v (winv.mul (inner st.v v0)) st.x
-    -- next V = A V S Sᵀ + V d + V₁ e + V₂ f
-    let next := mulAcc st.v2 f (mulAcc st.v1 e (mulAcc st.v d (av.andMask mask0)))
-    .ok ⟨next, st.v, st.v1, x, winv, st.winv1, vtav, vta2v, s, mask0⟩
+    -- x += V Winv Vᵀ V₀; next V = A V S Sᵀ + V d + V₁ e + V₂ f
+    let tW := tables (winv.mul vtv0)
+    let (tD, tE, tF) := (tables d, tables e, tables f)
+    let upd := (chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
+      (nextRange st.v st.v1 st.v2 av mask0 tD tE tF lo hi, xRange st.x st.v tW lo hi)
+    let (nd, xd) := upd.foldl (fun (a, b) tk =>
+      let (c, e) := tk.get
+      (a ++ c.d, b ++ e.d)) ((Array.mkEmpty (2 * n) : Array UInt32), (Array.mkEmpty (2 * n) : Array UInt32))
+    .ok ⟨⟨⟨nd⟩⟩, st.v, st.v1, ⟨⟨xd⟩⟩, winv, st.winv1, vtav, vta2v, s, mask0⟩
 
 /-- Iterate until `VᵀAV = 0` (at most `fuel` steps). -/
 def loop (B : Sparse) (threads : Nat) (v0 : Block) : Nat → LState → Option LState

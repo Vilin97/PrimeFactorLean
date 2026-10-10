@@ -68,6 +68,19 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0) : IO Uni
   let (mrows, hist, mcols) ← IO.lazyPure fun _ => Merge.merge numCols (2 + ctx.fb.chars.size)
     (kept.map fun i => matRows[i]!) params.mergeDensity 32
   let t5b ← IO.monoNanosNow
+  -- Lanczos components, timed
+  let la0 ← IO.monoNanosNow
+  let kept2 ← IO.lazyPure fun _ => GF2.removeSingletons mcols mrows
+  let la1 ← IO.monoNanosNow
+  let Bm ← IO.lazyPure fun _ => Lanczos.Sparse.mk' mcols (kept2.map fun i => mrows[i]!)
+  let la2 ← IO.monoNanosNow
+  let it ← IO.lazyPure fun _ => Lanczos.iterate Bm threads 1
+  let la3 ← IO.monoNanosNow
+  let nd ← IO.lazyPure fun _ => match it with
+    | some (x, v) => (Lanczos.combine Bm x v threads 64).size
+    | none => 0
+  let la4 ← IO.monoNanosNow
+  IO.println s!"lanczos parts: singletons {ms la0 la1}, sparse {ms la1 la2}, iterate {ms la2 la3}, combine {ms la3 la4} ({nd} deps, {kept2.size} cols)"
   let mdeps ← IO.lazyPure fun _ => Lanczos.dependencies mcols mrows 64 threads
   let deps := (Merge.unmerge kept.size hist mdeps).map fun dep => dep.map fun i => kept[i]!
   let t6 ← IO.monoNanosNow
