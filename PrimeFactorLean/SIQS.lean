@@ -224,23 +224,36 @@ def scanBytes (s : ByteArray) (j e : Nat) (acc : Array Nat) : Array Nat :=
   else acc
 termination_by e - j
 
+/-- The chunks of 64 bytes from `c` to `e` whose `OR` fold has bit 7 set,
+scanned byte by byte (tail recursive: a `while` loop with several mutable
+variables allocates its state every iteration). -/
+def scanChunks (s : ByteArray) (c e : Nat) (acc : Array Nat) : Nat → Array Nat
+  | 0 => acc
+  | fuel + 1 =>
+    if c < e then
+      let ce := min e (c + 64)
+      let acc := if s.foldl (fun acc x => acc ||| x) 0 c ce ≥ 128 then scanBytes s c ce acc else acc
+      scanChunks s ce e acc fuel
+    else acc
+
+/-- The blocks of 4096 bytes from `b` to `size` whose `OR` fold has bit 7 set,
+then their chunks. -/
+def scanBlocks (s : ByteArray) (b size : Nat) (acc : Array Nat) : Nat → Array Nat
+  | 0 => acc
+  | fuel + 1 =>
+    if b < size then
+      let e := min size (b + 4096)
+      let acc := if s.foldl (fun acc x => acc ||| x) 0 b e ≥ 128 then scanChunks s b e acc 65
+        else acc
+      scanBlocks s e size acc fuel
+    else acc
+
 /-- Positions whose byte reached `128` (bit 7 set). Blocks of 4096 bytes, then
 chunks of 64, are first tested by an `OR` fold (vectorized by the C compiler);
 only chunks containing a candidate are scanned byte by byte. -/
-def scan (s : ByteArray) (len : Nat) : Array Nat := Id.run do
+def scan (s : ByteArray) (len : Nat) : Array Nat :=
   let size := min len s.size
-  let mut out : Array Nat := #[]
-  let mut b := 0
-  while b < size do
-    let e := min size (b + 4096)
-    if s.foldl (fun acc x => acc ||| x) 0 b e ≥ 128 then
-      let mut c := b
-      while c < e do
-        let ce := min e (c + 64)
-        if s.foldl (fun acc x => acc ||| x) 0 c ce ≥ 128 then out := scanBytes s c ce out
-        c := ce
-    b := e
-  return out
+  scanBlocks s 0 size #[] (size / 4096 + 1)
 
 /-! ### Kernels on unboxed per-prime arrays
 

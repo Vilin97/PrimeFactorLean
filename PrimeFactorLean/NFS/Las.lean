@@ -805,21 +805,30 @@ termination_by e - j
 4096 bytes are skipped unless both sides' `OR` folds (vectorized) have bit 7
 set, then 16-byte groups unless the algebraic side's has (its threshold is
 reached far less often than the rational side's). -/
-def survivors (bufR bufA : ByteArray) (len : Nat) : Array Nat := Id.run do
+def survivors (bufR bufA : ByteArray) (len : Nat) : Array Nat :=
   let size := min len (min bufR.size bufA.size)
-  let fold (s : ByteArray) (a b : Nat) : UInt8 := s.foldl (fun acc x => acc ||| x) 0 a b
-  let mut out : Array Nat := #[]
-  let mut b := 0
-  while b < size do
-    let e := min size (b + 4096)
-    if fold bufA b e ≥ 128 && fold bufR b e ≥ 128 then
-      let mut c := b
-      while c < e do
+  survBlocks bufR bufA 0 size #[] (size / 4096 + 1)
+where
+  fold (s : ByteArray) (a b : Nat) : UInt8 := s.foldl (fun acc x => acc ||| x) 0 a b
+  /-- The 16-byte groups of `[c, e)` (tail recursive, no loop state). -/
+  survGroups (bufR bufA : ByteArray) (c e : Nat) (acc : Array Nat) : Nat → Array Nat
+    | 0 => acc
+    | fuel + 1 =>
+      if c < e then
         let ce := min e (c + 16)
-        if fold bufA c ce ≥ 128 then out := scanBoth bufA bufR c ce out
-        c := ce
-    b := e
-  return out
+        let acc := if fold bufA c ce ≥ 128 then scanBoth bufA bufR c ce acc else acc
+        survGroups bufR bufA ce e acc fuel
+      else acc
+  /-- The blocks of 4096 bytes of `[b, size)`. -/
+  survBlocks (bufR bufA : ByteArray) (b size : Nat) (acc : Array Nat) : Nat → Array Nat
+    | 0 => acc
+    | fuel + 1 =>
+      if b < size then
+        let e := min size (b + 4096)
+        let acc := if fold bufA b e ≥ 128 && fold bufR b e ≥ 128 then
+            survGroups bufR bufA b e acc 257 else acc
+        survBlocks bufR bufA e size acc fuel
+      else acc
 
 /-- Indices `k < stop` of the small ideals whose progression `i ≡ j R (mod p)`
 contains the column `c` of row `j` (`y = c + I p - I/2 - j R` is divisible by

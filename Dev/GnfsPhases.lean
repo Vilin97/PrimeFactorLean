@@ -64,7 +64,10 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
       mfbA := params.mfbA, fudge := params.lasFudge,
       variant := (overrides.findSome? fun kv => match kv.splitOn "=" with
         | ["variant", v] => v.toNat?
-        | _ => none).getD 11 }
+        | _ => none).getD 11,
+      jDiv := (overrides.findSome? fun kv => match kv.splitOn "=" with
+        | ["jDiv", v] => v.toNat?
+        | _ => none).getD 2 }
   let las := Las.mkLasCtx ctx lasParams
   let mut coll : Collection := {}
   let mut rows := Rows.empty ctx.fb
