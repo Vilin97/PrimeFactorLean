@@ -169,7 +169,10 @@ def Words.xor (a b : Words) : Words :=
 /-! ## The matrix -/
 
 /-- A sparse matrix by columns (relations), with its transpose by rows, both in
-compressed form: entries of column `c` are `colIdx[colPtr[c] .. colPtr[c+1])`. -/
+compressed form: entries of column `c` are `colIdx[colPtr[c] .. colPtr[c+1])`.
+Very large matrices (`packed`, at least `2^26` entries) keep their indices in
+three bytes each instead (`colIdxB`, `rowIdxB`): an `Array UInt32` spends eight
+bytes per entry (at `2^24` entries the decoding still costs more than it saves). -/
 structure Sparse where
   nrows : Nat
   ncols : Nat
@@ -177,28 +180,45 @@ structure Sparse where
   colIdx : Array UInt32
   rowPtr : Array Nat
   rowIdx : Array UInt32
+  packed : Bool
+  colIdxB : ByteArray
+  rowIdxB : ByteArray
 
-def Sparse.mk' (nrows : Nat) (cols : Array (Array Nat)) : Sparse := Id.run do
+/-- Append `x < 2^24` in three bytes (little endian). -/
+def push3 (b : ByteArray) (x : Nat) : ByteArray :=
+  ((b.push x.toUInt8).push (x >>> 8).toUInt8).push (x >>> 16).toUInt8
+
+def Sparse.mk' (nrows : Nat) (cols : Array (Array Nat)) (packAt : Nat := 67108864) : Sparse :=
+  Id.run do
+  let nnz := cols.foldl (· + ·.size) 0
+  let packed := nnz ≥ packAt && nrows < 16777216 && cols.size < 16777216
   let mut colPtr : Array Nat := Array.mkEmpty (cols.size + 1)
   let mut colIdx : Array UInt32 := #[]
+  let mut colIdxB : ByteArray := ByteArray.emptyWithCapacity (if packed then 3 * nnz else 0)
   let mut count : Array Nat := Array.replicate nrows 0
+  let mut k := 0
   colPtr := colPtr.push 0
   for c in cols do
     for r in c do
-      colIdx := colIdx.push r.toUInt32
+      if packed then colIdxB := push3 colIdxB r else colIdx := colIdx.push r.toUInt32
       count := count.set! r (count[r]! + 1)
-    colPtr := colPtr.push colIdx.size
+    k := k + c.size
+    colPtr := colPtr.push k
   let mut rowPtr : Array Nat := Array.mkEmpty (nrows + 1)
   rowPtr := rowPtr.push 0
   for r in [0:nrows] do rowPtr := rowPtr.push (rowPtr[r]! + count[r]!)
   let mut fill := rowPtr
-  let mut rowIdx : Array UInt32 := Array.replicate colIdx.size 0
+  let mut rowEnt : Array UInt32 := Array.replicate nnz 0
   for c in [0:cols.size] do
     for r in cols[c]! do
       let pos := fill[r]!
-      rowIdx := rowIdx.set! pos c.toUInt32
+      rowEnt := rowEnt.set! pos c.toUInt32
       fill := fill.set! r (pos + 1)
-  return { nrows := nrows, ncols := cols.size, colPtr, colIdx, rowPtr, rowIdx }
+  let mut rowIdxB : ByteArray := ByteArray.emptyWithCapacity (if packed then 3 * nnz else 0)
+  if packed then
+    for c in rowEnt do rowIdxB := push3 rowIdxB c.toNat
+  return { nrows := nrows, ncols := cols.size, colPtr, colIdx,
+           rowPtr, rowIdx := if packed then #[] else rowEnt, packed, colIdxB, rowIdxB }
 
 /-- `⊕ x[idx[k]]` for `k ∈ [lo, hi)`. -/
 def gather (x : Words) (idx : Array UInt32) (lo hi : Nat) (acc : UInt64) : UInt64 :=
@@ -207,12 +227,23 @@ def gather (x : Words) (idx : Array UInt32) (lo hi : Nat) (acc : UInt64) : UInt6
   else acc
 termination_by hi - lo
 
-/-- Rows `[lo, hi)` of a compressed product. -/
-def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (lo hi : Nat) : Words :=
-  Id.run do
+/-- `gather` on indices of three bytes (machine-word decoding: `Nat` shifts left
+are run-time calls). -/
+def gather3 (x : Words) (idx : ByteArray) (lo hi : Nat) (acc : UInt64) : UInt64 :=
+  if h : lo < hi ∧ 3 * lo + 2 < idx.size then
+    let i := (idx[3 * lo].toUInt64 ||| (idx[3 * lo + 1].toUInt64 <<< 8) |||
+      (idx[3 * lo + 2].toUInt64 <<< 16)).toNat
+    gather3 x idx (lo + 1) hi (acc ^^^ x.get i)
+  else acc
+termination_by hi - lo
+
+/-- Rows `[lo, hi)` of a compressed product (`idxB` if `packed`). -/
+def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (packed : Bool)
+    (idxB : ByteArray) (lo hi : Nat) : Words := Id.run do
   let mut out : Words := ⟨Array.mkEmpty (2 * (hi - lo))⟩
   for r in [lo:hi] do
-    out := out.push (gather x.data idx ptr[r]! ptr[r + 1]! 0)
+    out := out.push (if packed then gather3 x.data idxB ptr[r]! ptr[r + 1]! 0
+      else gather x.data idx ptr[r]! ptr[r + 1]! 0)
   return out
 
 /-- The first `r ∈ [lo, hi]` with `ptr[r] ≥ target` (binary search; `ptr` nondecreasing). -/
@@ -224,30 +255,30 @@ def firstAtLeast (ptr : Array Nat) (target lo hi : Nat) : Nat :=
 termination_by hi - lo
 
 /-- A compressed product, split over `threads` tasks (one task for small products). -/
-def mulCompressed (x : Block) (ptr : Array Nat) (idx : Array UInt32) (count threads : Nat) :
-    Block := Id.run do
-  -- below about 100000 nonzeros a single task is faster than spawning
-  let threads := if idx.size < 100000 then 1 else threads
-  if threads ≤ 1 then return ⟨gatherRange x ptr idx 0 count⟩
-  -- chunks of equal numbers of entries (the dense rows of small primes and
-  -- characters would otherwise all fall into the first chunk)
+def mulCompressed (x : Block) (ptr : Array Nat) (idx : Array UInt32) (packed : Bool)
+    (idxB : ByteArray) (count threads : Nat) : Block := Id.run do
   let nnz := ptr[count]!
-  -- the last bound is `count` itself: trailing rows may be empty
+  -- below about 100000 nonzeros a single task is faster than spawning
+  let threads := if nnz < 100000 then 1 else threads
+  if threads ≤ 1 then return ⟨gatherRange x ptr idx packed idxB 0 count⟩
+  -- chunks of equal numbers of entries (the dense rows of small primes and
+  -- characters would otherwise all fall into the first chunk); the last bound
+  -- is `count` itself: trailing rows may be empty
   let bounds := ((List.range threads).map fun t => firstAtLeast ptr (t * nnz / threads) 0 count) ++
     [count]
   let tasks := (bounds.zip bounds.tail).map fun (lo, hi) =>
-    Task.spawn fun _ => gatherRange x ptr idx lo hi
+    Task.spawn fun _ => gatherRange x ptr idx packed idxB lo hi
   let mut data : Array UInt32 := Array.mkEmpty (2 * count)
   for task in tasks do data := data ++ task.get.d
   return ⟨⟨data⟩⟩
 
 /-- `B x` for a block over the columns (gathering along each row). -/
 def mulB (B : Sparse) (x : Block) (threads : Nat) : Block :=
-  mulCompressed x B.rowPtr B.rowIdx B.nrows threads
+  mulCompressed x B.rowPtr B.rowIdx B.packed B.rowIdxB B.nrows threads
 
 /-- `Bᵀ y` for a block over the rows (gathering along each column). -/
 def mulBT (B : Sparse) (y : Block) (threads : Nat) : Block :=
-  mulCompressed y B.colPtr B.colIdx B.ncols threads
+  mulCompressed y B.colPtr B.colIdx B.packed B.colIdxB B.ncols threads
 
 /-- `A x = Bᵀ (B x)`. -/
 def mulA (B : Sparse) (x : Block) (threads : Nat) : Block := mulBT B (mulB B x threads) threads

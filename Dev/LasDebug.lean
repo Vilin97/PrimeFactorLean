@@ -45,9 +45,10 @@ def fkUnit : IO Unit := do
 
 /-- Sieve a few special-`q` with the lattice siever, time it and check every relation. -/
 def lasDebug (n : Nat) (count : Nat) (fudge : Nat := 4) (skewOverride : Nat := 0)
-    (preSlack : Nat := 6) (qstart : Nat := 0) (v5 : Bool := false) (v6 : Bool := false) :
-    IO Unit := do
+    (preSlack : Nat := 6) (qstart : Nat := 0) (v5 : Bool := false) (v6 : Bool := false)
+    (logI : Nat := 0) : IO Unit := do
   let params := chooseParams (GNFS.decimalDigits n)
+  let params := if logI > 0 then { params with lasLogI := logI } else params
   let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
       (min params.ratBound params.algBound) + 1 }
   let some sel := (PolySelect.selectCollision n params.degree params.psP params.psNq params.psIncr

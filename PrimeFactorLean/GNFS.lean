@@ -271,18 +271,18 @@ occur (large primes included). -/
 /-- The Jacobi symbol `(a / n)` for odd `n > 0` (binary algorithm on machine
 words): `1`, `-1` or `0`. Used for the quadratic characters (untrusted: a wrong
 character only spoils a dependency, which the square root then rejects). -/
-def jacobi (a n : UInt64) : Int := go (a % n) n 1 128
+def jacobi (a n : UInt64) : Int := go (a % n) n 1 8192
 where
   go (a n : UInt64) (t : Int) : Nat → Int
     | 0 => 0
     | fuel + 1 =>
       if a == 0 then (if n == 1 then t else 0)
-      else
-        -- remove the factors of 2 of `a`: each flips the sign when n ≡ ±3 (mod 8)
-        let tz := (a &&& (-a)).toNat.log2
-        let a := a >>> tz.toUInt64
+      else if a &&& 1 == 0 then
+        -- a factor 2 of `a` flips the sign when n ≡ ±3 (mod 8) (one shift per
+        -- step: `Nat.log2` of the low bit would be a run-time call)
         let r := n % 8
-        let t := if tz % 2 == 1 && (r == 3 || r == 5) then -t else t
+        go (a >>> 1) n (if r == 3 || r == 5 then -t else t) fuel
+      else
         -- reciprocity
         let t := if a % 4 == 3 && n % 4 == 3 then -t else t
         go (n % a) a t fuel
@@ -453,10 +453,10 @@ def rowsReady (rs : Rows) (dense extra : Nat) : Bool :=
 
 /-- The excess (rows minus active columns and `dense`) after singleton removal,
 and whether it reaches `extra`. -/
-def rowsExcess (rs : Rows) (dense extra : Nat) : Int × Bool :=
+def rowsExcess (rs : Rows) (dense extra : Nat) : Int × Bool × Nat :=
   let kept := GF2.removeSingletons rs.next rs.sparse
   let e : Int := (kept.size : Int) - (activeColumns rs.next rs.sparse kept + dense : Nat)
-  (e, e ≥ extra)
+  (e, e ≥ extra, kept.size)
 
 /-- Whether the matrix of `rels` has enough excess after singleton removal. -/
 def matrixReady (ctx : Ctx) (params : Params) (rels : Array Rel) : Bool :=
@@ -514,16 +514,22 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
     let mut target := 0
     if coll.rels.size ≥ base && (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11) then
       lastCheck := coll.rels.size
-      let (excess, ok) := rowsExcess rows (2 + ctx.fb.chars.size) params.extra
+      let (excess, ok, kept) := rowsExcess rows (2 + ctx.fb.chars.size) params.extra
       ready := ok
-      -- the relations still needed, extrapolated from the last two checks
-      -- (with a tenth more: the excess grows faster than linearly)
-      if let some (r0, e0) := prev then
-        if excess > e0 && coll.rels.size > r0 then
-          let need := ((params.extra : Int) - excess) * ((coll.rels.size - r0 : Nat) : Int) /
-            (excess - e0)
-          target := coll.rels.size + (11 * need.toNat) / 10
-      prev := some (coll.rels.size, excess)
+      if kept == 0 then
+        -- nothing survives singleton removal yet: far from ready, check again
+        -- after two fifths more relations
+        prev := none
+        lastCheck := coll.rels.size * 14 / 11
+      else
+        -- the relations still needed, extrapolated from the last two checks
+        -- (with a tenth more: the excess grows faster than linearly)
+        if let some (r0, e0) := prev then
+          if excess > e0 && coll.rels.size > r0 then
+            let need := ((params.extra : Int) - excess) * ((coll.rels.size - r0 : Nat) : Int) /
+              (excess - e0)
+            target := coll.rels.size + (11 * need.toNat) / 10
+        prev := some (coll.rels.size, excess)
     let gained := coll.rels.size - before
     if params.lasLogI > 0 && gained > 0 then
       count := max (6 * threads) (count * (coll.rels.size / 10 + 1) / gained)

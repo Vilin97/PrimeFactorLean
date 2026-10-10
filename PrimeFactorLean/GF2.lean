@@ -41,18 +41,38 @@ def removeSingletons (numCols : Nat) (rows : Array (Array Nat)) : Array Nat := I
   for r in rows do
     for c in r do
       if c < numCols then count := count.set! c (count[c]! + 1)
+  -- the rows of each column (compressed), then a queue of singleton columns:
+  -- removing the row of a singleton may create new singletons (linear time,
+  -- instead of passes over all rows until nothing changes)
+  let mut start : Array Nat := Array.mkEmpty (numCols + 1)
+  start := start.push 0
+  for c in [0:numCols] do start := start.push (start[c]! + count[c]!)
+  let mut fill := start
+  let mut idx : Array Nat := Array.replicate start[numCols]! 0
+  for i in [0:rows.size] do
+    for c in rows[i]! do
+      if c < numCols then
+        idx := idx.set! fill[c]! i
+        fill := fill.set! c (fill[c]! + 1)
   let mut alive : Array Bool := Array.replicate rows.size true
-  let mut changed := true
-  while changed do
-    changed := false
-    for i in [0:rows.size] do
+  let mut queue : Array Nat := #[]
+  for c in [0:numCols] do
+    if count[c]! == 1 then queue := queue.push c
+  let mut qi := 0
+  while qi < queue.size do
+    let c := queue[qi]!
+    qi := qi + 1
+    if count[c]! != 1 then continue
+    for k in [start[c]!:start[c + 1]!] do
+      let i := idx[k]!
       if alive[i]! then
-        let r := rows[i]!
-        if r.any (fun c => c < numCols && count[c]! == 1) then
-          alive := alive.set! i false
-          changed := true
-          for c in r do
-            if c < numCols then count := count.set! c (count[c]! - 1)
+        alive := alive.set! i false
+        for c' in rows[i]! do
+          if c' < numCols then
+            let v := count[c']! - 1
+            count := count.set! c' v
+            if v == 1 then queue := queue.push c'
+        break
   let mut kept := #[]
   for i in [0:rows.size] do
     if alive[i]! then kept := kept.push i

@@ -839,3 +839,20 @@ def siqsPolyStats (n as : Nat) (fb M : Nat := 0) : IO Unit := do
   let t1 ← IO.monoNanosNow
   let ns := t1 - t0
   IO.println s!"fb {ctx.fb.size} M {ctx.M} s {ap.qs.size} medEnd {ctx.medEnd}: {as} A, {polys} polys, {rels.size} rels (full+partial) in {ns / 1000000} ms: {ns / 1000 / polys} us/poly, {rels.size * 1000000000 / ns} rels/s"
+
+
+open PrimeFactorLean.Lanczos in
+/-- `A x` on an `n × n` matrix with `w` entries per column, both index layouts. -/
+def mulABig (n w : Nat) : IO Unit := do
+  let cols : Array (Array Nat) := (Array.range n).map fun c =>
+    ((Array.range w).map fun t => (c * 7919 + t * 104729 + t * t * 31 + (c * t) % 977) % n).qsort (· < ·)
+  for packAt in [1000000000000, 0] do
+    let B := Sparse.mk' n cols packAt
+    let x := randomBlock n 3
+    let t0 ← IO.monoNanosNow
+    let mut acc : UInt64 := 0
+    for _ in [0:20] do
+      let r ← IO.lazyPure fun _ => mulA B x 16
+      acc := acc ^^^ r.get 7
+    let t1 ← IO.monoNanosNow
+    IO.println s!"n {n} w {w} packed {B.packed}: {(t1 - t0) / 20000} us per A x {acc}"

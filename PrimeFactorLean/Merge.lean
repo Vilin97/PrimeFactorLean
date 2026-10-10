@@ -108,10 +108,14 @@ def merge (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : Nat)
           if r != pivot then
             let old := rows[r]!
             let new := symmDiff old prow
-            for x in old do
-              if !containsSorted new x then colWeight := colWeight.set! x (colWeight[x]! - 1)
-            for x in new do
-              if !containsSorted old x then
+            -- only the pivot's columns change: those also in `old` cancel, the
+            -- others are added (one merge walk, no searches)
+            let mut i := 0
+            for x in prow do
+              while i < old.size && old[i]! < x do i := i + 1
+              if i < old.size && old[i]! == x then
+                colWeight := colWeight.set! x (colWeight[x]! - 1)
+              else
                 colWeight := colWeight.set! x (colWeight[x]! + 1)
                 colRows := colRows.modify x (·.push r)
             weight := weight + new.size - old.size

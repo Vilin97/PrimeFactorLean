@@ -8,12 +8,32 @@ open PrimeFactorLean PrimeFactorLean.NFS PrimeFactorLean.GNFS
 
 def ms (a b : Nat) : Nat := (b - a) / 1000000
 
+/-- Parameter overrides `key=value` (`limR limA lpbR lpbA mfbR mfbA fudge qmin`). -/
+def applyOverrides (p : Params) (kvs : List String) : Params :=
+  kvs.foldl (fun p kv =>
+    match kv.splitOn "=" with
+    | [k, v] =>
+      let x := v.toNat!
+      match k with
+      | "limR" => { p with ratBound := x }
+      | "limA" => { p with algBound := x }
+      | "lpbR" => { p with lpbR := x }
+      | "lpbA" => { p with lpbA := x }
+      | "mfbR" => { p with mfbR := x }
+      | "mfbA" => { p with mfbA := x }
+      | "fudge" => { p with lasFudge := x }
+      | "qmin" => { p with qmin := x }
+      | "logI" => { p with lasLogI := x }
+      | _ => p
+    | _ => p) p
+
 def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
-    (snfs : Option (Selection × Nat) := none) : IO Unit := do
+    (snfs : Option (Selection × Nat) := none) (overrides : List String := []) : IO Unit := do
   let t0 ← IO.monoNanosNow
   let params0 := match snfs with
     | some (sel, digits) => { chooseParams (max 60 (7 * digits / 10)) with degree := sel.degree }
     | none => chooseParams (decimalDigits n)
+  let params0 := applyOverrides params0 overrides
   let params0 := if logI > 0 then { params0 with lasLogI := logI } else params0
   let params0 := if density > 0 then { params0 with mergeDensity := density } else params0
   let params := { params0 with lpMult := 2 ^ (max params0.lpbR params0.lpbA) /
@@ -56,15 +76,19 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     let mut target := 0
     if coll.rels.size ≥ base && (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11) then
       lastCheck := coll.rels.size
-      let (excess, ok) ← IO.lazyPure fun _ => rowsExcess rows (2 + ctx.fb.chars.size) params.extra
+      let (excess, ok, kept) ← IO.lazyPure fun _ => rowsExcess rows (2 + ctx.fb.chars.size) params.extra
       ready := ok
-      IO.eprintln s!"  check: rels {coll.rels.size} excess {excess}"
-      if let some (r0, e0) := prev then
-        if excess > e0 && coll.rels.size > r0 then
-          let need := ((params.extra : Int) - excess) * ((coll.rels.size - r0 : Nat) : Int) /
-            (excess - e0)
-          target := coll.rels.size + (11 * need.toNat) / 10
-      prev := some (coll.rels.size, excess)
+      IO.eprintln s!"  check: rels {coll.rels.size} kept {kept} excess {excess}"
+      if kept == 0 then
+        prev := none
+        lastCheck := coll.rels.size * 14 / 11
+      else
+        if let some (r0, e0) := prev then
+          if excess > e0 && coll.rels.size > r0 then
+            let need := ((params.extra : Int) - excess) * ((coll.rels.size - r0 : Nat) : Int) /
+              (excess - e0)
+            target := coll.rels.size + (11 * need.toNat) / 10
+        prev := some (coll.rels.size, excess)
     let c ← IO.monoNanosNow
     tSieve := tSieve + (b - a)
     tCheck := tCheck + (c - b)
@@ -78,26 +102,26 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   IO.println s!"rounds {round}, q up to {coll.nextQ}, relations {coll.rels.size}: sieve {tSieve / 1000000} ms, rows+checks {tCheck / 1000000} ms"
   let rels := coll.rels
   let numCols := rows.next
-  let matRows ← IO.lazyPure fun _ => (Array.range rels.size).map fun k => fullRow ctx.fb rels[k]! rows.sparse[k]!
+  let matRows ← IO.lazyPure fun _ =>
+    let chunk := (rels.size + threads - 1) / threads
+    let rowTasks := (List.range threads).map fun t => Task.spawn fun _ =>
+      (Array.range (min rels.size ((t + 1) * chunk) - min rels.size (t * chunk))).map fun i =>
+        let k := t * chunk + i
+        fullRow ctx.fb rels[k]! rows.sparse[k]!
+    rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
   let t4 ← IO.monoNanosNow
   let kept := GF2.removeSingletons numCols matRows
   let t5 ← IO.monoNanosNow
   let (mrows, hist, mcols) ← IO.lazyPure fun _ => Merge.merge numCols (2 + ctx.fb.chars.size)
     (kept.map fun i => matRows[i]!) params.mergeDensity 32
   let t5b ← IO.monoNanosNow
-  -- Lanczos components, timed
+  -- Lanczos components, timed (the dependencies are those of `Lanczos.dependencies`)
   let la0 ← IO.monoNanosNow
   let kept2 ← IO.lazyPure fun _ => GF2.removeSingletons mcols mrows
   let la1 ← IO.monoNanosNow
   let Bm ← IO.lazyPure fun _ => Lanczos.Sparse.mk' mcols (kept2.map fun i => mrows[i]!)
   let la2 ← IO.monoNanosNow
-  let it ← IO.lazyPure fun _ => Lanczos.iterate Bm threads 1
-  let la3 ← IO.monoNanosNow
-  let nd ← IO.lazyPure fun _ => match it with
-    | some (x, v) => (Lanczos.combine Bm x v threads 64).size
-    | none => 0
-  let la4 ← IO.monoNanosNow
-  IO.println s!"lanczos parts: singletons {ms la0 la1}, sparse {ms la1 la2}, iterate {ms la2 la3}, combine {ms la3 la4} ({nd} deps, {kept2.size} cols)"
+  IO.println s!"lanczos setup: singletons {ms la0 la1}, sparse {ms la1 la2} ({kept2.size} rows)"
   let mdeps ← IO.lazyPure fun _ => Lanczos.dependencies mcols mrows 64 threads
   let deps := (Merge.unmerge kept.size hist mdeps).map fun dep => dep.map fun i => kept[i]!
   let t6 ← IO.monoNanosNow

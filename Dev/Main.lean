@@ -93,6 +93,7 @@ def main (args : List String) : IO Unit := do
   | ["lanczosunit"] => lanczosUnit
   | ["mulacc"] => mulAccBench
   | ["mula"] => mulABench
+  | ["mulabig", n, w] => mulABig n.toNat! w.toNat!
   | ["cofactor"] => cofactorBench (70000000 + args.length - 1)
   | ["rb"] => rbMain
   | ["fkunit"] => fkUnit
@@ -100,6 +101,7 @@ def main (args : List String) : IO Unit := do
   | ["las", ns, cnt, fudge, skew] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! skew.toNat!
   | ["lasq", ns, cnt, fudge, pre, q0] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 pre.toNat! q0.toNat!
   | ["laspar", ns, per] => lasPar ns.toNat! per.toNat! [1, 2, 4, 8, 12, 16]
+  | ["lasI", ns, cnt, fudge, pre, li] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 pre.toNat! 0 false false li.toNat!
   | ["las6", ns, cnt, fudge, pre] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 pre.toNat! 0 false true
   | ["las5", ns, cnt, fudge, pre] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 pre.toNat! 0 true
   | ["lasold", ns, cnt, fudge, pre] => lasDebug ns.toNat! cnt.toNat! fudge.toNat! 0 pre.toNat!
@@ -138,6 +140,7 @@ def main (args : List String) : IO Unit := do
   | ["siqstimes", ns, ts, reps] => siqsPhaseTimes ns.toNat! ts.toNat! reps.toNat!
   | ["monttest"] => montTestMain
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
+  | "gnfsover" :: ns :: ts :: kvs => gnfsPhases ns.toNat! ts.toNat! 0 0 none kvs
   | ["snfsphases", ns, ts, b, k, sgn, d] =>
     let sel := GNFS.snfsSelection b.toNat! k.toNat! d.toNat! (sgn == "+")
     gnfsPhases ns.toNat! ts.toNat! 0 0 (some (sel, GNFS.decimalDigits (b.toNat! ^ k.toNat!)))
