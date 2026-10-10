@@ -41,10 +41,11 @@ private def parseOptions : List String → Config → List String × Config
     | none => (["--invalid"], cfg)
   | args, cfg => (args, cfg)
 
-/-- Grow the task pool (`PrimeFactorLean.warmPool`) for inputs that may run
-parallel searches (from 30 digits; a millisecond is not worth it below). -/
+/-- Grow the task pool (`PrimeFactorLean.warmPool`) for inputs whose searches
+run long enough in parallel (from 45 digits; the millisecond it takes costs more
+than it saves below). -/
 private def prepare (cfg : Config) (n : Nat) : IO Unit := do
-  if cfg.threads > 1 && n ≥ 10 ^ 29 then warmPool (2 * cfg.threads)
+  if cfg.threads > 1 && n ≥ 10 ^ 44 then warmPool cfg.threads
 
 def main (args : List String) : IO UInt32 := do
   let (args, cfg) := parseOptions args {}

@@ -228,7 +228,8 @@ def lasFile (path : String) (q0 count : Nat) (out : String) (kvs : List String) 
       if v == 8 then Las.processQ8 las (get "slack" 2) q ρ sc else
       if v == 9 then Las.processQ9 las (get "slack" 3) q ρ sc else
       if v == 10 then Las.processQ10 las (get "slack" 3) q ρ sc else
-      if v == 11 then Las.processQ11 las q ρ sc else Las.processQWith las q ρ sc
+      if v == 11 then Las.processQ11 las q ρ sc else
+      if v == 12 then Las.processQ12 las q ρ sc else Las.processQWith las q ρ sc
     sc := sc'
     total := total + rels.size
     for r in rels do
@@ -381,7 +382,8 @@ def lasParFile (path : String) (q0 per : Nat) (ts : List Nat) (kvs : List String
         let (rels, sc') := if v == 8 then Las.processQ8 las slack q ρ sc else
           if v == 9 then Las.processQ9 las slack q ρ sc else
           if v == 10 then Las.processQ10 las slack q ρ sc else
-          if v == 11 then Las.processQ11 las q ρ sc else Las.processQWith las q ρ sc
+          if v == 11 then Las.processQ11 las q ρ sc else
+      if v == 12 then Las.processQ12 las q ρ sc else Las.processQWith las q ρ sc
         sc := sc'
         c := c + rels.size
       return c).foldl (fun acc tk => acc + tk.get) 0

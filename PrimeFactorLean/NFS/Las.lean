@@ -429,6 +429,39 @@ def fkGoBU (bits : ByteArray) (bsz : USize) (hb : bsz.toNat ≤ bits.size) (len 
 termination_by fuel.toNat
 decreasing_by all_goals exact usize_pred_lt fuel hf
 
+/-! ### Reduced bases cached between the sieve and the resieve
+
+The reduction of each large ideal (about five Euclid steps with divisions) cost
+as much as a third of each walk; the sieve pass now stores the basis packed into
+one word (`x | y << 13 | b₀ << 26 | b₁ << 44`, each `b` below `2^18`; `0` when
+there is nothing to walk, `2^62 + R` when it does not fit) in place of the
+lattice root, and the resieve walks from it. -/
+
+/-- The packed Franke–Kleinjung basis of `(p, R)` (machine words, no allocation). -/
+def fkBasis (I : UInt32) (x b0 y b1 : UInt32) : Nat → UInt64
+  | 0 => 0
+  | fuel + 1 =>
+    if x < I && y < I then
+      if x == 0 || x + y < I || b0 == 0 || b1 == 0 then 0
+      else if b0 ≥ 262144 || b1 ≥ 262144 || I > 8192 then 1
+      else x.toUInt64 ||| (y.toUInt64 <<< 13) ||| (b0.toUInt64 <<< 26) ||| (b1.toUInt64 <<< 44)
+    else if x ≥ y then
+      if y == 0 then 0
+      else
+        let k := x / y
+        if x - k * y + y ≥ I then fkBasis I (x - k * y) (b0 + k * b1) y b1 fuel
+        else
+          let k' := (x - I) / y + 1
+          fkBasis I (x - k' * y) (b0 + k' * b1) y b1 fuel
+    else
+      if x == 0 then 0
+      else
+        let k := y / x
+        if y - k * x + x ≥ I then fkBasis I x b0 (y - k * x) (b1 + k * b0) fuel
+        else
+          let k' := (y - I) / x + 1
+          fkBasis I x b0 (y - k' * x) (b1 + k' * b0) fuel
+
 /-- `a⁻¹ mod p` for `0 < a < p < 2^32` by extended Euclid on 32-bit words (`0` if
 not invertible). -/
 def inv32Loop (r0 r1 : UInt32) (s0 s1 : Int64) : Nat → Int64
@@ -479,9 +512,10 @@ the survivors (`tinyAt`), and `fudge` covers them in the thresholds. -/
   jDiv : Nat := 2
   /-- Tolerance in bits of the survivor prefilter (`prefilterGap`). -/
   gapSlack : Nat := 3
-  /-- The siever: `11` for `processQ11` (row thresholds), `10` for `processQ10`
-(segment thresholds, the odd tiny primes counted at the survivors). -/
-  variant : Nat := 11
+  /-- The siever: `12` for `processQ12` (row thresholds, cached reduced bases),
+`11` for `processQ11`, `10` for `processQ10` (segment thresholds, the odd tiny
+primes counted at the survivors). -/
+  variant : Nat := 12
   deriving Repr, Inhabited
 
 /-- One side's factor base: ideals `(p, r)` (`r = p` projective) with logarithms. -/
@@ -1130,6 +1164,66 @@ def resieveSideBU (ctx : LasCtx) (side : Side) (R : Array Nat) (bits : ByteArray
     return acc
   else return acc
 
+/-- Sieve the large ideals of a side, returning the region and the lattice roots
+with the packed bases in place of the large ideals' roots. -/
+def sieveLargeCached (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray) :
+    ByteArray × Array Nat := Id.run do
+  let I := ctx.I
+  let len := (I * ctx.J).toUSize
+  let IU := I.toUInt64
+  let I32 := I.toUInt32
+  let mut b := buf
+  let mut R := R
+  if len.toNat < b.size then
+    for k in [side.largeStart:side.primes.size] do
+      let p := side.primes[k]!
+      let r := R[k]!
+      if r ≥ p then
+        R := R.set! k 0
+        continue
+      let w := fkBasis I32 p.toUInt32 0 r.toUInt32 1 128
+      -- `1` from `fkBasis`: the basis does not fit, keep the root behind a flag
+      R := R.set! k (if w == 1 then 4611686018427387904 + r else w.toNat)
+      let lg := side.logs.get! k
+      if hb' : len.toNat < b.size then
+        if w == 0 then continue
+        else if w == 1 then
+          b := fkGoU b len hb' IU p.toUInt64 lg p.toUInt64 0 r.toUInt64 1 128
+        else
+          let x := w &&& 8191
+          let y := (w >>> 13) &&& 8191
+          let b0 := (w >>> 26) &&& 262143
+          let b1 := (w >>> 44) &&& 262143
+          b := fkSieveU b len hb' (IU - 1).toUSize x.toUSize y.toUSize (b0 * IU - x).toUSize
+            (b1 * IU + y).toUSize lg (IU / 2).toUSize (2 * len / p.toUSize + 4)
+  return (b, R)
+
+/-- The resieve of the large ideals from the cached bases (`RB` from
+`sieveLargeCached`). -/
+def resieveCached (ctx : LasCtx) (side : Side) (RB : Array Nat) (bits : ByteArray)
+    (acc : Array Nat) : Array Nat := Id.run do
+  let I := ctx.I.toUInt64
+  let len := (ctx.I * ctx.J).toUSize
+  let bsz := bits.size.toUSize
+  if hb : bsz.toNat ≤ bits.size then
+    let mut acc := acc
+    for k in [side.largeStart:side.primes.size] do
+      let w := RB[k]!.toUInt64
+      if w == 0 then continue
+      let p := side.primes[k]!
+      if w ≥ 4611686018427387904 then
+        acc := fkGoBU bits bsz hb len I p.toUInt64 k.toUInt64 acc p.toUInt64 0
+          (w - 4611686018427387904) 1 128
+      else
+        let x := w &&& 8191
+        let y := (w >>> 13) &&& 8191
+        let b0 := (w >>> 26) &&& 262143
+        let b1 := (w >>> 44) &&& 262143
+        acc := fkWalkBU bits bsz hb len (I - 1).toUSize x.toUSize y.toUSize (b0 * I - x).toUSize
+          (b1 * I + y).toUSize k.toUInt64 (I / 2).toUSize acc (2 * len / p.toUSize + 4)
+    return acc
+  else return acc
+
 /-- Records `pos <<< 24 ||| k` grouped by survivor (`survs` increasing). -/
 def groupRecords (survs : Array Nat) (recs : Array Nat) : Array (List Nat) := Id.run do
   let mut lists : Array (List Nat) := Array.replicate survs.size []
@@ -1296,6 +1390,49 @@ def processQ11 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch
   let bits := markBits bits surv true
   let listsR := groupLabelled ctx surv lab rowStart (resieveSideBU ctx ctx.rat Rr bits #[])
   let listsA := groupLabelled ctx surv lab rowStart (resieveSideBU ctx ctx.alg Ra bits #[])
+  let bits := markBits bits surv false
+  let mut rels : Array Rel := #[]
+  for k in [0:surv.size] do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+      rels := rels.push rel
+  return (rels, ⟨bufR, lab, bits⟩)
+
+/-- `sieveSideU` without the large ideals (line sieve only). -/
+def lineSieveSide (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray) : ByteArray :=
+  Id.run do
+  let I := ctx.I
+  let len := I * ctx.J
+  let lenU := len.toUSize
+  let mut b := buf
+  for k in [side.sieveStart:side.largeStart] do
+    let p := side.primes[k]!
+    let r := R[k]!
+    if r ≥ p then continue
+    let lg := side.logs.get! k
+    if hb' : lenU.toNat < b.size then
+      b := lineSieveU b lenU hb' p.toUSize r.toUSize I.toUSize ctx.J.toUSize lg
+        ((I + p - 1) / p).toUSize 1 ((r + I / 2) % p).toUSize ctx.J.toUSize
+  return b
+
+/-- `processQ11` with the reduced bases of the large ideals cached for the resieve. -/
+def processQ12 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
+  let ⟨b1, b2, bits⟩ := sc
+  let (u, v) := reduceLattice q ρ ctx.skew
+  let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
+  let len := ctx.I * ctx.J
+  let Rr := latticeRoots ctx.rat ua ub va vb
+  let Ra := latticeRoots ctx.alg ua ub va vb
+  let thrR := rowThresholds ctx q ua ub va vb ctx.params.mfbR false
+  let thrA := rowThresholds ctx q ua ub va vb ctx.params.mfbA true
+  let (bufR, Rr) := sieveLargeCached ctx ctx.rat Rr (lineSieveSide ctx ctx.rat Rr (fillRows ctx b1 thrR))
+  let (bufA, Ra) := sieveLargeCached ctx ctx.alg Ra (lineSieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA))
+  let surv := prefilterRows ctx q ua ub va vb thrR thrA bufR bufA
+    (dropSmallGcd ctx (survivors bufR bufA len))
+  if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
+  let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
+  let bits := markBits bits surv true
+  let listsR := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.rat Rr bits #[])
+  let listsA := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.alg Ra bits #[])
   let bits := markBits bits surv false
   let mut rels : Array Rel := #[]
   for k in [0:surv.size] do

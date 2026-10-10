@@ -288,40 +288,86 @@ where
         go (n % a) a t fuel
 
 /-- Incrementally maintained matrix rows: the odd-exponent ideal columns of each
-relation (numbered from `2 + chars` in order of first appearance). The dense
-columns (the parity column `1`, the sign `0` and the characters) are added only
-when the final matrix is built. -/
+relation. The factor base has fixed columns (`2 + chars + k` for the rational
+prime of index `k`, then the algebraic ideals), found through tables indexed by
+the prime; only the large primes beyond it are numbered on first occurrence (a
+hash-map lookup per prime of every relation made this a serial bottleneck). The
+dense columns (the parity column `1`, the sign `0` and the characters) are added
+only when the final matrix is built. -/
 structure Rows where
+  /-- `ratIdx[p]` is one more than the index of the rational factor-base prime `p`
+  (`0`: not in the factor base). -/
+  ratIdx : Array Nat := #[]
+  /-- `algFirst[p]` is one more than the index of the first algebraic ideal
+  above `p`. -/
+  algFirst : Array Nat := #[]
+  algPrimes : Array Nat := #[]
+  algRoots : Array Nat := #[]
+  ratBase : Nat := 0
+  algBase : Nat := 0
   ratCol : Std.HashMap Nat Nat := {}
-  algCol : Std.HashMap (Nat × Nat) Nat := {}
+  /-- Large ideals `(p, r)` keyed by `2^32 p + r`. -/
+  algCol : Std.HashMap Nat Nat := {}
   next : Nat
   sparse : Array (Array Nat) := #[]
   deriving Inhabited
 
-def Rows.empty (fb : FactorBase) : Rows := { next := 2 + fb.chars.size }
+def Rows.empty (fb : FactorBase) : Rows := Id.run do
+  let ratLim := fb.ratPrimes.back?.getD 0
+  let algLim := fb.algPrimes.back?.getD 0
+  let mut ratIdx : Array Nat := Array.replicate (ratLim + 1) 0
+  for k in [0:fb.ratPrimes.size] do ratIdx := ratIdx.set! fb.ratPrimes[k]! (k + 1)
+  let mut algFirst : Array Nat := Array.replicate (algLim + 1) 0
+  for k' in [0:fb.algPrimes.size] do
+    let k := fb.algPrimes.size - 1 - k'
+    algFirst := algFirst.set! fb.algPrimes[k]! (k + 1)
+  let ratBase := 2 + fb.chars.size
+  let algBase := ratBase + fb.ratPrimes.size
+  return { ratIdx, algFirst, algPrimes := fb.algPrimes, algRoots := fb.algRoots, ratBase, algBase,
+           next := algBase + fb.algPrimes.size }
+
+/-- The column of the algebraic factor-base ideal `(p, r)` if it is one. -/
+def algColumnOf (algFirst algPrimes algRoots : Array Nat) (algBase p r : Nat) : Option Nat := Id.run do
+  let k0 := algFirst.getD p 0
+  if k0 == 0 then return none
+  let mut k := k0 - 1
+  while k < algPrimes.size && algPrimes[k]! == p do
+    if algRoots[k]! == r then return some (algBase + k)
+    k := k + 1
+  return none
 
 def Rows.add (rs : Rows) (rel : Rel) : Rows := Id.run do
-  let mut ratCol := rs.ratCol
-  let mut algCol := rs.algCol
-  let mut next := rs.next
+  -- every field taken apart once, so that the arrays and maps stay unshared
+  let ⟨ratIdx, algFirst, algPrimes, algRoots, ratBase, algBase, ratCol0, algCol0, next0, sparse⟩ := rs
+  let mut ratCol := ratCol0
+  let mut algCol := algCol0
+  let mut next := next0
   let mut row : Array Nat := #[]
   for (p, e) in rel.rat do
     if e % 2 == 1 then
-      match ratCol.get? p with
-      | some c => row := row.push c
-      | none =>
-        ratCol := ratCol.insert p next
-        row := row.push next
-        next := next + 1
+      let k := ratIdx.getD p 0
+      if k != 0 then row := row.push (ratBase + k - 1)
+      else
+        match ratCol.get? p with
+        | some c => row := row.push c
+        | none =>
+          ratCol := ratCol.insert p next
+          row := row.push next
+          next := next + 1
   for (p, r, e) in rel.alg do
     if e % 2 == 1 then
-      match algCol.get? (p, r) with
+      match algColumnOf algFirst algPrimes algRoots algBase p r with
       | some c => row := row.push c
       | none =>
-        algCol := algCol.insert (p, r) next
-        row := row.push next
-        next := next + 1
-  return { ratCol, algCol, next, sparse := rs.sparse.push row }
+        let key := ((p.toUInt64 <<< 32) ||| r.toUInt64).toNat
+        match algCol.get? key with
+        | some c => row := row.push c
+        | none =>
+          algCol := algCol.insert key next
+          row := row.push next
+          next := next + 1
+  return ⟨ratIdx, algFirst, algPrimes, algRoots, ratBase, algBase, ratCol, algCol, next,
+    sparse.push row⟩
 
 /-- The full row of relation `rel` (with sparse part `sparse`): parity column,
 sign, quadratic characters and ideals. -/
@@ -433,6 +479,7 @@ def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (
         let (q, ρ) := qs[t + k * T]!
         let (rels, sc') := if las.params.variant == 0 then Las.processQWith las q ρ sc
           else if las.params.variant == 11 then Las.processQ11 las q ρ sc
+          else if las.params.variant == 12 then Las.processQ12 las q ρ sc
           else Las.processQ10 las las.params.gapSlack q ρ sc
         sc := sc'
         out := out ++ rels
