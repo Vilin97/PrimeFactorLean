@@ -1018,8 +1018,9 @@ def processA (ctx : Ctx) (seed : Nat) : Array (Found ctx.n ctx.fb) := Id.run do
     rels := processCands ctx ap B ((B * B - (ctx.N : Int)) / (if ctx.q2 then 4 * A else A)) roots buf
       cands rels
   for g in [1:2 ^ (s - 1)] do
-    -- Gray code: bit v flips between g - 1 and g
-    let v := (g &&& (2 ^ 64 - g)).log2
+    -- Gray code: bit v (the lowest set bit of g) flips between g - 1 and g;
+    -- machine words (`2 ^ 64 - g` would be a big number)
+    let v := (g.toUInt64 &&& (-g.toUInt64)).toNat.log2
     let gray := g ^^^ (g >>> 1)
     let negate := gray.testBit v
     let bv : Int := (ap.Bl[v]! : Int)

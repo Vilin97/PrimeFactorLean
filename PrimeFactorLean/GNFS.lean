@@ -456,28 +456,14 @@ def matrixReady (ctx : Ctx) (params : Params) (rels : Array Rel) : Bool :=
     rowsReady rs (2 + ctx.fb.chars.size) params.extra
 
 /-- Sieve until the matrix has a healthy excess of relations, then try dependencies. -/
-def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run do
-  let params := cfg.params.getD (chooseParams (decimalDigits n))
+def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {}) :
+    Option (ProperFactor n) := Id.run do
   -- with the lattice siever, large primes reach `2^lpb`: the quadratic
   -- characters (chosen above `lpMult · bound`) must lie above them
   let params := if params.lasLogI > 0 then
       { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
           (min params.ratBound params.algBound) + 1 }
     else params
-  -- Kleinjung-style polynomials (rational side `Y₁ x - m`) for the lattice
-  -- siever, base-`m` polynomials for the line sievers
-  let sel? := if params.lasLogI > 0 then
-      if params.psP > 0 then
-        PolySelect.selectCollision n params.degree params.psP params.psNq params.psIncr
-          params.psAdMax params.psKeep 16 100000 params.lpbR params.lpbA
-          (Float.exp2 (2 * params.lasLogI - 1).toFloat * params.qmin.toFloat) (max 1 cfg.threads)
-      else
-        PolySelect.select n params.degree params.psAdStep params.psAdCount 2 params.psQlo
-          params.psQhi 3 params.psRotV (max 1 cfg.threads)
-    else none
-  let some sel := sel?.orElse fun _ =>
-    selectPolynomial n params.degree params.polyTries params.halfWidth params.expectedLines
-    | return none
   let some st := mkSetup n sel | return none
   let ctx := mkCtx n sel params
   -- A factor-base prime dividing n is a factor.
@@ -547,6 +533,59 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) := Id.run
       if let some d := tk.get then return some d
     i := i + 4
   return none
+
+/-- The number field sieve with a selected polynomial pair: Kleinjung-style
+polynomials (rational side `Y₁ x - m`) for the lattice siever, base-`m`
+polynomials for the line sievers. -/
+def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) :=
+  let params := cfg.params.getD (chooseParams (decimalDigits n))
+  let sel? := if params.lasLogI > 0 then
+      if params.psP > 0 then
+        PolySelect.selectCollision n params.degree params.psP params.psNq params.psIncr
+          params.psAdMax params.psKeep 16 100000 params.lpbR params.lpbA
+          (Float.exp2 (2 * params.lasLogI - 1).toFloat * params.qmin.toFloat) (max 1 cfg.threads)
+      else
+        PolySelect.select n params.degree params.psAdStep params.psAdCount 2 params.psQlo
+          params.psQhi 3 params.psRotV (max 1 cfg.threads)
+    else none
+  match sel?.orElse fun _ =>
+      selectPolynomial n params.degree params.polyTries params.halfWidth params.expectedLines with
+  | some sel => splitWith n sel params cfg
+  | none => none
+
+/-! ## The special number field sieve
+
+For a divisor `n` of `N = b^k ± 1` the pair `f = b^r x^d ± 1`, `g = x - b^t`
+(`k = d t + r`) has `f(b^t) = N ≡ 0 (mod n)`; alternatively `f = x^d ± b^(d-r)`
+with `m = b^(t+1)` has `f(m) = b^(d-r) N`. Both coefficients are tiny, so the
+norms are those of a number field sieve on a number of about half the digits
+of `N`: the parameters are chosen for `7/10` of its digits. The polynomial is
+not trusted: `mkSetup` checks `f(m) ≡ 0 (mod n)` like any other. -/
+
+/-- The SNFS pair of degree `d` for `b^k + 1` (`plus`) or `b^k - 1`, with the
+smaller leading or constant coefficient. -/
+def snfsSelection (b k d : Nat) (plus : Bool) : Selection :=
+  let t := k / d
+  let r := k % d
+  let one : Int := if plus then 1 else -1
+  if r ≤ d - r || r == 0 then
+    -- b^r x^d ± 1, m = b^t
+    let cs : Array Int := ((Array.replicate (d + 1) (0 : Int)).set! d ((b ^ r : Nat) : Int)).set! 0 one
+    { coeffs := cs, m := b ^ t }
+  else
+    -- x^d ± b^(d-r), m = b^(t+1): f(m) = b^(d-r) (b^k ± 1)
+    let cs : Array Int := ((Array.replicate (d + 1) (0 : Int)).set! d 1).set! 0
+      (one * ((b ^ (d - r) : Nat) : Int))
+    { coeffs := cs, m := b ^ (t + 1) }
+
+/-- The special number field sieve for a divisor `n` of `b^k ± 1`: degree 4
+below 90 digits of `b^k`, 5 below 125, 6 beyond; parameters of the general
+number field sieve at `7/10` of the digits (at least 60), with that degree. -/
+def splitSNFS (n b k : Nat) (plus : Bool) (cfg : Config := {}) : Option (ProperFactor n) :=
+  let digits := decimalDigits (b ^ k)
+  let d := if digits < 90 then 4 else if digits < 125 then 5 else 6
+  let params := { (cfg.params.getD (chooseParams (max 60 (7 * digits / 10)))) with degree := d }
+  splitWith n (snfsSelection b k d plus) params cfg
 
 /-- The public splitter: even numbers and perfect powers are handled first. -/
 def split (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) :=

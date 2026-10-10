@@ -8,14 +8,17 @@ open PrimeFactorLean PrimeFactorLean.NFS PrimeFactorLean.GNFS
 
 def ms (a b : Nat) : Nat := (b - a) / 1000000
 
-def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0) : IO Unit := do
+def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
+    (snfs : Option (Selection × Nat) := none) : IO Unit := do
   let t0 ← IO.monoNanosNow
-  let params0 := chooseParams (decimalDigits n)
+  let params0 := match snfs with
+    | some (sel, digits) => { chooseParams (max 60 (7 * digits / 10)) with degree := sel.degree }
+    | none => chooseParams (decimalDigits n)
   let params0 := if logI > 0 then { params0 with lasLogI := logI } else params0
   let params0 := if density > 0 then { params0 with mergeDensity := density } else params0
   let params := { params0 with lpMult := 2 ^ (max params0.lpbR params0.lpbA) /
       (min params0.ratBound params0.algBound) + 1 }
-  let some sel ← IO.lazyPure fun _ => (PolySelect.selectCollision n params.degree params.psP
+  let some sel ← IO.lazyPure fun _ => (snfs.map (·.1)).orElse fun _ => (PolySelect.selectCollision n params.degree params.psP
     params.psNq params.psIncr params.psAdMax params.psKeep 16 100000 params.lpbR params.lpbA
     (Float.exp2 (2 * params.lasLogI - 1).toFloat * params.qmin.toFloat) threads).orElse fun _ =>
       selectPolynomial n params.degree params.polyTries params.halfWidth params.expectedLines

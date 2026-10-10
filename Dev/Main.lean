@@ -128,8 +128,12 @@ def main (args : List String) : IO Unit := do
   | ["bench9"] => Bench9.bench9Main
   | ["bench10"] => Bench10.bench10Main
   | ["stages", ns, ts] => autoStages ns.toNat! ts.toNat!
+  | ["siqstimes", ns, ts, reps] => siqsPhaseTimes ns.toNat! ts.toNat! reps.toNat!
   | ["monttest"] => montTestMain
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
+  | ["snfsphases", ns, ts, b, k, sgn, d] =>
+    let sel := GNFS.snfsSelection b.toNat! k.toNat! d.toNat! (sgn == "+")
+    gnfsPhases ns.toNat! ts.toNat! 0 0 (some (sel, GNFS.decimalDigits (b.toNat! ^ k.toNat!)))
   | ["gnfsphases", ns, ts, li, dens] => gnfsPhases ns.toNat! ts.toNat! li.toNat! dens.toNat!
   | ["alphacheck"] =>
     alphaCheck #[-14032843145855478, -67002930025814, 56665726855, 74132416, 36000] 188406130907

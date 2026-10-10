@@ -785,3 +785,21 @@ def grayCheck (n : Nat) (params : SIQS.Params) (seed steps : Nat) : IO Unit := d
       let b := (buf.get! j).toNat
       IO.println s!"  rel at j={j}: byte {b} (need 128), log|v| {Float.log2 v.natAbs.toFloat}, 2^{e2}, tiny bits {tinyBits}, LP bits {Float.log2 u.toFloat}"
   IO.println s!"poly {steps}: bad roots {badRoots}; brute force full {full} partial {part}; candidates {cands.size}, relations {rels.size}; bias {ctx.bias}"
+
+/-- Phase times of the fast SIQS (context, collection, extraction) on `n`. -/
+def siqsPhaseTimes (n threads reps : Nat) : IO Unit := do
+  let params := PrimeFactorLean.SIQS.chooseParams (PrimeFactorLean.QS.decimalDigits n)
+  for _ in [0:reps] do
+    let t0 ← IO.monoNanosNow
+    let c ← IO.lazyPure fun _ => PrimeFactorLean.SIQS.mkCtx n params
+    let t1 ← IO.monoNanosNow
+    match c with
+    | .inr _ => IO.println "factor in setup"
+    | .inl ctx =>
+      let needed := ctx.fb.size + 1 + params.extra
+      let rels ← IO.lazyPure fun _ => PrimeFactorLean.SIQS.collect ctx needed threads 1000
+      let t2 ← IO.monoNanosNow
+      if h : ctx.n = n then
+        let r ← IO.lazyPure fun _ => (h ▸ PrimeFactorLean.SIQS.extract ctx rels threads : Option (PrimeFactorLean.ProperFactor n))
+        let t3 ← IO.monoNanosNow
+        IO.println s!"fb {ctx.fb.size} M {ctx.M}: ctx {(t1 - t0) / 1000} us, collect {(t2 - t1) / 1000} us ({rels.size} rels), extract {(t3 - t2) / 1000} us -> {r.map (·.val)}"

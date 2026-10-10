@@ -156,7 +156,37 @@ def ecmLevels (threads : Nat) (levels : List (Nat × Nat)) : Splitter := fun n =
   levels.foldl (fun acc (b1, curves) => acc.orElse fun _ =>
     ECMF.split n { b1 := b1, curves := curves, threads := threads }) none
 
-/-- The automatic portfolio: cheap methods first, then ECM, then SIQS. -/
+/-- `(b, k, plus)` with `n ∣ b^k + 1` (`plus`) or `n ∣ b^k - 1` for a small base
+`b`, `k` the least such exponent. -/
+def specialForm (n : Nat) : Option (Nat × Nat × Bool) := Id.run do
+  for b in [2, 3, 5, 6, 7, 10, 11, 12] do
+    if n % b == 0 then continue
+    let kmax := 3 * (n.log2 / Nat.log2 b) + 64
+    let mut x := b % n
+    let mut k := 1
+    while k ≤ kmax do
+      if x == n - 1 then return some (b, k, true)
+      if x == 1 then return some (b, k, false)
+      x := x * b % n
+      k := k + 1
+  return none
+
+/-- The special number field sieve applies when `n` (at least 80 digits)
+divides `b^k ± 1` with `7/10` of the digits of `b^k` (its effective size) at
+least ten digits below those of `n`: `(b, k, plus, digits of b^k)`. -/
+def snfsCandidate (n : Nat) : Option (Nat × Nat × Bool × Nat) :=
+  let dn := QS.decimalDigits n
+  if dn < 80 then none else
+  match specialForm n with
+  | some (b, k, plus) =>
+    let D := QS.decimalDigits (b ^ k)
+    if 7 * D + 100 ≤ 10 * dn && D ≤ 140 then some (b, k, plus, D) else none
+  | none => none
+
+/-- The automatic portfolio: cheap methods first, then ECM, then the special
+number field sieve for divisors of `b^k ± 1` where it pays off, else SIQS. The
+ECM pretest is sized for the sieve that follows (the special number field
+sieve's effective size). -/
 def autoSplitter (cfg : Config) : Splitter := fun n =>
   if n < 4 then none else
   (smallSplitter 4096 n).orElse fun _ =>
@@ -166,8 +196,16 @@ def autoSplitter (cfg : Config) : Splitter := fun n =>
   (RhoF.split n 8000 1).orElse fun _ =>
   -- `p - 1` pays off only once the quadratic sieve is slow (from about 45 digits)
   (if n < 10 ^ 44 then none else PM1F.split n 20000).orElse fun _ =>
-  (ecmLevels cfg.threads (ecmSchedule (QS.decimalDigits n)) n).orElse fun _ =>
-  SIQS.split n { threads := cfg.threads }
+  let snfs := snfsCandidate n
+  let pretest := match snfs with
+    | some (_, _, _, D) => 7 * D / 10
+    | none => QS.decimalDigits n
+  (ecmLevels cfg.threads (ecmSchedule pretest) n).orElse fun _ =>
+  match snfs with
+  | some (b, k, plus, _) =>
+    (GNFS.splitSNFS n b k plus { threads := cfg.threads }).orElse fun _ =>
+      SIQS.split n { threads := cfg.threads }
+  | none => SIQS.split n { threads := cfg.threads }
 
 /-- The proof-carrying splitter of each algorithm. -/
 def splitter (algorithm : Algorithm) (cfg : Config := {}) : Splitter :=

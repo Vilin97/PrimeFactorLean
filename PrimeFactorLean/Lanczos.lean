@@ -232,7 +232,9 @@ def mulCompressed (x : Block) (ptr : Array Nat) (idx : Array UInt32) (count thre
   -- chunks of equal numbers of entries (the dense rows of small primes and
   -- characters would otherwise all fall into the first chunk)
   let nnz := ptr[count]!
-  let bounds := (List.range (threads + 1)).map fun t => firstAtLeast ptr (t * nnz / threads) 0 count
+  -- the last bound is `count` itself: trailing rows may be empty
+  let bounds := ((List.range threads).map fun t => firstAtLeast ptr (t * nnz / threads) 0 count) ++
+    [count]
   let tasks := (bounds.zip bounds.tail).map fun (lo, hi) =>
     Task.spawn fun _ => gatherRange x ptr idx lo hi
   let mut data : Array UInt32 := Array.mkEmpty (2 * count)
