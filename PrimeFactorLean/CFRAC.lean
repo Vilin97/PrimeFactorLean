@@ -160,7 +160,7 @@ expansion ends (`Q_i = 1`). An unmatched large-prime candidate is stored as
 same large prime turns up. -/
 def collect (n : Nat) (fb : Array Nat) (N lpBound needed maxSteps : Nat) :
     Array (Relation n fb) := Id.run do
-  let s := Nat.sqrt N
+  let s := isqrt N
   let fbProd := fb.foldl (· * ·) 1
   let mut fulls : Array (Relation n fb) := #[]
   let mut singles : Std.HashMap Nat (Nat × Nat × Bool) := {}
@@ -226,7 +226,7 @@ def splitWith (n : Nat) (params : Params) (tries : Nat := 5) : Option (ProperFac
   let primes := primesUpTo (max 1000 (params.fbSize * 30))
   for k in chooseMultipliers n primes tries do
     let N := k * n
-    let s := Nat.sqrt N
+    let s := isqrt N
     if s * s == N then
       -- `n = k m²`: the root shares the factor `k m` with `n`.
       if let some d := checkFactor n (Nat.gcd s n) then return some d

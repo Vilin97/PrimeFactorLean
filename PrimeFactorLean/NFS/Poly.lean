@@ -1,7 +1,4 @@
-import Mathlib.Data.ZMod.Basic
-import Mathlib.Algebra.BigOperators.Group.List.Basic
-import Mathlib.Tactic.Ring
-import Mathlib.Tactic.LinearCombination
+import PrimeFactorLean.Core
 
 /-!
 # Arithmetic in `ℤ[ω] = ℤ[X]/(f)` for a monic `f`, with an evaluation theorem
@@ -12,28 +9,39 @@ polynomial `f = g + X^d` is stored through its lower coefficients `g`
 
 The number field sieve maps `ℤ[ω]` to `ℤ/n` by `ω ↦ r`, where `f(r) ≡ 0`.
 `eval_mulZ` proves that the *executable* multiplication (convolution followed by
-reduction modulo `f`) is compatible with this map in every commutative ring in
-which `r` is a root of `f`. Consequently an exactly checked square
-`β · β = γ` in `ℤ[ω]` gives `eval(β)² = eval(γ)` modulo `n`.
+reduction modulo `f`) is compatible with this map: evaluation at `r` is
+multiplicative modulo every `n` with `f(r) ≡ 0 (mod n)`. Consequently an
+exactly checked square `β · β = γ` in `ℤ[ω]` gives `eval(β)² ≡ eval(γ)`
+modulo `n`.
 -/
 
 namespace PrimeFactorLean.NFS
 
 /-! ## Coefficient lists and their evaluation -/
 
-/-- Horner evaluation of a coefficient list at `r`. -/
-def eval {R : Type*} [CommRing R] (r : R) : List Int → R
+/-- Horner evaluation of a coefficient list at `r` (over the integers). -/
+def eval (r : Int) : List Int → Int
   | [] => 0
-  | c :: cs => (c : R) + r * eval r cs
+  | c :: cs => c + r * eval r cs
+
+/-- The product of a list of integers. -/
+def prodL : List Int → Int
+  | [] => 1
+  | x :: xs => x * prodL xs
+
+theorem prodL_append (a b : List Int) : prodL (a ++ b) = prodL a * prodL b := by
+  induction a with
+  | nil => simp [prodL]
+  | cons x xs ih => simp only [List.cons_append, prodL, ih]; grind
 
 section Eval
 
-variable {R : Type*} [CommRing R] (r : R)
+variable (r : Int)
 
 @[simp] theorem eval_nil : eval r [] = 0 := rfl
 
 @[simp] theorem eval_cons (c : Int) (cs : List Int) :
-    eval r (c :: cs) = (c : R) + r * eval r cs := rfl
+    eval r (c :: cs) = c + r * eval r cs := rfl
 
 /-- Pointwise sum with zero padding. -/
 def addL : List Int → List Int → List Int
@@ -48,18 +56,18 @@ theorem eval_addL (xs ys : List Int) : eval r (addL xs ys) = eval r xs + eval r 
     cases ys with
     | nil => simp [addL]
     | cons y ys =>
-      simp only [addL, eval_cons, ih, Int.cast_add]
-      ring
+      simp only [addL, eval_cons, ih]
+      grind
 
 def scaleL (a : Int) (ys : List Int) : List Int := ys.map (a * ·)
 
-theorem eval_scaleL (a : Int) (ys : List Int) : eval r (scaleL a ys) = (a : R) * eval r ys := by
+theorem eval_scaleL (a : Int) (ys : List Int) : eval r (scaleL a ys) = a * eval r ys := by
   induction ys with
   | nil => simp [scaleL]
   | cons y ys ih =>
     simp only [scaleL, List.map_cons, eval_cons] at ih ⊢
-    rw [ih, Int.cast_mul]
-    ring
+    rw [ih]
+    grind
 
 /-- Multiplication by `X^k`. -/
 def shiftL : Nat → List Int → List Int
@@ -70,8 +78,8 @@ theorem eval_shiftL (k : Nat) (ys : List Int) : eval r (shiftL k ys) = r ^ k * e
   induction k with
   | zero => simp [shiftL]
   | succ k ih =>
-    simp only [shiftL, eval_cons, ih, Int.cast_zero, zero_add]
-    ring
+    simp only [shiftL, eval_cons, ih, Int.pow_succ]
+    grind
 
 /-- Convolution product of coefficient lists. -/
 def mulL : List Int → List Int → List Int
@@ -82,16 +90,16 @@ theorem eval_mulL (xs ys : List Int) : eval r (mulL xs ys) = eval r xs * eval r 
   induction xs with
   | nil => simp [mulL]
   | cons x xs ih =>
-    simp only [mulL, eval_addL, eval_scaleL, eval_cons, ih, Int.cast_zero, zero_add]
-    ring
+    simp only [mulL, eval_addL, eval_scaleL, eval_cons, ih]
+    grind
 
 theorem eval_append_singleton (ys : List Int) (c : Int) :
-    eval r (ys ++ [c]) = eval r ys + (c : R) * r ^ ys.length := by
+    eval r (ys ++ [c]) = eval r ys + c * r ^ ys.length := by
   induction ys with
   | nil => simp
   | cons y ys ih =>
-    simp only [List.cons_append, eval_cons, ih, List.length_cons]
-    ring
+    simp only [List.cons_append, eval_cons, ih, List.length_cons, Int.pow_succ]
+    grind
 
 /-- Dropping trailing zero coefficients does not change the value. -/
 def normalize (xs : List Int) : List Int :=
@@ -109,7 +117,7 @@ theorem eval_normalize (xs : List Int) : eval r (normalize xs) = eval r xs := by
     by_cases hy : y = 0
     · subst hy
       simp only [List.dropWhile_cons, beq_self_eq_true, ↓reduceIte, List.reverse_cons,
-        eval_append_singleton, Int.cast_zero, zero_mul, add_zero]
+        eval_append_singleton, Int.zero_mul, Int.add_zero]
       exact ih
     · have : (y == 0) = false := by simpa using hy
       simp only [List.dropWhile_cons, this, Bool.false_eq_true, ↓reduceIte]
@@ -123,11 +131,14 @@ def reduceTop (g xs : List Int) : List Int :=
   | none => xs
   | some c => addL xs.dropLast (shiftL (xs.length - 1 - g.length) (scaleL (-c) g))
 
+variable {n : Nat}
+
 theorem eval_reduceTop (g xs : List Int) (hlen : g.length < xs.length)
-    (hroot : eval r g + r ^ g.length = 0) : eval r (reduceTop g xs) = eval r xs := by
+    (hroot : ModEq n (eval r g + r ^ g.length) 0) :
+    ModEq n (eval r (reduceTop g xs)) (eval r xs) := by
   unfold reduceTop
   cases hl : xs.getLast? with
-  | none => rfl
+  | none => exact ModEq.refl n _
   | some c =>
     simp only
     have hne : xs ≠ [] := by
@@ -136,16 +147,22 @@ theorem eval_reduceTop (g xs : List Int) (hlen : g.length < xs.length)
       rw [List.getLast?_eq_getLast hne] at hl
       exact Option.some.inj hl
     have hxs : xs = xs.dropLast ++ [c] := by
-      rw [← hlast]; exact (List.dropLast_append_getLast hne).symm
+      rw [← hlast]; exact (List.dropLast_concat_getLast hne).symm
     have hdl : xs.dropLast.length = xs.length - 1 := List.length_dropLast
-    conv_rhs => rw [hxs]
-    rw [eval_addL, eval_shiftL, eval_scaleL, eval_append_singleton, hdl]
-    have hk : xs.length - 1 = (xs.length - 1 - g.length) + g.length := by omega
-    have hg : eval r g = -(r ^ g.length) := by linear_combination hroot
-    rw [hg]
-    conv_rhs => rw [hk, pow_add]
-    push_cast
-    ring
+    rw [eval_addL, eval_shiftL, eval_scaleL]
+    conv => rhs; rw [hxs]
+    rw [eval_append_singleton, hdl]
+    have hpow : r ^ (xs.length - 1) = r ^ (xs.length - 1 - g.length) * r ^ g.length := by
+      rw [← Int.pow_add]; congr 1; omega
+    rw [hpow]
+    generalize r ^ (xs.length - 1 - g.length) = u at *
+    generalize r ^ g.length = v at *
+    -- the difference is `-c u (g(r) + v)`, a multiple of `f(r)`
+    have key := (((ModEq.refl n (-c * u)).mul hroot).add
+      (ModEq.refl n (eval r xs.dropLast))).add (ModEq.refl n (c * u * v))
+    refine (ModEq.of_eq ?_).trans (key.trans (ModEq.of_eq ?_))
+    · grind
+    · grind
 
 /-- Repeated top reduction, `fuel` steps at most. -/
 def reduceFuel (g : List Int) : Nat → List Int → List Int
@@ -153,32 +170,35 @@ def reduceFuel (g : List Int) : Nat → List Int → List Int
   | fuel + 1, xs =>
     if g.length < xs.length then reduceFuel g fuel (reduceTop g xs) else xs
 
-theorem eval_reduceFuel (g : List Int) (hroot : eval r g + r ^ g.length = 0) :
-    ∀ (fuel : Nat) (xs : List Int), eval r (reduceFuel g fuel xs) = eval r xs := by
+theorem eval_reduceFuel (g : List Int) (hroot : ModEq n (eval r g + r ^ g.length) 0) :
+    ∀ (fuel : Nat) (xs : List Int), ModEq n (eval r (reduceFuel g fuel xs)) (eval r xs) := by
   intro fuel
   induction fuel with
-  | zero => intro xs; rfl
+  | zero => intro xs; exact ModEq.refl n _
   | succ fuel ih =>
     intro xs
     simp only [reduceFuel]
-    split_ifs with h
-    · rw [ih, eval_reduceTop r g xs h hroot]
-    · rfl
+    split
+    · rename_i h
+      exact (ih _).trans (eval_reduceTop r g xs h hroot)
+    · exact ModEq.refl n _
 
 /-- Canonical reduction modulo `f = g + X^d`. -/
 def reduce (g xs : List Int) : List Int := normalize (reduceFuel g xs.length xs)
 
-theorem eval_reduce (g xs : List Int) (hroot : eval r g + r ^ g.length = 0) :
-    eval r (reduce g xs) = eval r xs := by
-  rw [reduce, eval_normalize, eval_reduceFuel r g hroot]
+theorem eval_reduce (g xs : List Int) (hroot : ModEq n (eval r g + r ^ g.length) 0) :
+    ModEq n (eval r (reduce g xs)) (eval r xs) := by
+  rw [reduce, eval_normalize]
+  exact eval_reduceFuel r g hroot _ _
 
 /-- Multiplication in `ℤ[ω]`. -/
 def mulZ (g xs ys : List Int) : List Int := reduce g (mulL xs ys)
 
-/-- **Evaluation is multiplicative** at every root of `f`. -/
-theorem eval_mulZ (g xs ys : List Int) (hroot : eval r g + r ^ g.length = 0) :
-    eval r (mulZ g xs ys) = eval r xs * eval r ys := by
-  rw [mulZ, eval_reduce r g _ hroot, eval_mulL]
+/-- **Evaluation is multiplicative** modulo every `n` at a root `r` of `f`. -/
+theorem eval_mulZ (g xs ys : List Int) (hroot : ModEq n (eval r g + r ^ g.length) 0) :
+    ModEq n (eval r (mulZ g xs ys)) (eval r xs * eval r ys) := by
+  rw [mulZ, ← eval_mulL]
+  exact eval_reduce r g _ hroot
 
 /-- Balanced product of a list of elements of `ℤ[ω]` (a product tree). -/
 def prodTree (g : List Int) (xs : List (List Int)) : List Int :=
@@ -193,34 +213,35 @@ def prodTree (g : List Int) (xs : List (List Int)) : List Int :=
     mulZ g (prodTree g (xs.take ((k + 2) / 2))) (prodTree g (xs.drop ((k + 2) / 2)))
 termination_by xs.length
 
-theorem eval_prodTree_le (g : List Int) (hroot : eval r g + r ^ g.length = 0) :
+theorem eval_prodTree_le (g : List Int) (hroot : ModEq n (eval r g + r ^ g.length) 0) :
     ∀ (k : Nat) (xs : List (List Int)), xs.length ≤ k →
-      eval r (prodTree g xs) = (xs.map (eval r)).prod := by
+      ModEq n (eval r (prodTree g xs)) (prodL (xs.map (eval r))) := by
   intro k
   induction k with
   | zero =>
     intro xs hk
     have : xs = [] := List.length_eq_zero_iff.mp (by omega)
     subst this
-    simp [prodTree]
+    exact ModEq.of_eq (by simp [prodTree, prodL])
   | succ k ih =>
     intro xs hk
     rw [prodTree]
     split
     · rename_i h
       rw [List.length_eq_zero_iff.mp h]
-      simp
+      exact ModEq.of_eq (by simp [prodL])
     · rename_i h
       obtain ⟨x, rfl⟩ := List.length_eq_one_iff.mp h
-      simp
+      exact ModEq.of_eq (by simp [prodL])
     · rename_i j h
-      rw [eval_mulZ r g _ _ hroot, ih _ (by simp only [List.length_take, h]; omega),
-        ih _ (by simp only [List.length_drop, h]; omega), ← List.prod_append,
-        ← List.map_append, List.take_append_drop]
+      refine (eval_mulZ r g _ _ hroot).trans ?_
+      refine ((ih _ (by simp only [List.length_take, h]; omega)).mul
+        (ih _ (by simp only [List.length_drop, h]; omega))).trans (ModEq.of_eq ?_)
+      rw [← prodL_append, ← List.map_append, List.take_append_drop]
 
-theorem eval_prodTree (g : List Int) (hroot : eval r g + r ^ g.length = 0)
-    (xs : List (List Int)) : eval r (prodTree g xs) = (xs.map (eval r)).prod :=
-  eval_prodTree_le r g hroot xs.length xs le_rfl
+theorem eval_prodTree (g : List Int) (hroot : ModEq n (eval r g + r ^ g.length) 0)
+    (xs : List (List Int)) : ModEq n (eval r (prodTree g xs)) (prodL (xs.map (eval r))) :=
+  eval_prodTree_le r g hroot xs.length xs (Nat.le_refl _)
 
 end Eval
 
@@ -231,18 +252,22 @@ def evalMod (n r : Nat) : List Int → Nat
   | [] => 0
   | c :: cs => ((c % (n : Int)).toNat + r * evalMod n r cs) % n
 
-theorem toNat_emod_cast {n : Nat} (hn : 0 < n) (c : Int) :
-    (((c % (n : Int)).toNat : Nat) : ZMod n) = (c : ZMod n) := by
-  have h0 : 0 ≤ c % (n : Int) := Int.emod_nonneg _ (by exact_mod_cast hn.ne')
-  have h1 : (((c % (n : Int)).toNat : Nat) : Int) = c % (n : Int) := Int.toNat_of_nonneg h0
-  rw [← Int.cast_natCast, h1, ZMod.intCast_mod]
+theorem toNat_emod_modEq {n : Nat} (hn : 0 < n) (c : Int) :
+    ModEq n (((c % (n : Int)).toNat : Nat) : Int) c := by
+  have h0 : 0 ≤ c % (n : Int) := Int.emod_nonneg _ (by omega)
+  rw [Int.toNat_of_nonneg h0]
+  unfold ModEq
+  rw [Int.emod_def]
+  exact ⟨-(c / n), by grind⟩
 
-theorem evalMod_cast {n : Nat} (hn : 0 < n) (r : Nat) (xs : List Int) :
-    ((evalMod n r xs : Nat) : ZMod n) = eval (r : ZMod n) xs := by
+theorem evalMod_modEq {n : Nat} (hn : 0 < n) (r : Nat) (xs : List Int) :
+    ModEq n (evalMod n r xs : Int) (eval (r : Int) xs) := by
   induction xs with
-  | nil => simp [evalMod]
+  | nil => exact ModEq.of_eq (by simp [evalMod])
   | cons c cs ih =>
-    simp only [evalMod, ZMod.natCast_mod, Nat.cast_add, Nat.cast_mul, ih, eval_cons,
-      toNat_emod_cast hn]
+    simp only [evalMod, eval_cons]
+    refine (ModEq.natCast_mod _ n).trans ?_
+    push_cast
+    exact (toNat_emod_modEq hn c).add ((ModEq.refl n (r : Int)).mul ih)
 
 end PrimeFactorLean.NFS

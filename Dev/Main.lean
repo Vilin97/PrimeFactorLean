@@ -4,6 +4,7 @@ import PrimeFactorLean.Pocklington
 import PrimeFactorLean.GNFS
 import Dev.NFSDebug
 import Dev.QSDebug
+import Dev.Micro
 open PrimeFactorLean
 
 def timed (label : String) (f : Unit → Option Nat) : IO Unit := do
@@ -14,6 +15,7 @@ def timed (label : String) (f : Unit → Option Nat) : IO Unit := do
 
 def main (args : List String) : IO Unit := do
   match args with
+  | ["micro"] => microMain
   | ["ecm", b1, curves, ns, ts] =>
     let n := ns.toNat!
     timed s!"ecm B1={b1} n={n}" fun _ =>

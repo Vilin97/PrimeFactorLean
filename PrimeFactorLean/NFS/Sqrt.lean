@@ -53,7 +53,7 @@ def sqrtCandidate (g γ : List Int) (p bits : Nat) : Option (List Int) := Id.run
   let some s := ModP.fqSqrt p f γp | return none
   let z0 := ModP.fqInv p f s
   let mut P := p
-  let mut z : List Int := z0.toList.map (fun c => (c : Int))
+  let mut z : List Int := z0.toList.map (fun (c : Nat) => (c : Int))
   let mut fuel := 64
   while P.log2 < bits + 1 && fuel > 0 do
     fuel := fuel - 1

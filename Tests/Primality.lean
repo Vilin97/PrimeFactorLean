@@ -59,9 +59,9 @@ def run : IO Unit := do
     (generatePrimeCertificate (fun _ => []) 2 0 0).isSome
   for n in [2, 3, 101, 65537, 1000000007, 2 ^ 61 - 1, 2 ^ 89 - 1, 2 ^ 127 - 1,
             79638304766856507377778616296087448490695649] do
-    require ("production oracle prime " ++ toString n) (primeOracle {} n).isSome
+    require ("production oracle prime " ++ toString n) (primeOracle {} n)
   for n in [0, 1, 4, 561, 1105, 1729, 3215031751, 2 ^ 67 - 1, 3825123056546413051] do
-    require ("production oracle composite " ++ toString n) (!(primeOracle {} n).isSome)
+    require ("production oracle composite " ++ toString n) (!(primeOracle {} n))
   -- Pocklington certificates: generated ones check, tampered ones are rejected.
   let split : Nat → Option Nat := fun m => (autoSplitter {} m).map Subtype.val
   let big := 79638304766856507377778616296087448490695649
@@ -85,7 +85,7 @@ def run : IO Unit := do
       require "different target" (!(Pocklington.Certificate.mk (big + 2) c.steps).check)
   require "production factor prime" (factor .auto 1000000007 == some [1000000007])
   require "production factor Carmichael" (factor .auto 561 == some [3, 11, 17])
-  let hostileOracle : PrimeOracle := prattOracle (fun _ => [0])
+  let hostileOracle : Nat → Bool := fun n => (prattOracle (fun _ => [0]) (n := n)).isSome
   let hostileSplitter : Splitter := checkedSplitter (fun _ => some 1)
   require "hostile oracle and splitter preserve exact fallback"
     (factorCoreWith hostileOracle hostileSplitter 21 == [3, 7])

@@ -49,7 +49,7 @@ def nfsDebug (n : Nat) (threads : Nat) (params : Params) (maxRounds : Nat := 50)
     let S : List (Int × Int) := rs.map fun r => (r.a, (r.b : Int))
     let rr := rationalRoot rs
     let hrat := match rr with
-      | some Y0 => (S.map fun (ab : Int × Int) => ab.1 - ab.2 * (st.sel.m : Int)).prod == Y0 * Y0
+      | some Y0 => prodL (S.map fun (ab : Int × Int) => ab.1 - ab.2 * (st.sel.m : Int)) == Y0 * Y0
       | none => false
     let γ := prodTree st.g (st.fp :: st.fp :: S.map fun (ab : Int × Int) => [(st.cd : Int) * ab.1, -ab.2])
     let t4 ← IO.monoNanosNow

@@ -335,7 +335,7 @@ def sievePoly (ctx : Context) (poly : Poly) (pos1 pos2 : Array Nat) (buf : ByteA
 /-- QS: windows of the single polynomial `(x + B₀ + 2Mt)² - N`. -/
 def qsBatch (ctx : Context) (batch : Nat) (windows : Nat) :
     Array (Found ctx.n ctx.fb) := Id.run do
-  let b0 : Int := (Nat.sqrt ctx.N : Int)
+  let b0 : Int := (isqrt ctx.N : Int)
   let mut buf := ctx.zeros
   let mut rels := #[]
   let skip := Array.replicate ctx.fb.size false
@@ -367,7 +367,7 @@ def sqrtModPrimeSquare (N q : Nat) : Option Nat := do
 /-- MPQS: `A = q²` for consecutive suitable primes `q` from a per-batch start. -/
 def mpqsBatch (ctx : Context) (batch : Nat) (polys : Nat) :
     Array (Found ctx.n ctx.fb) := Id.run do
-  let ideal := Nat.sqrt (Nat.sqrt (2 * ctx.N) / ctx.M)
+  let ideal := isqrt (isqrt (2 * ctx.N) / ctx.M)
   let mut q := max 3 (ideal + batch * polys * 8) ||| 1
   let mut buf := ctx.zeros
   let mut rels := #[]
@@ -435,7 +435,7 @@ def chooseA (ctx : Context) (seed s lo hi target : Nat) : Option (Array Nat) := 
 /-- SIQS: `numA` values of `A`, each with its `2^{s-1}` Gray-code polynomials. -/
 def siqsBatch (ctx : Context) (batch : Nat) (numA : Nat) :
     Array (Found ctx.n ctx.fb) := Id.run do
-  let target := Nat.sqrt (2 * ctx.N) / ctx.M
+  let target := isqrt (2 * ctx.N) / ctx.M
   -- Number of A-factors: aim for factors of roughly 2000 (smaller for small N).
   let qSize : Nat := if target.log2 > 66 then 2000 else if target.log2 > 40 then 600
     else if target.log2 > 20 then 100 else 20

@@ -5,7 +5,7 @@ open PrimeFactorLean PrimeFactorLean.QS
 def qsDebug (n : Nat) (params : Params) (numA : Nat) : IO Unit := do
   let .inl ctx := mkContext n params | IO.println "small factor"
   IO.println s!"k={ctx.k} fb={ctx.fb.size} pmax={ctx.fb[ctx.fb.size-1]!} M={ctx.M} thr={ctx.threshold} lp={ctx.lpBound}"
-  let target := Nat.sqrt (2 * ctx.N) / ctx.M
+  let target := isqrt (2 * ctx.N) / ctx.M
   let qSize : Nat := if target.log2 > 66 then 2000 else if target.log2 > 40 then 600
     else if target.log2 > 20 then 100 else 20
   let s := max 1 ((target.log2 + qSize.log2 / 2) / max 1 qSize.log2)

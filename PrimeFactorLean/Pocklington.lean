@@ -1,8 +1,4 @@
-import Mathlib.FieldTheory.Finite.Basic
-import Mathlib.GroupTheory.OrderOfElement
-import Mathlib.Data.Nat.GCD.BigOperators
 import PrimeFactorLean.Arith
-
 /-!
 # Pocklington–Lehmer primality certificates
 
@@ -31,86 +27,9 @@ namespace PrimeFactorLean.Pocklington
 
 open Arith
 
-/-- The order argument: a witness forces `q^e ∣ p - 1` for every prime `p ∣ n`. -/
-theorem prime_pow_dvd_sub_one {p q e N a : Nat} (hp : p.Prime) (hq : q.Prime)
-    (hqe : q ^ e ∣ N - 1)
-    (hfull : (a : ZMod p) ^ (N - 1) = 1)
-    (hpart : (a : ZMod p) ^ ((N - 1) / q) ≠ 1) : q ^ e ∣ p - 1 := by
-  haveI := Fact.mk hp
-  haveI := Fact.mk hq
-  rcases e with _ | e
-  · simp
-  obtain ⟨k, hk⟩ := hqe
-  set b : ZMod p := (a : ZMod p) ^ k with hb
-  have hfin : b ^ q ^ (e + 1) = 1 := by
-    rw [hb, ← pow_mul, mul_comm, ← hk]
-    exact hfull
-  have hnot : ¬ b ^ q ^ e = 1 := by
-    intro h
-    apply hpart
-    have hdiv : (N - 1) / q = k * q ^ e := by
-      rw [hk, pow_succ, show q ^ e * q * k = (k * q ^ e) * q by ring]
-      exact Nat.mul_div_cancel _ hq.pos
-    rw [hdiv, pow_mul]
-    exact h
-  have hord : orderOf b = q ^ (e + 1) := orderOf_eq_prime_pow hnot hfin
-  have hb0 : b ≠ 0 := by
-    intro h0
-    rw [h0, zero_pow (pow_pos hq.pos _).ne'] at hfin
-    exact zero_ne_one hfin
-  rw [← hord]
-  exact ZMod.orderOf_dvd_card_sub_one hb0
-
-/-- Pairwise coprime divisors of `m` have a product dividing `m`. -/
-theorem list_prod_dvd_of_coprime {l : List Nat} {m : Nat}
-    (hco : l.Pairwise Nat.Coprime) (hd : ∀ x ∈ l, x ∣ m) : l.prod ∣ m := by
-  induction l with
-  | nil => simp
-  | cons x xs ih =>
-    rw [List.pairwise_cons] at hco
-    rw [List.prod_cons]
-    apply Nat.Coprime.mul_dvd_of_dvd_of_dvd
-    · exact Nat.coprime_list_prod_right_iff.mpr hco.1
-    · exact hd x (by simp)
-    · exact ih hco.2 (fun y hy => hd y (by simp [hy]))
-
 /-- The factored part of a certificate row: `∏ q^e` over its `(q, e, a)` triples. -/
 def factoredPart (ws : List (Nat × Nat × Nat)) : Nat :=
-  (ws.map fun t => t.1 ^ t.2.1).prod
-
-/-- **Pocklington's criterion**, in the form used by the checker. -/
-theorem pocklington {N : Nat} (hN : 2 ≤ N) (ws : List (Nat × Nat × Nat))
-    (hprime : ∀ t ∈ ws, t.1.Prime)
-    (hnodup : (ws.map Prod.fst).Nodup)
-    (hdvd : ∀ t ∈ ws, t.1 ^ t.2.1 ∣ N - 1)
-    (hbig : N < factoredPart ws ^ 2)
-    (hwit : ∀ t ∈ ws, ∀ p, p.Prime → p ∣ N →
-      (t.2.2 : ZMod p) ^ (N - 1) = 1 ∧ (t.2.2 : ZMod p) ^ ((N - 1) / t.1) ≠ 1) :
-    N.Prime := by
-  by_contra hnp
-  have hp : N.minFac.Prime := Nat.minFac_prime (by omega)
-  have hpN : N.minFac ∣ N := Nat.minFac_dvd N
-  have hsq : N.minFac ^ 2 ≤ N := Nat.minFac_sq_le_self (by omega) hnp
-  have hco : (ws.map fun t => t.1 ^ t.2.1).Pairwise Nat.Coprime := by
-    rw [List.pairwise_map]
-    have hne : ws.Pairwise (fun a b => a.1 ≠ b.1) := by
-      have := hnodup
-      rw [List.Nodup, List.pairwise_map] at this
-      exact this
-    refine List.Pairwise.imp_of_mem ?_ hne
-    intro a b ha hb hab
-    exact Nat.Coprime.pow _ _ ((Nat.coprime_primes (hprime a ha) (hprime b hb)).mpr hab)
-  have hF : factoredPart ws ∣ N.minFac - 1 := by
-    apply list_prod_dvd_of_coprime hco
-    intro x hx
-    obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hx
-    obtain ⟨h1, h2⟩ := hwit t ht N.minFac hp hpN
-    exact prime_pow_dvd_sub_one hp (hprime t ht) (hdvd t ht) h1 h2
-  have h2 := hp.two_le
-  have hFle : factoredPart ws ≤ N.minFac - 1 := Nat.le_of_dvd (by omega) hF
-  have hlt : factoredPart ws ^ 2 < N.minFac ^ 2 :=
-    Nat.pow_lt_pow_left (by omega) (by norm_num)
-  omega
+  (ws.map fun t => t.1 ^ t.2.1).foldr (· * ·) 1
 
 /-! ## Executable certificates -/
 
@@ -118,36 +37,6 @@ theorem pocklington {N : Nat} (hN : 2 ≤ N) (ws : List (Nat × Nat × Nat))
 def witnessOK (n q a : Nat) : Bool :=
   powMod a (n - 1) n == 1 % n &&
   Nat.gcd ((powMod a ((n - 1) / q) n + n - 1) % n) n == 1
-
-/-- Translate a successful witness check into the hypotheses of `pocklington`. -/
-theorem witnessOK_sound {n q a : Nat} (hn : 2 ≤ n) (h : witnessOK n q a = true)
-    {p : Nat} (hp : p.Prime) (hpn : p ∣ n) :
-    (a : ZMod p) ^ (n - 1) = 1 ∧ (a : ZMod p) ^ ((n - 1) / q) ≠ 1 := by
-  simp only [witnessOK, Bool.and_eq_true, beq_iff_eq, powMod_eq] at h
-  obtain ⟨hfull, hgcd⟩ := h
-  constructor
-  · have hmod : a ^ (n - 1) % p = 1 % p := Nat.ModEq.of_dvd hpn hfull
-    have := (ZMod.natCast_eq_natCast_iff' (a ^ (n - 1)) 1 p).mpr hmod
-    simpa using this
-  · intro hone
-    -- x = a^((n-1)/q) mod n is ≡ 1 mod p, so p divides the gcd argument.
-    set x := a ^ ((n - 1) / q) % n with hx
-    have hxp : (x : ZMod p) = 1 := by
-      have hm : x % p = a ^ ((n - 1) / q) % p := Nat.mod_mod_of_dvd _ hpn
-      have := (ZMod.natCast_eq_natCast_iff' x (a ^ ((n - 1) / q)) p).mpr hm
-      rw [this]
-      push_cast
-      exact hone
-    have htp : (((x + n - 1) % n : Nat) : ZMod p) = 0 := by
-      have hm : (x + n - 1) % n % p = (x + n - 1) % p := Nat.mod_mod_of_dvd _ hpn
-      rw [(ZMod.natCast_eq_natCast_iff' _ _ p).mpr hm]
-      have hn0 : ((n : Nat) : ZMod p) = 0 := (ZMod.natCast_eq_zero_iff n p).mpr hpn
-      rw [Nat.cast_sub (by omega), Nat.cast_add, hxp, hn0]
-      simp
-    have hdvd1 : p ∣ (x + n - 1) % n := (ZMod.natCast_eq_zero_iff _ p).mp htp
-    have : p ∣ Nat.gcd ((x + n - 1) % n) n := Nat.dvd_gcd hdvd1 hpn
-    rw [hgcd] at this
-    exact hp.one_lt.ne' (Nat.dvd_one.mp this)
 
 /-- A Pocklington step: prove `n` prime from witnesses `(q, e, a)`. Each `q`
 must be proved prime earlier in the certificate or be small enough for the
@@ -164,14 +53,6 @@ def smallBound : Nat := 2 ^ 32
 def knownPrime (known : List Nat) (q : Nat) : Bool :=
   known.contains q || (decide (q < smallBound) && smallPrime q)
 
-theorem knownPrime_sound {known : List Nat} (hk : ∀ p ∈ known, p.Prime) {q : Nat}
-    (h : knownPrime known q = true) : q.Prime := by
-  simp only [knownPrime, Bool.or_eq_true, List.contains_iff_mem, Bool.and_eq_true,
-    decide_eq_true_eq] at h
-  rcases h with h | ⟨_, h⟩
-  · exact hk q h
-  · exact smallPrime_sound h
-
 /-- The executable acceptance test for one step. -/
 def Step.check (s : Step) (known : List Nat) : Bool :=
   decide (2 ≤ s.n) &&
@@ -180,43 +61,10 @@ def Step.check (s : Step) (known : List Nat) : Bool :=
     knownPrime known t.1 && (s.n - 1) % (t.1 ^ t.2.1) == 0 && witnessOK s.n t.1 t.2.2) &&
   decide (s.n < factoredPart s.witnesses ^ 2)
 
-/-- Accepted steps prove primality, assuming only that earlier values were prime. -/
-theorem Step.check_sound (s : Step) (known : List Nat) (hk : ∀ p ∈ known, p.Prime)
-    (h : s.check known = true) : s.n.Prime := by
-  simp only [Step.check, Bool.and_eq_true, decide_eq_true_eq, List.all_eq_true,
-    beq_iff_eq] at h
-  obtain ⟨⟨⟨hn, hnodup⟩, hall⟩, hbig⟩ := h
-  apply pocklington hn s.witnesses
-  · intro t ht
-    exact knownPrime_sound hk (hall t ht).1.1
-  · exact hnodup
-  · intro t ht
-    exact Nat.dvd_of_mod_eq_zero (hall t ht).1.2
-  · exact hbig
-  · intro t ht p hp hpn
-    exact witnessOK_sound hn (hall t ht).2 hp hpn
-
 /-- Verify a dependency-ordered list of steps; the result lists proved primes. -/
 def verifySteps : List Step → List Nat → Option (List Nat)
   | [], known => some known
   | s :: rest, known => if s.check known then verifySteps rest (s.n :: known) else none
-
-theorem verifySteps_sound (steps : List Step) (known result : List Nat)
-    (hk : ∀ p ∈ known, p.Prime) (h : verifySteps steps known = some result) :
-    ∀ p ∈ result, p.Prime := by
-  induction steps generalizing known with
-  | nil =>
-    simp only [verifySteps, Option.some.injEq] at h
-    subst result
-    exact hk
-  | cons s rest ih =>
-    simp only [verifySteps] at h
-    split_ifs at h with hs
-    apply ih (s.n :: known) ?_ h
-    intro p hp
-    rcases List.mem_cons.mp hp with rfl | hp
-    · exact s.check_sound known hk hs
-    · exact hk p hp
 
 /-- A certificate for `n`: small values are decided by verified trial division,
 larger ones by Pocklington steps ending in `n`. -/
@@ -230,16 +78,6 @@ def Certificate.check (c : Certificate) : Bool :=
   else match verifySteps c.steps [] with
     | none => false
     | some proved => proved.contains c.n
-
-theorem Certificate.check_sound (c : Certificate) (h : c.check = true) : c.n.Prime := by
-  unfold Certificate.check at h
-  split_ifs at h
-  · exact smallPrime_sound h
-  · split at h
-    · contradiction
-    · rename_i proved hv
-      exact verifySteps_sound c.steps [] proved (by simp) hv c.n
-        (List.contains_iff_mem.mp h)
 
 /-! ## Untrusted certificate generation -/
 
@@ -332,36 +170,17 @@ def checked (n : Nat) (steps : List Step) : Option Certificate :=
   let c : Certificate := ⟨n, steps⟩
   if c.check then some c else none
 
-theorem checked_sound {n : Nat} {steps : List Step} {c : Certificate}
-    (h : checked n steps = some c) : c.n = n ∧ c.n.Prime := by
-  unfold checked at h
-  dsimp only at h
-  split_ifs at h with hc
-  cases h
-  exact ⟨rfl, Certificate.check_sound _ hc⟩
-
 /-- Generate a certificate and check it before returning. -/
 def generate (split : Nat → Option Nat) (n : Nat) (fuel : Nat := 64) : Option Certificate :=
   (if n < smallBound then some [] else generateSteps split (primesUpTo 65536) fuel n).bind
     (checked n)
 
-theorem generate_sound {split : Nat → Option Nat} {n fuel : Nat} {c : Certificate}
-    (h : generate split n fuel = some c) : c.n = n ∧ c.n.Prime := by
-  unfold generate at h
-  obtain ⟨steps, _, hc⟩ := Option.bind_eq_some_iff.mp h
-  exact checked_sound hc
-
-/-- A proof-producing primality oracle for the verified factorization engine. -/
-def oracle (split : Nat → Option Nat) (fuel : Nat := 64) (n : Nat) :
-    Option {_u : Unit // n.Prime} :=
-  if n < smallBound then
-    if h : smallPrime n = true then some ⟨(), smallPrime_sound h⟩ else none
-  else if isProbablePrime n then
-    match h : generate split n fuel with
-    | none => none
-    | some _ =>
-      have hc := generate_sound h
-      some ⟨(), hc.1 ▸ hc.2⟩
-  else none
+/-- The primality checker used by the verified factorization engine: exact
+trial division below `2^32`, otherwise a Pocklington certificate that is
+generated (untrusted) and then accepted by `Certificate.check`. Its soundness,
+`Proofs.Pocklington.oracle_sound`, rests on Pocklington's theorem. -/
+def oracle (split : Nat → Option Nat) (fuel : Nat := 64) (n : Nat) : Bool :=
+  if n < smallBound then smallPrime n
+  else isProbablePrime n && (generate split n fuel).isSome
 
 end PrimeFactorLean.Pocklington

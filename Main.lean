@@ -1,6 +1,15 @@
-import PrimeFactorLean
+import PrimeFactorLean.Algorithms
 
-open PrimeFactorLean Lean
+open PrimeFactorLean
+
+/-! The CLI deliberately imports only the runtime layer (`PrimeFactorLean.Algorithms`,
+Lean core only), so it starts without initializing mathlib or the Lean frontend.
+JSON is therefore written by hand. -/
+
+private def jsonString (s : String) : String := "\"" ++ s ++ "\""
+
+private def jsonObject (fields : List (String × String)) : String :=
+  "{" ++ ",".intercalate (fields.map fun (k, v) => jsonString k ++ ":" ++ v) ++ "}"
 
 -- An IO boundary prevents pure work from being moved outside the measured interval.
 @[noinline] private def computeFactor (algorithm : Algorithm) (n : Nat) (cfg : Config) :
@@ -40,15 +49,15 @@ def main (args : List String) : IO UInt32 := do
       let started ← IO.monoNanosNow
       let factors ← computeFactor algorithm z.natAbs cfg
       let stopped ← IO.monoNanosNow
-      let data := Json.mkObj [
-        ("algorithm", toJson mode),
-        ("n", toJson (toString z)),
-        ("sign", toJson (toString z.sign)),
+      let data := jsonObject [
+        ("algorithm", jsonString mode),
+        ("elapsedNs", toString (stopped - started)),
         ("factors", match factors with
-          | none => Json.null
-          | some ps => toJson ((ps.mergeSort (· ≤ ·)).map toString)),
-        ("elapsedNs", toJson (stopped - started))]
-      (← IO.getStdout).putStrLn data.compress
+          | none => "null"
+          | some ps => "[" ++ ",".intercalate ((ps.mergeSort (· ≤ ·)).map fun p => jsonString (toString p)) ++ "]"),
+        ("n", jsonString (toString z)),
+        ("sign", jsonString (toString z.sign))]
+      (← IO.getStdout).putStrLn data
       return 0
     | _, _ =>
       (← IO.getStderr).putStrLn ("Unknown algorithm or invalid integer.\n" ++ usage)
@@ -59,10 +68,11 @@ def main (args : List String) : IO UInt32 := do
       let started ← IO.monoNanosNow
       let result ← computeSplit algorithm n cfg
       let stopped ← IO.monoNanosNow
-      (← IO.getStdout).putStrLn (Json.mkObj [
-        ("algorithm", toJson mode), ("n", toJson input),
-        ("divisor", match result with | none => Json.null | some d => toJson (toString d)),
-        ("elapsedNs", toJson (stopped - started))]).compress
+      (← IO.getStdout).putStrLn (jsonObject [
+        ("algorithm", jsonString mode),
+        ("divisor", match result with | none => "null" | some d => jsonString (toString d)),
+        ("elapsedNs", toString (stopped - started)),
+        ("n", jsonString input)])
       return 0
     | _, _ =>
       (← IO.getStderr).putStrLn usage

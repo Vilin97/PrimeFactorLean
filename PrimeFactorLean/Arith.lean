@@ -1,8 +1,3 @@
-import Mathlib.Data.Nat.Prime.Basic
-import Mathlib.Data.Nat.Sqrt
-import Mathlib.Data.Int.GCD
-import Mathlib.Data.Nat.ModEq
-import Mathlib.Tactic.Ring
 import PrimeFactorLean.Trial
 
 /-!
@@ -29,37 +24,35 @@ def powModAux (m base exp acc : Nat) : Nat :=
 termination_by exp
 decreasing_by omega
 
+/-- `(a % m) * (b % m)^k ≡ a * b^k (mod m)`. -/
+theorem mod_mul_pow_mod (a b k m : Nat) : (a % m) * (b % m) ^ k % m = a * b ^ k % m := by
+  rw [Nat.mul_mod, Nat.mod_mod, ← Nat.pow_mod, ← Nat.mul_mod]
+
+/-- `a * (b % m)^k ≡ a * b^k (mod m)`. -/
+theorem mul_pow_mod (a b k m : Nat) : a * (b % m) ^ k % m = a * b ^ k % m := by
+  rw [Nat.mul_mod, ← Nat.pow_mod, ← Nat.mul_mod]
+
 theorem powModAux_eq (m base exp acc : Nat) :
     powModAux m base exp acc = acc * base ^ exp % m := by
-  induction exp using Nat.strong_induction_on generalizing base acc with
+  induction exp using Nat.strongRecOn generalizing base acc with
   | _ exp ih =>
     rw [powModAux]
-    dsimp only
-    split_ifs with hz hodd
+    by_cases hz : exp = 0
     · subst hz; simp
-    · have hlt : exp / 2 < exp := by omega
+    · rw [if_neg hz]
+      have hlt : exp / 2 < exp := by omega
       rw [ih _ hlt]
-      show Nat.ModEq m _ _
-      have h1 : Nat.ModEq m ((acc * base % m) * (base * base % m) ^ (exp / 2))
-          ((acc * base) * (base * base) ^ (exp / 2)) :=
-        (Nat.mod_modEq _ _).mul ((Nat.mod_modEq _ _).pow _)
-      have h2 : (acc * base) * (base * base) ^ (exp / 2) = acc * base ^ exp := by
-        rw [← sq, ← pow_mul]
-        conv_rhs => rw [show exp = 2 * (exp / 2) + 1 by omega]
-        rw [pow_succ]; ring
-      rw [h2] at h1
-      exact h1
-    · have hlt : exp / 2 < exp := by omega
-      rw [ih _ hlt]
-      show Nat.ModEq m _ _
-      have h1 : Nat.ModEq m (acc * (base * base % m) ^ (exp / 2))
-          (acc * (base * base) ^ (exp / 2)) :=
-        (Nat.ModEq.refl acc).mul ((Nat.mod_modEq _ _).pow _)
-      have h2 : acc * (base * base) ^ (exp / 2) = acc * base ^ exp := by
-        rw [← sq, ← pow_mul]
-        conv_rhs => rw [show exp = 2 * (exp / 2) by omega]
-      rw [h2] at h1
-      exact h1
+      by_cases hodd : exp % 2 = 1
+      · rw [if_pos hodd, mod_mul_pow_mod]
+        have h2 : exp = 2 * (exp / 2) + 1 := by omega
+        generalize exp / 2 = k at h2 ⊢
+        subst h2
+        rw [Nat.pow_succ, Nat.pow_mul, Nat.pow_two, Nat.mul_assoc, Nat.mul_comm base]
+      · rw [if_neg hodd, mul_pow_mod]
+        have h2 : exp = 2 * (exp / 2) := by omega
+        generalize exp / 2 = k at h2 ⊢
+        subst h2
+        rw [Nat.pow_mul, Nat.pow_two]
 
 /-- Modular powering `b ^ e % m` with `O(log e)` multiplications. -/
 def powMod (b e m : Nat) : Nat := powModAux m (b % m) e 1
@@ -90,9 +83,9 @@ def invMod (a m : Nat) : Option Nat :=
 theorem invMod_spec {a m x : Nat} (h : invMod a m = some x) : a * x % m = 1 % m := by
   unfold invMod at h
   dsimp only at h
-  split_ifs at h with hc
-  cases h
-  exact hc
+  split at h
+  · cases h; assumption
+  · contradiction
 
 /-! ## Square roots modulo primes -/
 
@@ -163,9 +156,9 @@ theorem sqrtModPrime_spec {a p r : Nat} (h : sqrtModPrime a p = some r) :
     r * r % p = a % p := by
   unfold sqrtModPrime at h
   dsimp only at h
-  split_ifs at h with hc
-  cases h
-  exact hc
+  split at h
+  · cases h; assumption
+  · contradiction
 
 /-! ## Integer roots and perfect powers -/
 
@@ -205,15 +198,16 @@ theorem perfectPowerFrom_spec {n fuel k r e : Nat}
   | zero => simp [perfectPowerFrom] at h
   | succ fuel ih =>
     simp only [perfectPowerFrom] at h
-    split_ifs at h with hc
-    · cases h; exact hc
+    split at h
+    · cases h; assumption
     · exact ih h
 
 theorem perfectPower_spec {n r k : Nat} (h : perfectPower n = some (r, k)) :
     2 ≤ r ∧ r ^ k = n := by
   unfold perfectPower at h
-  split_ifs at h
-  exact perfectPowerFrom_spec h
+  split at h
+  · contradiction
+  · exact perfectPowerFrom_spec h
 
 theorem perfectPowerFrom_exponent {n fuel k r e : Nat}
     (h : perfectPowerFrom n fuel k = some (r, e)) : k ≤ e := by
@@ -221,8 +215,8 @@ theorem perfectPowerFrom_exponent {n fuel k r e : Nat}
   | zero => simp [perfectPowerFrom] at h
   | succ fuel ih =>
     simp only [perfectPowerFrom] at h
-    split_ifs at h with hc
-    · cases h; exact le_rfl
+    split at h
+    · cases h; exact Nat.le_refl _
     · exact Nat.le_of_succ_le (ih h)
 
 /-- A perfect-power root is a proper divisor. -/
@@ -231,14 +225,16 @@ theorem perfectPower_proper {n r k : Nat} (h : perfectPower n = some (r, k)) :
   obtain ⟨hr, hpow⟩ := perfectPower_spec h
   have hk : 2 ≤ k := by
     unfold perfectPower at h
-    split_ifs at h
-    exact perfectPowerFrom_exponent h
+    split at h
+    · contradiction
+    · exact perfectPowerFrom_exponent h
   refine ⟨by omega, ?_, ?_⟩
   · rw [← hpow]
-    calc r = r ^ 1 := (pow_one r).symm
+    calc r = r ^ 1 := (Nat.pow_one r).symm
       _ < r ^ k := Nat.pow_lt_pow_right (by omega) (by omega)
   · rw [← hpow]
-    exact dvd_pow_self r (by omega)
+    have := Nat.pow_dvd_pow r (show 1 ≤ k by omega)
+    rwa [Nat.pow_one] at this
 
 /-! ## Small-prime enumeration and probable-prime screening -/
 
@@ -286,10 +282,5 @@ def isProbablePrime (n : Nat) : Bool :=
 
 /-- Exact primality for small inputs by the verified 6-wheel trial division. -/
 def smallPrime (n : Nat) : Bool := 2 ≤ n && (trialWheelSearch n).isNone
-
-theorem smallPrime_sound {n : Nat} (h : smallPrime n = true) : n.Prime := by
-  unfold smallPrime at h
-  simp only [Bool.and_eq_true, decide_eq_true_eq, Option.isNone_iff_eq_none] at h
-  exact trialWheelSearch_none_prime h.1 h.2
 
 end PrimeFactorLean.Arith

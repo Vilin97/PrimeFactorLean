@@ -78,6 +78,17 @@ everything downstream, is proved.
 - **Trial division.** Completeness is proved as well: no divisor up to `√n`
   implies `Nat.Prime n`.
 
+**Two layers.** Every executed definition lives in a module that imports only
+Lean's core library (plus `Std` hash maps), so the `factor` executable starts
+in about a millisecond and never loads mathlib or the Lean frontend. Proof
+obligations that runtime code needs (proper divisors, relation congruences,
+the GNFS square identity, termination) are proved there with core tactics,
+stating congruences as integer divisibility (`ModEq n a b := (n : ℤ) ∣ a - b`).
+Everything that needs mathlib — `Nat.Prime`, Pocklington's theorem, the ECM
+formulas, the final `factor_total_correct` — is proved in
+`PrimeFactorLean/Proofs/` *about the same constants*. `scripts/audit_sources.py`
+checks that the executable's import closure contains no mathlib or `Lean` module.
+
 `Tests/Audit.lean` fails the build if any of the ~1,900 project declarations
 depends on an axiom other than `propext`, `Classical.choice` and `Quot.sound`.
 `scripts/audit_sources.py` rejects `sorry`, `admit`, `native_decide`, `unsafe`,
@@ -312,7 +323,8 @@ gzip-compressed JSON (`gzip -dc results/…json.gz`).
 
 | Path | Contents |
 |---|---|
-| `PrimeFactorLean/Core.lean` | verified engine `factorCoreWith`, `ProperFactor`, signed factorization |
+| `PrimeFactorLean/Core.lean` | engine `factorCoreWith`, `ProperFactor`, `ModEq`, `isqrt`, `minFac`, signed factorization |
+| `PrimeFactorLean/Proofs/*.lean` | mathlib-based correctness proofs of the runtime modules (`factor_total_correct`, Pocklington, ECM formulas, …) |
 | `PrimeFactorLean/Trial.lean` | trial division (reference, `√n`, 6-wheel) with completeness proofs |
 | `PrimeFactorLean/Search.lean` | Fermat, Pollard rho, Brent, original `p − 1` |
 | `PrimeFactorLean/SQUFOF.lean`, `PMinusOne.lean` | SQUFOF; `p − 1` and Williams `p + 1` with stage 2 |
@@ -321,7 +333,7 @@ gzip-compressed JSON (`gzip -dc results/…json.gz`).
 | `PrimeFactorLean/CFRAC.lean`, `QS.lean` | continued fractions; QS, MPQS, SIQS |
 | `PrimeFactorLean/NFS/*.lean`, `GNFS.lean` | number field sieve: `ℤ[ω]` arithmetic with proofs, `𝔽_p[x]` routines, square roots, selection, line and lattice sieving, driver |
 | `PrimeFactorLean/Pocklington.lean`, `Primality.lean` | Pocklington and Lucas–Pratt certificates |
-| `PrimeFactorLean/Algorithms.lean` | public API and main theorems |
+| `PrimeFactorLean/Algorithms.lean` | public API (`Proofs/Algorithms.lean`: main theorems) |
 | `Tests/` | regression tests, adversarial certificate tests, axiom audit, generated dataset |
 | `Bench.lean`, `scripts/` | in-process optimization benchmarks; dataset, raw-splitter and scaling benchmarks |
 | `Dev/` | tuning harnesses (`lake exe dev`) |

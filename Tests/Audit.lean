@@ -15,6 +15,12 @@ import PrimeFactorLean
 run_cmd do
   let audited : List Lean.Name := [
     ``PrimeFactorLean.factorCoreWith_correct,
+    ``PrimeFactorLean.minFac_prime,
+    ``PrimeFactorLean.isqrt_spec,
+    ``PrimeFactorLean.isqrt_eq_sqrt,
+    ``PrimeFactorLean.Pocklington.oracle_sound,
+    ``PrimeFactorLean.Squares.modEq_iff_zmod,
+    ``PrimeFactorLean.Squares.Relation.valid_zmod,
     ``PrimeFactorLean.factorInt_correct,
     ``PrimeFactorLean.trialCore_correct,
     ``PrimeFactorLean.trialWheelCore_correct,
@@ -56,7 +62,7 @@ run_cmd do
     ``PrimeFactorLean.NFS.eval_reduce,
     ``PrimeFactorLean.NFS.eval_mulZ,
     ``PrimeFactorLean.NFS.eval_prodTree,
-    ``PrimeFactorLean.NFS.evalMod_cast,
+    ``PrimeFactorLean.NFS.evalMod_modEq,
     ``PrimeFactorLean.GNFS.nfs_square,
     ``PrimeFactorLean.GNFS.split_sound,
     ``PrimeFactorLean.SQUFOF.split_sound,

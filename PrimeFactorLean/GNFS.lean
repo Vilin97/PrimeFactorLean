@@ -44,38 +44,46 @@ open Arith NFS Squares
 
 /-! ## The congruence of squares -/
 
-private theorem prod_map_elt {n : Nat} (r : ZMod n) (cd m : Nat)
-    (hr : r = (cd : ZMod n) * (m : ZMod n)) (S : List (Int × Int)) :
-    (S.map (fun ab => eval r [(cd : Int) * ab.1, -ab.2])).prod =
-      (cd : ZMod n) ^ S.length *
-        (((S.map fun ab => ab.1 - ab.2 * (m : Int)).prod : Int) : ZMod n) := by
+private theorem prod_map_elt {n : Nat} (r : Int) (cd m : Nat)
+    (hr : ModEq n r ((cd : Int) * (m : Int))) (S : List (Int × Int)) :
+    ModEq n (prodL (S.map (fun ab => eval r [(cd : Int) * ab.1, -ab.2])))
+      ((cd : Int) ^ S.length * prodL (S.map fun ab => ab.1 - ab.2 * (m : Int))) := by
   induction S with
-  | nil => simp
+  | nil => exact ModEq.of_eq (by simp [prodL])
   | cons ab rest ih =>
-    rw [List.map_cons, List.prod_cons, ih, List.map_cons, List.prod_cons, List.length_cons]
-    simp only [eval_cons, eval_nil, Int.cast_mul, Int.cast_natCast, Int.cast_neg, Int.cast_sub,
-      hr, pow_succ]
-    ring
+    simp only [List.map_cons, prodL, List.length_cons]
+    have he : ModEq n (eval r [(cd : Int) * ab.1, -ab.2])
+        ((cd : Int) * (ab.1 - ab.2 * (m : Int))) := by
+      have := (ModEq.refl n ((cd : Int) * ab.1)).add (hr.mul (ModEq.refl n (-ab.2)))
+      refine (ModEq.of_eq ?_).trans (this.trans (ModEq.of_eq ?_))
+      · simp only [eval_cons, eval_nil]; grind
+      · grind
+    refine (he.mul ih).trans (ModEq.of_eq ?_)
+    rw [Int.pow_succ]
+    grind
 
-/-- **The number field sieve congruence.** If `f(r) = 0` with `r = c_d m`, `β² = γ`
-in `ℤ[ω]` and the rational product is the square `Y₀²`, then
-`φ(β)² = (φ(f') · c_d^k · Y₀)²` for `|S| = 2k`. -/
+/-- **The number field sieve congruence.** If `f(r) ≡ 0` with `r ≡ c_d m`,
+`β² = γ` in `ℤ[ω]` and the rational product is the square `Y₀²`, then
+`φ(β)² ≡ (φ(f') · c_d^k · Y₀)² (mod n)` for `|S| = 2k`. -/
 theorem nfs_square {n : Nat} (g fp β : List Int) (cd m : Nat) (S : List (Int × Int))
-    (Y0 : Int) (k : Nat) (r : ZMod n) (hroot : eval r g + r ^ g.length = 0)
-    (hr : r = (cd : ZMod n) * (m : ZMod n))
+    (Y0 : Int) (k : Nat) (r : Int) (hroot : ModEq n (eval r g + r ^ g.length) 0)
+    (hr : ModEq n r ((cd : Int) * (m : Int)))
     (hβ : mulZ g β β = prodTree g (fp :: fp :: S.map fun ab => [(cd : Int) * ab.1, -ab.2]))
-    (hrat : (S.map fun ab => ab.1 - ab.2 * (m : Int)).prod = Y0 * Y0)
+    (hrat : prodL (S.map fun ab => ab.1 - ab.2 * (m : Int)) = Y0 * Y0)
     (hk : S.length = 2 * k) :
-    (eval r β) ^ 2 = (eval r fp * (cd : ZMod n) ^ k * (Y0 : ZMod n)) ^ 2 := by
-  have h1 : (eval r β) ^ 2 = eval r (mulZ g β β) := by
-    rw [eval_mulZ r g β β hroot]; ring
-  rw [h1, hβ, eval_prodTree r g hroot]
-  simp only [List.map_cons, List.prod_cons, List.map_map]
+    ModEq n ((eval r β) ^ 2) ((eval r fp * (cd : Int) ^ k * Y0) ^ 2) := by
+  have h1 : ModEq n ((eval r β) ^ 2) (eval r (mulZ g β β)) :=
+    (ModEq.of_eq (by grind)).trans (eval_mulZ r g β β hroot).symm
+  rw [hβ] at h1
+  refine h1.trans ((eval_prodTree r g hroot _).trans ?_)
+  simp only [List.map_cons, prodL, List.map_map]
   have hcomp : (S.map (eval r ∘ fun ab => [(cd : Int) * ab.1, -ab.2])) =
       S.map (fun ab => eval r [(cd : Int) * ab.1, -ab.2]) := rfl
-  rw [hcomp, prod_map_elt r cd m hr S, hrat, hk]
-  push_cast
-  ring
+  rw [hcomp]
+  refine ((ModEq.refl n (eval r fp)).mul ((ModEq.refl n (eval r fp)).mul
+    (prod_map_elt r cd m hr S))).trans (ModEq.of_eq ?_)
+  rw [hrat, hk, Squares.pow_two_mul]
+  grind
 
 /-! ## Run setup with the proved root equation -/
 
@@ -86,8 +94,8 @@ structure Setup (n : Nat) where
   cd : Nat
   r : Nat
   hn : 0 < n
-  hroot : eval (r : ZMod n) g + (r : ZMod n) ^ g.length = 0
-  hr : (r : ZMod n) = (cd : ZMod n) * (sel.m : ZMod n)
+  hroot : ModEq n (eval (r : Int) g + (r : Int) ^ g.length) 0
+  hr : ModEq n (r : Int) ((cd : Int) * (sel.m : Int))
 
 def mkSetup (n : Nat) (sel : Selection) : Option (Setup n) :=
   let g := monicLower sel.coeffs
@@ -96,10 +104,10 @@ def mkSetup (n : Nat) (sel : Selection) : Option (Setup n) :=
   if h : 0 < n ∧ evalMod n r (g ++ [1]) = 0 then
     some { sel := sel, g := g, fp := derivative g, cd := cd, r := r, hn := h.1,
            hroot := by
-             have hc := congrArg (fun t : Nat => (t : ZMod n)) h.2
-             simp only [evalMod_cast h.1, eval_append_singleton, Nat.cast_zero] at hc
-             simpa using hc,
-           hr := by simp [r, ZMod.natCast_mod] }
+             have hc := evalMod_modEq h.1 r (g ++ [1])
+             rw [h.2, eval_append_singleton] at hc
+             exact (ModEq.of_eq (by grind)).trans (hc.symm.trans (ModEq.of_eq (by simp))),
+           hr := (ModEq.natCast_mod (cd * sel.m) n).trans (ModEq.of_eq (by push_cast; rfl)) }
   else none
 
 /-! ## From a dependency to a congruence of squares -/
@@ -128,7 +136,7 @@ def congruence {n : Nat} (st : Setup n) (rels : List Rel) (p : Nat) :
     match rationalRoot rels with
     | none => none
     | some Y0 =>
-      if hrat : (S.map fun ab => ab.1 - ab.2 * (st.sel.m : Int)).prod = Y0 * Y0 then
+      if hrat : prodL (S.map fun ab => ab.1 - ab.2 * (st.sel.m : Int)) = Y0 * Y0 then
         let γ := prodTree st.g (st.fp :: st.fp :: S.map fun ab => [(st.cd : Int) * ab.1, -ab.2])
         match sqrtZ st.g γ p with
         | none => none
@@ -136,11 +144,24 @@ def congruence {n : Nat} (st : Setup n) (rels : List Rel) (p : Nat) :
           if hβ : mulZ st.g β β = γ then
             some ⟨evalMod n st.r β,
               evalMod n st.r st.fp * powMod st.cd k n % n * (Y0 % (n : Int)).toNat % n, by
-                have key := nfs_square st.g st.fp β st.cd st.sel.m S Y0 k (st.r : ZMod n)
+                have key := nfs_square st.g st.fp β st.cd st.sel.m S Y0 k (st.r : Int)
                   st.hroot st.hr hβ hrat hk
-                simp only [evalMod_cast st.hn, ZMod.natCast_mod, Nat.cast_mul, powMod_eq,
-                  Nat.cast_pow, toNat_emod_cast st.hn]
-                exact key⟩
+                have hx := (evalMod_modEq st.hn st.r β).pow 2
+                have hpow : ModEq n ((powMod st.cd k n : Nat) : Int) ((st.cd : Int) ^ k) := by
+                  rw [powMod_eq]
+                  exact (ModEq.natCast_mod _ n).trans (ModEq.of_eq (by push_cast; rfl))
+                have hab : ModEq n ((evalMod n st.r st.fp * powMod st.cd k n % n : Nat) : Int)
+                    (eval (st.r : Int) st.fp * (st.cd : Int) ^ k) := by
+                  refine (ModEq.natCast_mod _ n).trans ?_
+                  rw [Int.natCast_mul]
+                  exact (evalMod_modEq st.hn st.r st.fp).mul hpow
+                have hy : ModEq n
+                    ((evalMod n st.r st.fp * powMod st.cd k n % n * (Y0 % (n : Int)).toNat % n : Nat) : Int)
+                    (eval (st.r : Int) st.fp * (st.cd : Int) ^ k * Y0) := by
+                  refine (ModEq.natCast_mod _ n).trans ?_
+                  rw [Int.natCast_mul]
+                  exact hab.mul (toNat_emod_modEq st.hn Y0)
+                exact hx.trans (key.trans (hy.pow 2).symm)⟩
           else none
       else none
   else none

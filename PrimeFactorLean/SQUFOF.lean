@@ -56,7 +56,7 @@ def squaresMod64 : Nat := 0x0202021202030213
 @[inline] def squareRoot? (q : Nat) : Option Nat :=
   if (squaresMod64 >>> (q % 64)) % 2 == 0 then none
   else
-    let r := Nat.sqrt q
+    let r := isqrt q
     if r * r == q then some r else none
 
 /-- One step of the cycle, from `(P_{i-1}, Q_{i-1}, Q_i)` to `(P_i, Q_{i+1})`.
@@ -100,10 +100,10 @@ structure Racer where
 `gcd(√(kn), n)`. -/
 def Racer.start (n k : Nat) : Except (Option (ProperFactor n)) Racer :=
   let D := k * n
-  let s := Nat.sqrt D
+  let s := isqrt D
   if s * s == D then .error (gcdFactor n s)
   else .ok { D := D, s := s, P := s, Qprev := 1, Q := D - s * s, i := 1,
-             bound := 6 * Nat.sqrt (2 * s) }
+             bound := 6 * isqrt (2 * s) }
 
 /-- Advance by up to `steps` forward steps, sending every square form at an even
 index through its reverse cycle. -/
