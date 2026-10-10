@@ -13,7 +13,18 @@ correctness theorem depends on their answers.
 
 namespace PrimeFactorLean.Arith
 
-/-! ## Floating-point constants for hot loops -/
+/-! ## Floating-point conversions and constants for hot loops -/
+
+/-- A natural number as a float, through `UInt64` below `2^32`: `Nat.toFloat` is
+`Float.ofNat`, i.e. `Float.ofScientific n false 0`, which runs a big-number
+logarithm and shifts for every argument. (The bound is a 32-bit literal: larger
+`Nat` literals are emitted as decimal strings, parsed where they are used.) -/
+@[inline] def nf (n : Nat) : Float :=
+  if n ≤ 4294967295 then n.toUInt64.toFloat else n.toFloat
+
+/-- An integer as a float (as `nf`; `Float.ofInt` goes through `Float.ofNat`). -/
+@[inline] def intF (i : Int) : Float :=
+  if i ≥ 0 then nf i.toNat else Float.neg (nf (-i).toNat)
 
 /-- A float constant by integer conversion: a float literal in a loop may be
 rebuilt by `Float.ofScientific` on every iteration (common-subexpression

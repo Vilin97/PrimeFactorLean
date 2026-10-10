@@ -184,8 +184,8 @@ def natBits (k : Nat) : ByteArray := Id.run do
   let mut out := ByteArray.emptyWithCapacity (k.log2 + 1)
   let mut r := k
   while r > 0 do
-    let w := r % 4294967296
-    r := r / 4294967296
+    let w := r &&& 4294967295
+    r := r >>> 32
     for i in [0:32] do
       out := out.push (if w.testBit i then 1 else 0)
   -- drop leading zeros

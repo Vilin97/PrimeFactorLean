@@ -45,7 +45,8 @@ def fkUnit : IO Unit := do
 
 /-- Sieve a few special-`q` with the lattice siever, time it and check every relation. -/
 def lasDebug (n : Nat) (count : Nat) (fudge : Nat := 4) (skewOverride : Nat := 0)
-    (preSlack : Nat := 6) (qstart : Nat := 0) : IO Unit := do
+    (preSlack : Nat := 6) (qstart : Nat := 0) (v5 : Bool := false) (v6 : Bool := false) :
+    IO Unit := do
   let params := chooseParams (GNFS.decimalDigits n)
   let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
       (min params.ratBound params.algBound) + 1 }
@@ -69,7 +70,8 @@ def lasDebug (n : Nat) (count : Nat) (fudge : Nat := 4) (skewOverride : Nat := 0
   let t0 ← IO.monoNanosNow
   let mut sc := Las.Scratch.new las
   for (q, ρ) in qs do
-    let (rels, sc') := Las.processQWith las q ρ sc
+    let (rels, sc') := if v6 then Las.processQ6 las q ρ sc else
+      if v5 then Las.processQ5 las q ρ sc else Las.processQWith las q ρ sc
     sc := sc'
     total := total + rels.size
     for r in rels do

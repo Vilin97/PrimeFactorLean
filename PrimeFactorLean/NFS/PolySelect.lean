@@ -94,8 +94,8 @@ def alpha (cs : Array Int) : Float := Id.run do
     for x in [0:p] do
       roots := roots + (if hornerMod red pu x.toUInt64 d == 0 then 1 else 0)
     if red[d]! == 0 then roots := roots + 1
-    let pf := p.toFloat
-    a := a + (fc 1 / (pf - fc 1) - roots.toFloat * pf / (pf * pf - fc 1)) * Float.log pf
+    let pf := nf p
+    a := a + (fc 1 / (pf - fc 1) - nf roots * pf / (pf * pf - fc 1)) * Float.log pf
   return a
 
 /-- `s^d · ‖F‖²(s) = Σ_k w_k s^k` as a polynomial in the skewness `s` (unboxed
@@ -107,8 +107,8 @@ def normPoly (cs : Array Int) : FloatArray := Id.run do
     let mut c : Float := 0
     if k % 2 == 0 then
       for i in [0:d + 1] do
-        if i ≤ k && k - i ≤ d then c := c + Float.ofInt cs[i]! * Float.ofInt cs[k - i]!
-      c := c * fc 4 / ((k + 1).toFloat * (2 * d - k + 1).toFloat)
+        if i ≤ k && k - i ≤ d then c := c + intF cs[i]! * intF cs[k - i]!
+      c := c * fc 4 / ((nf (k + 1)) * (nf (2 * d - k + 1)))
     w := w.push c
   return w
 
@@ -124,7 +124,7 @@ def evalNormPoly (w : FloatArray) (s : Float) : Float := Id.run do
 def logNorm (cs : Array Int) : Float × Float := Id.run do
   let d := cs.size - 1
   let w := normPoly cs
-  let dF := d.toFloat
+  let dF := nf d
   let f (t : Float) : Float := evalNormPoly w (Float.exp t) * Float.exp (-dF * t)
   let mut lo : Float := 0.0
   let mut hi : Float := 80.0
@@ -477,8 +477,8 @@ def alphaB (cs : Array Int) (B : Nat) : Float := Id.run do
     for x in [0:p] do
       roots := roots + (if hornerMod red pu x.toUInt64 d == 0 then 1 else 0)
     if red[d]! == 0 then roots := roots + 1
-    let pf := p.toFloat
-    a := a + (fc 1 / (pf - fc 1) - roots.toFloat * pf / (pf * pf - fc 1)) * Float.log pf
+    let pf := nf p
+    a := a + (fc 1 / (pf - fc 1) - nf roots * pf / (pf * pf - fc 1)) * Float.log pf
   return a
 
 /-- `F(x, 1) mod q` for `x < q ≤ 2^16` (Horner on machine words). -/
@@ -495,7 +495,7 @@ def alphaExact (cs : Array Int) (B : Nat) : Float := Id.run do
   let d := cs.size - 1
   let mut a : Float := 0
   for p in primesUpTo B do
-    let pf := p.toFloat
+    let pf := nf p
     let lp := Float.log pf
     let mut ev : Float := 0
     let mut q := p
@@ -512,7 +512,7 @@ def alphaExact (cs : Array Int) (B : Nat) : Float := Id.run do
       for y' in [0:q / p] do
         let y := y' * p
         if evalModQ rev q.toUInt64 y.toUInt64 == 0 then n := n + 1
-      ev := ev + n.toFloat / (q.toFloat + (q / p).toFloat)
+      ev := ev + nf n / (nf q + (nf (q / p)))
       if q > 4096 then break
       q := q * p
       if q > 4096 then break
@@ -530,13 +530,13 @@ projective roots (which do not depend on `v`) are left out. -/
 def alphaSieve (cs : Array Int) (l m u : Int) (vlo : Int) (len : Nat) : FloatArray := Id.run do
   let mut arr : FloatArray := ⟨Array.replicate len (fc 0)⟩
   for p in primesUpTo 200 do
-    let pf := p.toFloat
+    let pf := nf p
     let lp := Float.log pf
     let constW := lp / (pf - fc 1)
     let mut q := p
     for _ in [0:12] do
       let qi : Int := q
-      let w := lp / (q.toFloat + (q / p).toFloat)
+      let w := lp / (nf q + (nf (q / p)))
       let red : Array UInt64 := cs.map fun c => (c % qi).toNat.toUInt64
       let lm := (l % qi).toNat
       let mm := (m % qi).toNat
@@ -553,7 +553,7 @@ def alphaSieve (cs : Array Int) (l m u : Int) (vlo : Int) (len : Nat) : FloatArr
       for r in [0:q] do
         let c := cnt[r]!
         if c == 0 then continue
-        let wr := c.toFloat * w
+        let wr := nf c * w
         let mut t := (r + q - vl) % q
         for _ in [0:len / q + 1] do
           if t ≥ len then break
@@ -568,7 +568,7 @@ def alphaSieve (cs : Array Int) (l m u : Int) (vlo : Int) (len : Nat) : FloatArr
 /-- The lognorm at a fixed skewness `s`. -/
 def lognormAt (cs : Array Int) (s : Float) : Float :=
   let d := cs.size - 1
-  fc 1 / fc 2 * Float.log (evalNormPoly (normPoly cs) s * Float.pow s (-(d.toFloat)))
+  fc 1 / fc 2 * Float.log (evalNormPoly (normPoly cs) s * Float.pow s (-((nf d))))
 
 /-- The range `[kmin, kmax]` of rotations `k x^i (ℓ x - m)` keeping the lognorm
 at skewness `s` at most `maxLog` (CADO-NFS `expected_growth`: doubling, then
@@ -614,7 +614,7 @@ def projAlpha (cs : Array Int) : Float := Id.run do
   let mut a : Float := 0
   for p in primesUpTo 100 do
     if ad % p == 0 then
-      let pf := p.toFloat
+      let pf := nf p
       a := a - pf / (pf * pf - fc 1) * Float.log pf
   return a
 
@@ -629,7 +629,7 @@ def expectedRotationGain (cs : Array Int) (l m : Int) : Float := Id.run do
   for i in [0:d] do
     if 2 * i < d then
       let (kmin, kmax) := rotRange cs l m i (n + fc 2 / fc 10) s
-      let sz := Float.ofInt (kmax - kmin + 1)
+      let sz := intF (kmax - kmin + 1)
       S := S * sz
       if sz ≥ fc 2 then incr := incr + fc 1 / fc 10
   return projAlpha cs + expectedAlpha (Float.log S) + incr
@@ -641,8 +641,8 @@ def dickmanTable : FloatArray := Id.run do
   let n := 32 * 64
   let mut t : FloatArray := ⟨Array.replicate (n + 1) (fc 1)⟩
   for i in [65:n + 1] do
-    let u0 := (i - 1).toFloat * h
-    let u1 := i.toFloat * h
+    let u0 := (nf (i - 1)) * h
+    let u1 := nf i * h
     let a := t.get! (i - 1 - 64) / u0
     let b := t.get! (i - 64) / u1
     t := t.set! i (t.get! (i - 1) - h * (a + b) / fc 2)
@@ -655,7 +655,7 @@ def dickman (tbl : FloatArray) (u : Float) : Float :=
   else
     let x := u * fc 64
     let i := x.floor.toUInt64.toNat
-    let f := x - i.toFloat
+    let f := x - (nf i)
     tbl.get! i * (fc 1 - f) + tbl.get! (i + 1) * f
 
 /-- Murphy's `E` (CADO-NFS `MurphyE`, `K` sample points on the skewed ellipse
@@ -666,13 +666,13 @@ def murphyE (tbl : FloatArray) (cs : Array Int) (l m : Int) (s bf bg area : Floa
   let ag := alphaExact #[-m, l] B
   let x0 := Float.sqrt (area * s)
   let y0 := Float.sqrt (area / s)
-  let csF : Array Float := cs.map Float.ofInt
-  let lf := Float.ofInt l
-  let mf := Float.ofInt m
+  let csF : Array Float := cs.map intF
+  let lf := intF l
+  let mf := intF m
   let pi : Float := fc 314159265358979 / fc 100000000000000
   let mut e : Float := 0
   for i in [0:K] do
-    let ti := pi / K.toFloat * (i.toFloat + fc 1 / fc 2)
+    let ti := pi / nf K * (nf i + fc 1 / fc 2)
     let xi := x0 * Float.cos ti
     let yi := y0 * Float.sin ti
     -- F(x, y) by Horner in x / y
@@ -685,7 +685,7 @@ def murphyE (tbl : FloatArray) (cs : Array Int) (l m : Int) (s bf bg area : Floa
     let vf := (Float.log acc.abs + af) / Float.log bf
     let vg := (Float.log (lf * xi - mf * yi).abs + ag) / Float.log bg
     e := e + dickman tbl vf * dickman tbl vg
-  return e / K.toFloat
+  return e / (nf K)
 
 /-- A collision candidate after size optimization. -/
 structure CCand where

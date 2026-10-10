@@ -49,12 +49,13 @@ def gcdFactor (n z : Nat) : Option (ProperFactor n) :=
 def multipliers : Array Nat :=
   #[1, 3, 5, 7, 11, 15, 21, 33, 35, 55, 77, 105, 165, 231, 385, 1155]
 
-/-- Bit `t` is set exactly when `t` is a square modulo `64`. -/
-def squaresMod64 : Nat := 0x0202021202030213
+/-- Bit `t` is set exactly when `t` is a square modulo `64` (a machine word: a
+`Nat` literal above `2^32` would be parsed from its digits wherever it is used). -/
+def squaresMod64 : UInt64 := 0x0202021202030213
 
 /-- `some r` when `q = r²`; residues modulo `64` reject most non-squares cheaply. -/
 @[inline] def squareRoot? (q : Nat) : Option Nat :=
-  if (squaresMod64 >>> (q % 64)) % 2 == 0 then none
+  if (squaresMod64 >>> (q % 64).toUInt64) &&& 1 == 0 then none
   else
     let r := isqrt q
     if r * r == q then some r else none

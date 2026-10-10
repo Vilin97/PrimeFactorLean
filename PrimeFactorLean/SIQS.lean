@@ -755,16 +755,21 @@ evaluated when needed). -/
 
 /-- A factor of a composite `u` (`0` if none was found): rho for `u < 2^50`. -/
 def cofactorFactor (u : Nat) : Nat :=
-  let g := if u < 2 ^ 52 then
-      let g := rho50 u.toUInt64 1 200000
-      if g != 0 then g else rho50 u.toUInt64 3 200000
+  -- Brent's rho finds a factor `p ≤ u^(1/2)` after about `1.25 √p ≤ 1.25 u^(1/4)`
+  -- steps: a budget of `8 u^(1/4)` (and at least 2000) rarely gives up early
+  let iters := (max 2000 (8 * iroot u 4)).toUInt64
+  -- `u >>> 52 == 0` rather than `u < 2 ^ 52`: `Nat` literals above `2^32` are
+  -- parsed from their digits at every use
+  let g := if u >>> 52 == 0 then
+      let g := rho50 u.toUInt64 1 iters
+      if g != 0 then g else rho50 u.toUInt64 3 iters
     else 0
   if g != 0 then g.toNat else squfofFactor u
 
 /-- Split a double-large-prime cofactor `u` into two primes below `lp` (a base-2
 probable-prime screen first). -/
 def splitCofactor (u lp : Nat) : Option (Nat × Nat) :=
-  if u < 2 ^ 52 && u % 2 == 1 && sprp2 u.toUInt64 then none
+  if u >>> 52 == 0 && u % 2 == 1 && sprp2 u.toUInt64 then none
   else
     let d := cofactorFactor u
     if d ≤ 1 then none else
@@ -938,10 +943,10 @@ def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf :
   for r in recs do
     let c := findCand cands (r >>> 24)
     if c < cands.size then lists := lists.modify c ((r &&& 0xFFFFFF) :: ·)
-  let Af := ap.A.toFloat
-  let Bf := Float.ofInt B
-  let Cf := Float.ofInt C
-  let Mf := ctx.M.toFloat
+  let Af := nf ap.A
+  let Bf := intF B
+  let Cf := intF C
+  let Mf := nf ctx.M
   -- `v(x) mod 2^64` gives the exact power of 2 in `v(x)` (2 is not sieved)
   let w64 : Int := 18446744073709551616
   let A64 := (ap.A % 18446744073709551616).toUInt64
@@ -949,12 +954,12 @@ def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf :
   let C64 := (C % w64).toNat.toUInt64
   let M64 := ctx.M.toUInt64
   let mut rels := rels
-  let biasF := ctx.bias.toNat.toFloat
+  let biasF := nf ctx.bias.toNat
   let B2f := if ctx.q2 then Bf else fc 2 * Bf
-  let pre8F := ctx.pre8.toFloat
+  let pre8F := nf ctx.pre8
   for c in [0:cands.size] do
     let j := cands[c]!
-    let x := j.toFloat - Mf
+    let x := nf j - Mf
     let vf := ((Af * x + B2f) * x + Cf).abs
     let l8v := if vf < fc 2 then fc 0 else fc 8 * Float.log2 vf
     let x64 := j.toUInt64 - M64
@@ -970,7 +975,7 @@ def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf :
           h.2.2.2.1 h.2.2.2.2 [] (8 * e2)
       else ([], 8 * e2)
     let sieved := ((buf.get! j).toUInt64.toFloat - biasF) * ctx.scale * fc 8
-    if l8v > lt.toFloat + sieved + pre8F then continue
+    if l8v > nf lt + sieved + pre8F then continue
     let (hits, l8) :=
       if h : ctx.smallEnd ≤ ap.logp.size ∧ ctx.smallEnd ≤ ctx.log8.size ∧ ctx.smallEnd ≤ ctx.pinv.size ∧
           ctx.smallEnd ≤ ctx.lim.size ∧ ctx.smallEnd ≤ roots.size then
@@ -982,7 +987,7 @@ def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf :
     for i in lists[c]! do
       l8 := l8 + (ctx.log8.get! i).toNat
       found := i :: found
-    if l8v ≤ (l8 + ctx.allow8).toFloat then
+    if l8v ≤ (nf (l8 + ctx.allow8)) then
       if let some r := exactRelation ctx ap B C j found then rels := rels.push r
   return rels
 

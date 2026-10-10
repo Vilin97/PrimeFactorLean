@@ -227,14 +227,14 @@ def l2NormSq (cs : Array Float) (s : Float) : Float := Id.run do
     for j in [0:d + 1] do
       if (i + j) % 2 == 0 then
         let k := i + j
-        acc := acc + cs[i]! * cs[j]! * Float.pow s (k.toFloat - d.toFloat) *
-          4.0 / ((k + 1).toFloat * (2 * d - k + 1).toFloat)
+        acc := acc + cs[i]! * cs[j]! * Float.pow s (nf k - (nf d)) *
+          4.0 / ((nf (k + 1)) * (nf (2 * d - k + 1)))
   return acc
 
 /-- The skewness minimizing the `L²` norm (golden-section search on `log s`),
 as CADO-NFS's `skewness`: the sieve region is stretched by it. -/
 def skewness (sel : Selection) : Nat := Id.run do
-  let cs : Array Float := sel.coeffs.map Float.ofInt
+  let cs : Array Float := sel.coeffs.map intF
   let f (t : Float) : Float := l2NormSq cs (Float.exp t)
   let mut lo : Float := 0.0
   let mut hi : Float := 60.0
