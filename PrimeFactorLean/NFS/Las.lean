@@ -405,14 +405,39 @@ def mkLasCtx (base : Ctx) (params : LasParams) : LasCtx :=
 
 /-! ## One special-`q` -/
 
+/-- `x mod p` in `[0, p)` for a signed word (`%` truncates toward zero). -/
+@[inline] def smodW (x : Int64) (p : Int64) : UInt64 :=
+  let t := x % p
+  (if t < 0 then t + p else t).toUInt64
+
+/-- `latticeRootW` from the basis as signed words: `u_a - r u_b` and `v_a - r v_b`
+are reduced once each (the basis is far below `2^31`, `r p < 2^48`). -/
+@[inline] def latticeRootI (p r : UInt64) (ua ub va vb : Int64) : UInt64 :=
+  let pi := p.toInt64
+  let α := if r == p then smodW ub pi else smodW (ua - r.toInt64 * ub) pi
+  let β := if r == p then smodW vb pi else smodW (va - r.toInt64 * vb) pi
+  if α == 0 then p
+  else
+    let inv := invMod32 α.toUInt32 p.toUInt32
+    if inv == 0 then p
+    else
+      let t := β * inv % p
+      if t == 0 then 0 else p - t
+
 /-- Lattice roots of one side's ideals for the basis `u, v` (machine words). -/
 def latticeRoots (side : Side) (ua ub va vb : Int) : Array Nat := Id.run do
   let mut out : Array Nat := Array.mkEmpty side.primes.size
-  for k in [0:side.primes.size] do
-    let p := side.primes[k]!
-    let r := side.roots[k]!
-    out := out.push (latticeRootW p.toUInt64 r.toUInt64 (modW ua p) (modW ub p) (modW va p)
-      (modW vb p)).toNat
+  -- signed words when the basis allows (always, in practice)
+  if ua.natAbs < 2 ^ 31 && ub.natAbs < 2 ^ 31 && va.natAbs < 2 ^ 31 && vb.natAbs < 2 ^ 31 then
+    let (a, b, c, d) := (ua.toInt64, ub.toInt64, va.toInt64, vb.toInt64)
+    for k in [0:side.primes.size] do
+      out := out.push (latticeRootI side.primes[k]!.toUInt64 side.roots[k]!.toUInt64 a b c d).toNat
+  else
+    for k in [0:side.primes.size] do
+      let p := side.primes[k]!
+      let r := side.roots[k]!
+      out := out.push (latticeRootW p.toUInt64 r.toUInt64 (modW ua p) (modW ub p) (modW va p)
+        (modW vb p)).toNat
   return out
 
 /-- `n` zero bytes. -/
