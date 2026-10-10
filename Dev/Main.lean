@@ -101,6 +101,11 @@ def main (args : List String) : IO Unit := do
   | ["fkunit"] => fkUnit
   | "lasfile" :: path :: q0 :: cnt :: out :: kvs => lasFile path q0.toNat! cnt.toNat! out kvs
   | "lasstats" :: path :: q0 :: cnt :: kvs => lasStats path q0.toNat! cnt.toNat! kvs
+  | ["lanczosbench", n, w, t] => lanczosBench n.toNat! w.toNat! t.toNat!
+  | ["lanczosbench", n, w, t, pk] => lanczosBench n.toNat! w.toNat! t.toNat! pk.toNat!
+  | ["gathercmp", n, m] => gatherCompare n.toNat! m.toNat!
+  | ["taskoverhead"] => do
+    for t in [1, 2, 4, 8, 16, 32] do taskOverhead t 2000
   | ["taskscaling", n] => taskScaling [1, 2, 4, 8, 16, 32, 4, 8] n.toNat!
   | ["taskscaling", n, ts] => taskScaling ((ts.splitOn ",").map String.toNat!) n.toNat!
   | "lasparfile" :: path :: q0 :: per :: kvs =>

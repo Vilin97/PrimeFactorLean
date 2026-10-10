@@ -856,3 +856,64 @@ def mulABig (n w : Nat) : IO Unit := do
       acc := acc ^^^ r.get 7
     let t1 ← IO.monoNanosNow
     IO.println s!"n {n} w {w} packed {B.packed}: {(t1 - t0) / 20000} us per A x {acc}"
+
+open PrimeFactorLean.Lanczos in
+/-- Wall time of block Lanczos on a random matrix (`n` columns of `w` entries,
+`n - 64` rows) and of its `A x` products alone. -/
+def lanczosBench (n w threads : Nat) (packAt : Nat := 67108864) : IO Unit := do
+  let rows := n - 64
+  let cols : Array (Array Nat) := (Array.range n).map fun c =>
+    (((Array.range w).map fun t => (c * 7919 + t * 104729 + t * t * 31 + (c * t) % 977) % rows).qsort
+      (· < ·)).toList.eraseDups.toArray
+  let B := Sparse.mk' rows cols packAt
+  IO.println s!"packed {B.packed}"
+  let x := randomBlock n 3
+  for th in [1, 2, 4, 8, 16] do
+    let t0 ← IO.monoNanosNow
+    let mut acc : UInt64 := 0
+    for i in [0:50] do
+      let r ← IO.lazyPure fun _ => mulB B (if i % 2 == 0 then x else x) th
+      acc := acc ^^^ r.get 7
+    let t1 ← IO.monoNanosNow
+    IO.println s!"n {n} w {w} threads {th}: {(t1 - t0) / 50000} us per B x ({acc})"
+  let t2 ← IO.monoNanosNow
+  let r ← IO.lazyPure fun _ => (iterate B threads 1).map fun (_, v) => v.size
+  let t3 ← IO.monoNanosNow
+  IO.println s!"iterate: {(t3 - t2) / 1000000} ms ({r})"
+
+/-- The 64-bit little-endian word `k` of a byte array (8 byte loads). -/
+@[inline] def bget64 (b : ByteArray) (k : Nat) (h : 8 * k + 8 ≤ b.size) : UInt64 :=
+  (b.get (8 * k) (by omega)).toUInt64 |||
+  ((b.get (8 * k + 1) (by omega)).toUInt64 <<< 8) |||
+  ((b.get (8 * k + 2) (by omega)).toUInt64 <<< 16) |||
+  ((b.get (8 * k + 3) (by omega)).toUInt64 <<< 24) |||
+  ((b.get (8 * k + 4) (by omega)).toUInt64 <<< 32) |||
+  ((b.get (8 * k + 5) (by omega)).toUInt64 <<< 40) |||
+  ((b.get (8 * k + 6) (by omega)).toUInt64 <<< 48) |||
+  ((b.get (8 * k + 7) (by omega)).toUInt64 <<< 56)
+
+/-- `⊕ x[idx[k]]` over a byte-array vector. -/
+def gatherB (x : ByteArray) (idx : Array UInt32) (lo hi : Nat) (acc : UInt64) : UInt64 :=
+  if h : lo < hi ∧ lo < idx.size then
+    let i := idx[lo].toNat
+    gatherB x idx (lo + 1) hi (if h2 : 8 * i + 8 ≤ x.size then acc ^^^ bget64 x i h2 else acc)
+  else acc
+termination_by hi - lo
+
+/-- Gathers over `Array UInt32` pairs and over a byte array, same indices. -/
+def gatherCompare (n m : Nat) : IO Unit := do
+  let idx : Array UInt32 := (Array.range m).map fun t => ((t * 2654435761) % n).toUInt32
+  let words := PrimeFactorLean.Lanczos.randomBlock n 5
+  let bytes : ByteArray := Id.run do
+    let mut b := ByteArray.emptyWithCapacity (8 * n)
+    for k in [0:n] do
+      let w := words.get k
+      for j in [0:8] do b := b.push (w >>> (8 * j).toUInt64).toUInt8
+    return b
+  let t0 ← IO.monoNanosNow
+  let a ← IO.lazyPure fun _ => (List.range 10).foldl (fun acc r =>
+    acc ^^^ PrimeFactorLean.Lanczos.gather words.data idx r m 0) 0
+  let t1 ← IO.monoNanosNow
+  let b ← IO.lazyPure fun _ => (List.range 10).foldl (fun acc r => acc ^^^ gatherB bytes idx r m 0) 0
+  let t2 ← IO.monoNanosNow
+  IO.println s!"pairs {(t1 - t0) / 10 / 1000} us, bytes {(t2 - t1) / 10 / 1000} us per {m} gathers ({a == b})"

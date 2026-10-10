@@ -405,3 +405,14 @@ def taskScaling (ts : List Nat) (n : Nat) : IO Unit := do
     let t1 ← IO.monoNanosNow
     IO.println s!"tasks {t}: {(t1 - t0) / 1000000} ms ({r})"
 
+
+/-- Average wall time of a batch of `t` trivial tasks (spawn + get), `reps` times. -/
+def taskOverhead (t reps : Nat) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let mut acc : UInt64 := 0
+  for r in [0:reps] do
+    let x ← IO.lazyPure fun _ => ((List.range t).map fun i =>
+      Task.spawn fun _ => busy (i + r).toUInt64 100).foldl (fun acc tk => acc ^^^ tk.get) 0
+    acc := acc ^^^ x
+  let t1 ← IO.monoNanosNow
+  IO.println s!"{t} trivial tasks: {(t1 - t0) / reps / 1000} us per batch ({acc})"

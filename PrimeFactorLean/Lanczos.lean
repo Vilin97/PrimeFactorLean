@@ -47,12 +47,124 @@ def Words.zeros (n : Nat) : Words := ⟨Array.replicate (2 * n) 0⟩
 
 def Words.size (w : Words) : Nat := w.d.size / 2
 
-/-- `n` words, one per row of a block of 64 vectors of length `n`. -/
-structure Block where
-  data : Words
+/-! The long vectors are kept as little-endian bytes instead: a word is eight
+byte loads that the C compiler merges into one, gathers run twice as fast as on
+`UInt32` pairs (half the memory), and the per-task pieces of a product are
+joined with `memcpy`. -/
+
+/-- The 64-bit little-endian word `k` of `b`. -/
+@[inline] def bget64 (b : ByteArray) (k : Nat) (h : 8 * k + 8 ≤ b.size) : UInt64 :=
+  (b.get (8 * k) (by omega)).toUInt64 |||
+  ((b.get (8 * k + 1) (by omega)).toUInt64 <<< 8) |||
+  ((b.get (8 * k + 2) (by omega)).toUInt64 <<< 16) |||
+  ((b.get (8 * k + 3) (by omega)).toUInt64 <<< 24) |||
+  ((b.get (8 * k + 4) (by omega)).toUInt64 <<< 32) |||
+  ((b.get (8 * k + 5) (by omega)).toUInt64 <<< 40) |||
+  ((b.get (8 * k + 6) (by omega)).toUInt64 <<< 48) |||
+  ((b.get (8 * k + 7) (by omega)).toUInt64 <<< 56)
+
+theorem usize_add_lt (a j : USize) (s : Nat) (hj : j.toNat < 8) (h : a.toNat + 8 ≤ s) :
+    (a + j).toNat < s := by
+  rw [USize.toNat_add]
+  exact Nat.lt_of_le_of_lt (Nat.mod_le _ _) (by omega)
+
+theorem usize_lit_lt (k : Nat) (hk : k < 8) : (OfNat.ofNat k : USize).toNat < 8 := by
+  show (USize.ofNat k).toNat < 8
+  have : (USize.ofNat k).toNat = k % 2 ^ System.Platform.numBits := rfl
+  rw [this]
+  exact Nat.lt_of_le_of_lt (Nat.mod_le _ _) hk
+
+theorem usize_succ_le (a : USize) : (a + 1).toNat ≤ a.toNat + 1 := by
+  rw [USize.toNat_add]
+  have : (1 : USize).toNat ≤ 1 := by
+    show (USize.ofNat 1).toNat ≤ 1
+    have : (USize.ofNat 1).toNat = 1 % 2 ^ System.Platform.numBits := rfl
+    rw [this]; exact Nat.mod_le _ _
+  exact Nat.le_trans (Nat.mod_le _ _) (by omega)
+
+theorem usize_pred_eq (c : USize) (h : c ≠ 0) : (c - 1).toNat = c.toNat - 1 := by
+  have h0 : c.toNat ≠ 0 := by
+    intro h0
+    apply h
+    exact USize.toNat_inj.mp (by simpa using h0)
+  have h1 : (1 : USize) ≤ c := by
+    rw [USize.le_iff_toNat_le]
+    simp
+    omega
+  rw [USize.toNat_sub_of_le _ _ h1]
+  simp
+
+theorem mul8_toNat (j : USize) (hj : j.toNat * 8 < USize.size) : (j * 8).toNat = j.toNat * 8 := by
+  rw [USize.toNat_mul]
+  have h8 : (8 : USize).toNat = 8 := by
+    show (USize.ofNat 8).toNat = 8
+    have : (USize.ofNat 8).toNat = 8 % 2 ^ System.Platform.numBits := rfl
+    rw [this]
+    apply Nat.mod_eq_of_lt
+    rcases System.Platform.numBits_eq with h | h <;> rw [h] <;> decide
+  rw [h8]
+  exact Nat.mod_eq_of_lt hj
+
+theorem nat_toUSize_le (n : Nat) : n.toUSize.toNat ≤ n := by
+  show (USize.ofNat n).toNat ≤ n
+  have : (USize.ofNat n).toNat = n % 2 ^ System.Platform.numBits := rfl
+  rw [this]; exact Nat.mod_le _ _
+
+/-- The 64-bit little-endian word at byte offset `i` (machine-word indices). -/
+@[inline] def bget64U (b : ByteArray) (i : USize) (h : i.toNat + 8 ≤ b.size) : UInt64 :=
+  (b.uget i (by omega)).toUInt64 |||
+  ((b.uget (i + 1) (usize_add_lt i 1 _ (usize_lit_lt 1 (by decide)) h)).toUInt64 <<< 8) |||
+  ((b.uget (i + 2) (usize_add_lt i 2 _ (usize_lit_lt 2 (by decide)) h)).toUInt64 <<< 16) |||
+  ((b.uget (i + 3) (usize_add_lt i 3 _ (usize_lit_lt 3 (by decide)) h)).toUInt64 <<< 24) |||
+  ((b.uget (i + 4) (usize_add_lt i 4 _ (usize_lit_lt 4 (by decide)) h)).toUInt64 <<< 32) |||
+  ((b.uget (i + 5) (usize_add_lt i 5 _ (usize_lit_lt 5 (by decide)) h)).toUInt64 <<< 40) |||
+  ((b.uget (i + 6) (usize_add_lt i 6 _ (usize_lit_lt 6 (by decide)) h)).toUInt64 <<< 48) |||
+  ((b.uget (i + 7) (usize_add_lt i 7 _ (usize_lit_lt 7 (by decide)) h)).toUInt64 <<< 56)
+
+/-- A vector of 64-bit words as little-endian bytes. -/
+structure Vec where
+  b : ByteArray
   deriving Inhabited
 
-def Block.zero (n : Nat) : Block := ⟨Words.zeros n⟩
+@[inline] def Vec.get (v : Vec) (k : Nat) : UInt64 :=
+  if h : 8 * k + 8 ≤ v.b.size then bget64 v.b k h else 0
+
+@[inline] def Vec.push (v : Vec) (x : UInt64) : Vec :=
+  let b := v.b.push x.toUInt8
+  let b := b.push (x >>> 8).toUInt8
+  let b := b.push (x >>> 16).toUInt8
+  let b := b.push (x >>> 24).toUInt8
+  let b := b.push (x >>> 32).toUInt8
+  let b := b.push (x >>> 40).toUInt8
+  let b := b.push (x >>> 48).toUInt8
+  ⟨b.push (x >>> 56).toUInt8⟩
+
+@[inline] def Vec.set (v : Vec) (k : Nat) (x : UInt64) : Vec :=
+  let b := v.b.set! (8 * k) x.toUInt8
+  let b := b.set! (8 * k + 1) (x >>> 8).toUInt8
+  let b := b.set! (8 * k + 2) (x >>> 16).toUInt8
+  let b := b.set! (8 * k + 3) (x >>> 24).toUInt8
+  let b := b.set! (8 * k + 4) (x >>> 32).toUInt8
+  let b := b.set! (8 * k + 5) (x >>> 40).toUInt8
+  let b := b.set! (8 * k + 6) (x >>> 48).toUInt8
+  ⟨b.set! (8 * k + 7) (x >>> 56).toUInt8⟩
+
+/-- An empty vector with room for `n` words. -/
+def Vec.empty (n : Nat) : Vec := ⟨ByteArray.emptyWithCapacity (8 * n)⟩
+
+def Vec.size (v : Vec) : Nat := v.b.size / 8
+
+def Vec.zeros (n : Nat) : Vec := Id.run do
+  let mut b := ByteArray.emptyWithCapacity (8 * n)
+  for _ in [0:8 * n] do b := b.push 0
+  return ⟨b⟩
+
+/-- `n` words, one per row of a block of 64 vectors of length `n`. -/
+structure Block where
+  data : Vec
+  deriving Inhabited
+
+def Block.zero (n : Nat) : Block := ⟨Vec.zeros n⟩
 
 @[inline] def Block.get (b : Block) (k : Nat) : UInt64 := b.data.get k
 
@@ -184,23 +296,23 @@ structure Sparse where
   colIdxB : ByteArray
   rowIdxB : ByteArray
 
-/-- Append `x < 2^24` in three bytes (little endian). -/
-def push3 (b : ByteArray) (x : Nat) : ByteArray :=
-  ((b.push x.toUInt8).push (x >>> 8).toUInt8).push (x >>> 16).toUInt8
+/-- Append `x < 2^32` in four bytes (little endian). -/
+def push4 (b : ByteArray) (x : Nat) : ByteArray :=
+  (((b.push x.toUInt8).push (x >>> 8).toUInt8).push (x >>> 16).toUInt8).push (x >>> 24).toUInt8
 
 def Sparse.mk' (nrows : Nat) (cols : Array (Array Nat)) (packAt : Nat := 67108864) : Sparse :=
   Id.run do
   let nnz := cols.foldl (· + ·.size) 0
-  let packed := nnz ≥ packAt && nrows < 16777216 && cols.size < 16777216
+  let packed := nnz ≥ packAt
   let mut colPtr : Array Nat := Array.mkEmpty (cols.size + 1)
   let mut colIdx : Array UInt32 := #[]
-  let mut colIdxB : ByteArray := ByteArray.emptyWithCapacity (if packed then 3 * nnz else 0)
+  let mut colIdxB : ByteArray := ByteArray.emptyWithCapacity (if packed then 4 * nnz else 0)
   let mut count : Array Nat := Array.replicate nrows 0
   let mut k := 0
   colPtr := colPtr.push 0
   for c in cols do
     for r in c do
-      if packed then colIdxB := push3 colIdxB r else colIdx := colIdx.push r.toUInt32
+      if packed then colIdxB := push4 colIdxB r else colIdx := colIdx.push r.toUInt32
       count := count.set! r (count[r]! + 1)
     k := k + c.size
     colPtr := colPtr.push k
@@ -214,36 +326,70 @@ def Sparse.mk' (nrows : Nat) (cols : Array (Array Nat)) (packAt : Nat := 6710886
       let pos := fill[r]!
       rowEnt := rowEnt.set! pos c.toUInt32
       fill := fill.set! r (pos + 1)
-  let mut rowIdxB : ByteArray := ByteArray.emptyWithCapacity (if packed then 3 * nnz else 0)
+  let mut rowIdxB : ByteArray := ByteArray.emptyWithCapacity (if packed then 4 * nnz else 0)
   if packed then
-    for c in rowEnt do rowIdxB := push3 rowIdxB c.toNat
+    for c in rowEnt do rowIdxB := push4 rowIdxB c.toNat
   return { nrows := nrows, ncols := cols.size, colPtr, colIdx,
            rowPtr, rowIdx := if packed then #[] else rowEnt, packed, colIdxB, rowIdxB }
 
 /-- `⊕ x[idx[k]]` for `k ∈ [lo, hi)`. -/
-def gather (x : Words) (idx : Array UInt32) (lo hi : Nat) (acc : UInt64) : UInt64 :=
+def gather (x : Vec) (idx : Array UInt32) (lo hi : Nat) (acc : UInt64) : UInt64 :=
   if h : lo < hi ∧ lo < idx.size then
     gather x idx (lo + 1) hi (acc ^^^ x.get idx[lo].toNat)
   else acc
 termination_by hi - lo
 
-/-- `gather` on indices of three bytes (machine-word decoding: `Nat` shifts left
-are run-time calls). -/
-def gather3 (x : Words) (idx : ByteArray) (lo hi : Nat) (acc : UInt64) : UInt64 :=
-  if h : lo < hi ∧ 3 * lo + 2 < idx.size then
-    let i := (idx[3 * lo].toUInt64 ||| (idx[3 * lo + 1].toUInt64 <<< 8) |||
-      (idx[3 * lo + 2].toUInt64 <<< 16)).toNat
-    gather3 x idx (lo + 1) hi (acc ^^^ x.get i)
+/-- `acc ⊕ x[idx[k]] ⊕ …` over `cnt` entries from `k`, for `x` of `n` words:
+machine-word indices throughout (the bounds are carried by the invariant `hk`). -/
+def gatherU (x : ByteArray) (n : USize) (hn : n.toNat * 8 ≤ x.size) (hs : n.toNat * 8 < USize.size)
+    (idx : Array UInt32) (k cnt : USize) (hk : k.toNat + cnt.toNat ≤ idx.size) (acc : UInt64) :
+    UInt64 :=
+  if hc : cnt = 0 then acc
+  else
+    have hcnt : cnt.toNat ≠ 0 := fun h0 => hc (USize.toNat_inj.mp (by simpa using h0))
+    let i := idx.uget k (by omega)
+    let j := i.toUSize
+    let acc := if h : j < n then
+        have hjn : j.toNat < n.toNat := USize.lt_iff_toNat_lt.mp h
+        acc ^^^ bget64U x (j * 8) (by rw [mul8_toNat j (by omega)]; omega)
+      else acc
+    gatherU x n hn hs idx (k + 1) (cnt - 1)
+      (by have := usize_succ_le k; rw [usize_pred_eq cnt hc]; omega) acc
+termination_by cnt.toNat
+decreasing_by rw [usize_pred_eq cnt hc]; omega
+
+/-- `gather` on indices of four bytes (little endian; the four byte loads merge). -/
+def gather4 (x : Vec) (idx : ByteArray) (lo hi : Nat) (acc : UInt64) : UInt64 :=
+  if h : lo < hi ∧ 4 * lo + 3 < idx.size then
+    let i := (idx[4 * lo].toUInt32 ||| (idx[4 * lo + 1].toUInt32 <<< 8) |||
+      (idx[4 * lo + 2].toUInt32 <<< 16) ||| (idx[4 * lo + 3].toUInt32 <<< 24)).toNat
+    gather4 x idx (lo + 1) hi (acc ^^^ x.get i)
   else acc
 termination_by hi - lo
 
 /-- Rows `[lo, hi)` of a compressed product (`idxB` if `packed`). -/
 def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (packed : Bool)
-    (idxB : ByteArray) (lo hi : Nat) : Words := Id.run do
-  let mut out : Words := ⟨Array.mkEmpty (2 * (hi - lo))⟩
-  for r in [lo:hi] do
-    out := out.push (if packed then gather3 x.data idxB ptr[r]! ptr[r + 1]! 0
-      else gather x.data idx ptr[r]! ptr[r + 1]! 0)
+    (idxB : ByteArray) (lo hi : Nat) : Vec := Id.run do
+  let mut out : Vec := Vec.empty (hi - lo)
+  let xb := x.data.b
+  let nU := (xb.size / 8).toUSize
+  if hs : xb.size < USize.size then
+    have hn : nU.toNat * 8 ≤ xb.size := by
+      have h1 : nU.toNat ≤ xb.size / 8 := nat_toUSize_le (xb.size / 8)
+      have h2 : xb.size / 8 * 8 ≤ xb.size := Nat.div_mul_le_self _ _
+      omega
+    for r in [lo:hi] do
+      let a := ptr[r]!
+      let b := ptr[r + 1]!
+      out := out.push (if packed then gather4 x.data idxB a b 0
+        else if h : a ≤ b ∧ b ≤ idx.size then
+          gatherU xb nU hn (by omega) idx a.toUSize (b - a).toUSize
+            (by have := nat_toUSize_le a; have := nat_toUSize_le (b - a); omega) 0
+        else gather x.data idx a b 0)
+  else
+    for r in [lo:hi] do
+      out := out.push (if packed then gather4 x.data idxB ptr[r]! ptr[r + 1]! 0
+        else gather x.data idx ptr[r]! ptr[r + 1]! 0)
   return out
 
 /-- The first `r ∈ [lo, hi]` with `ptr[r] ≥ target` (binary search; `ptr` nondecreasing). -/
@@ -268,8 +414,8 @@ def mulCompressed (x : Block) (ptr : Array Nat) (idx : Array UInt32) (packed : B
     [count]
   let tasks := (bounds.zip bounds.tail).map fun (lo, hi) =>
     Task.spawn fun _ => gatherRange x ptr idx packed idxB lo hi
-  let mut data : Array UInt32 := Array.mkEmpty (2 * count)
-  for task in tasks do data := data ++ task.get.d
+  let mut data : ByteArray := ByteArray.emptyWithCapacity (8 * count)
+  for task in tasks do data := data ++ task.get.b
   return ⟨⟨data⟩⟩
 
 /-- `B x` for a block over the columns (gathering along each row). -/
@@ -373,25 +519,20 @@ def splitmix (s : UInt64) : UInt64 :=
 the bits non-linear over GF(2); a linear generator such as xorshift yields
 blocks whose 64 bit-columns are dependent). -/
 def randomBlock (n seed : Nat) : Block := Id.run do
-  let mut a : Words := ⟨Array.mkEmpty (2 * n)⟩
+  let mut a : Vec := Vec.empty n
   for k in [0:n] do
     a := a.push (splitmix ((seed * n + k + 1).toUInt64 * 0x9E3779B97F4A7C15))
   return ⟨a⟩
 
-def Block.xor (a b : Block) : Block :=
-  ⟨⟨(Array.range a.data.d.size).map fun i => a.data.d[i]! ^^^ b.data.d[i]!⟩⟩
+def Block.xor (a b : Block) : Block := Id.run do
+  let mut out : Vec := Vec.empty a.size
+  for k in [0:a.size] do out := out.push (a.get k ^^^ b.get k)
+  return ⟨out⟩
 
 def Block.andMask (a : Block) (m : UInt64) : Block := Id.run do
-  let lo := m.toUInt32
-  let hi := (m >>> 32).toUInt32
-  let mut d := a.data.d
-  for k in [0:a.size] do
-    -- read both halves before writing: reading the old array after a `set!`
-    -- would keep it alive and force a copy of the whole array per element
-    let l := d[2 * k]! &&& lo
-    let h := d[2 * k + 1]! &&& hi
-    d := (d.set! (2 * k) l).set! (2 * k + 1) h
-  return ⟨⟨d⟩⟩
+  let mut out : Vec := Vec.empty a.size
+  for k in [0:a.size] do out := out.push (a.get k &&& m)
+  return ⟨out⟩
 
 /-- The recurrence state after step `i`. -/
 structure LState where
@@ -407,16 +548,16 @@ structure LState where
   mask1 : UInt64
 
 /-- Rows `[lo, hi)` of `(A V ∧ mask) ⊕ V D ⊕ V₁ E ⊕ V₂ F` (tables of `D, E, F`). -/
-def nextRange (v v1 v2 av : Block) (mask : UInt64) (tD tE tF : Words) (lo hi : Nat) : Words := Id.run do
-  let mut out : Words := ⟨Array.mkEmpty (2 * (hi - lo))⟩
+def nextRange (v v1 v2 av : Block) (mask : UInt64) (tD tE tF : Words) (lo hi : Nat) : Vec := Id.run do
+  let mut out : Vec := Vec.empty (hi - lo)
   for k in [lo:hi] do
     out := out.push ((av.get k &&& mask) ^^^ applyTables tD (v.get k) ^^^
       applyTables tE (v1.get k) ^^^ applyTables tF (v2.get k))
   return out
 
 /-- Rows `[lo, hi)` of `X ⊕ V W` (table of `W`). -/
-def xRange (x v : Block) (tW : Words) (lo hi : Nat) : Words := Id.run do
-  let mut out : Words := ⟨Array.mkEmpty (2 * (hi - lo))⟩
+def xRange (x v : Block) (tW : Words) (lo hi : Nat) : Vec := Id.run do
+  let mut out : Vec := Vec.empty (hi - lo)
   for k in [lo:hi] do
     out := out.push (x.get k ^^^ applyTables tW (v.get k))
   return out
@@ -460,7 +601,7 @@ def step (B : Sparse) (threads : Nat) (v0 : Block) (st : LState) : Except Bool L
       (nextRange st.v st.v1 st.v2 av mask0 tD tE tF lo hi, xRange st.x st.v tW lo hi)
     let (nd, xd) := upd.foldl (fun (a, b) tk =>
       let (c, e) := tk.get
-      (a ++ c.d, b ++ e.d)) ((Array.mkEmpty (2 * n) : Array UInt32), (Array.mkEmpty (2 * n) : Array UInt32))
+      (a ++ c.b, b ++ e.b)) (ByteArray.emptyWithCapacity (8 * n), ByteArray.emptyWithCapacity (8 * n))
     .ok ⟨⟨⟨nd⟩⟩, st.v, st.v1, ⟨⟨xd⟩⟩, winv, st.winv1, vtav, vta2v, s, mask0⟩
 
 /-- Iterate until `VᵀAV = 0` (at most `fuel` steps). -/
