@@ -257,12 +257,15 @@ def runCurve (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
   | 12 => curve12 n fast σ
   | _ => ECMM.runCurve n fast.plan σ
 
+set_option compiler.extract_closed false in
 /-- The stage data of the standard levels (`B2 = 100 B1`), built on first use and
-shared by every later call (the prime sieve up to `B2` dominates the cost). -/
+shared by every later call (the prime sieve up to `B2` dominates the cost; no
+`extract_closed`, which would build them at program start). -/
 def standardPlans : Array (Nat × Thunk Fast) :=
   #[2000, 11000, 50000, 250000, 1000000, 3000000].map fun b1 =>
     (b1, Thunk.mk fun _ => mkFast b1 (100 * b1))
 
+set_option compiler.extract_closed false in
 def planFor (b1 b2 : Nat) : Fast :=
   if b2 == 100 * b1 then
     match standardPlans.find? (·.1 == b1) with

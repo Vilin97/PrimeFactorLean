@@ -84,7 +84,10 @@ def mkPlan (b1 b2 : Nat) : Plan :=
   let start := (primes.findIdx? (· > b1)).getD primes.size
   { b1, b2, bits := ECMF.natBits (powers.foldl (· * ·) 1), primes, start }
 
-/-- The plan of the automatic pipeline (`B1 = 20000`), built on first use. -/
+set_option compiler.extract_closed false in
+/-- The plan of the automatic pipeline (`B1 = 20000`), built on first use (without
+`extract_closed` the compiler hoists the closed body out of the thunk and builds
+it at program start: 13 ms of every run). -/
 def plan20000 : Thunk Plan := Thunk.mk fun _ => mkPlan 20000 2000000
 
 def runWidth (n : Nat) (plan : Plan) : Option (Option (Nat × Nat)) :=
@@ -103,6 +106,7 @@ def runWidth (n : Nat) (plan : Plan) : Option (Option (Nat × Nat)) :=
   | 12 => some (run (α := N12) (Mod12.ofNat n) plan.bits plan.primes plan.start)
   | _ => none
 
+set_option compiler.extract_closed false in
 /-- Pollard `p - 1` with bounds `B1 = b1`, `B2 = 100 b1`: the fast path, and the
 `Nat` implementation (with backtracking) when a gcd is `n` or `n` is too wide. -/
 def split (n : Nat) (b1 : Nat) : Option (ProperFactor n) :=

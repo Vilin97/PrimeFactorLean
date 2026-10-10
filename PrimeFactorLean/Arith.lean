@@ -256,21 +256,40 @@ theorem perfectPower_proper {n r k : Nat} (h : perfectPower n = some (r, k)) :
 
 /-! ## Small-prime enumeration and probable-prime screening -/
 
-/-- Sieve of Eratosthenes: the primes `≤ n` (search data only, never trusted). -/
-def primesUpTo (n : Nat) : Array Nat := Id.run do
-  if n < 2 then return #[]
-  let mut composite : ByteArray := ByteArray.emptyWithCapacity (n + 1)
-  for _ in [0:n + 1] do
-    composite := composite.push 0
-  let mut primes : Array Nat := #[]
-  for i in [2:n + 1] do
-    if composite.get! i == 0 then
-      primes := primes.push i
-      let mut j := i * i
-      while j ≤ n do
-        composite := composite.set! j 1
-        j := j + i
-  return primes
+/-- `k` zero bytes appended to `b`. -/
+def pushZeros (b : ByteArray) : Nat → ByteArray
+  | 0 => b
+  | k + 1 => pushZeros (b.push 0) k
+
+/-- Mark the odd multiples `j, j + 2i, …` (odd-only indices: `j ↦ j / 2`) up to `n`. -/
+def markOdd (c : ByteArray) (j step n : Nat) : Nat → ByteArray
+  | 0 => c
+  | fuel + 1 => if j ≤ n then markOdd (c.set! (j / 2) 1) (j + step) step n fuel else c
+
+/-- Sieve the odd numbers `i, i + 2, …` with `i² ≤ n`. -/
+def sieveOdds (c : ByteArray) (i n : Nat) : Nat → ByteArray
+  | 0 => c
+  | fuel + 1 =>
+    if i * i ≤ n then
+      let c := if c.get! (i / 2) == 0 then markOdd c (i * i) (2 * i) n (n / (2 * i) + 1) else c
+      sieveOdds c (i + 2) n fuel
+    else c
+
+/-- The odd primes `i, i + 2, … ≤ n` not marked in `c`, appended to `acc`. -/
+def collectOdds (c : ByteArray) (i n : Nat) (acc : Array Nat) : Nat → Array Nat
+  | 0 => acc
+  | fuel + 1 =>
+    if i ≤ n then collectOdds c (i + 2) n (if c.get! (i / 2) == 0 then acc.push i else acc) fuel
+    else acc
+
+/-- Sieve of Eratosthenes: the primes `≤ n` (search data only, never trusted),
+on the odd numbers with tail-recursive loops (a `while` loop with several
+mutable variables allocates its state every step). -/
+def primesUpTo (n : Nat) : Array Nat :=
+  if n < 2 then #[] else
+  let c := pushZeros (ByteArray.emptyWithCapacity (n / 2 + 1)) (n / 2 + 1)
+  let c := sieveOdds c 3 n (iroot n 2 / 2 + 2)
+  collectOdds c 3 n #[2] (n / 2 + 1)
 
 /-- One strong-probable-prime round to base `a` for odd `n > 2`. -/
 def strongProbablePrime (n a : Nat) : Bool := Id.run do

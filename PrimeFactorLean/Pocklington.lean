@@ -194,9 +194,15 @@ def checked (n : Nat) (steps : List Step) : Option Certificate :=
   let c : Certificate := ⟨n, steps⟩
   if c.check then some c else none
 
+set_option compiler.extract_closed false in
+/-- The primes below `2^16` for the partial factorizations, built on first use
+(without `extract_closed` the compiler would build them at program start). -/
+def smallPrimes16 : Thunk (Array Nat) := Thunk.mk fun _ => primesUpTo 65536
+
+set_option compiler.extract_closed false in
 /-- Generate a certificate and check it before returning. -/
 def generate (split : Nat → Option Nat) (n : Nat) (fuel : Nat := 64) : Option Certificate :=
-  (if n < smallBound then some [] else generateSteps split (primesUpTo 65536) fuel n).bind
+  (if n < smallBound then some [] else generateSteps split smallPrimes16.get fuel n).bind
     (checked n)
 
 /-- The primality checker used by the verified factorization engine: exact
