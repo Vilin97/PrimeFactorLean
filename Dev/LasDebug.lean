@@ -221,19 +221,26 @@ def lasFile (path : String) (q0 count : Nat) (out : String) (kvs : List String) 
   let mut sc := Las.Scratch.new las
   let mut total := 0
   let t0 ← IO.monoNanosNow
-  for (q, ρ) in qs do
-    let (rels, sc') := if v == 5 then Las.processQ5 las q ρ sc else
-      if v == 6 then Las.processQ6 las q ρ sc else
-      if v == 7 then Las.processQ7 las q ρ sc else
-      if v == 8 then Las.processQ8 las (get "slack" 2) q ρ sc else
-      if v == 9 then Las.processQ9 las (get "slack" 3) q ρ sc else
-      if v == 10 then Las.processQ10 las (get "slack" 3) q ρ sc else
-      if v == 11 then Las.processQ11 las q ρ sc else
-      if v == 12 then Las.processQ12 las q ρ sc else Las.processQWith las q ρ sc
-    sc := sc'
-    total := total + rels.size
+  if v == 14 then
+    let (rels, _) := Las.processQs14 las (get "slack" 2) qs sc
     for r in rels do
-      h.putStrLn s!"{r.a},{r.b} {q} {ρ}"
+      h.putStrLn s!"{r.a},{r.b}"
+    total := rels.size
+  else
+    for (q, ρ) in qs do
+      let (rels, sc') := if v == 5 then Las.processQ5 las q ρ sc else
+        if v == 6 then Las.processQ6 las q ρ sc else
+        if v == 7 then Las.processQ7 las q ρ sc else
+        if v == 8 then Las.processQ8 las (get "slack" 2) q ρ sc else
+        if v == 9 then Las.processQ9 las (get "slack" 3) q ρ sc else
+        if v == 10 then Las.processQ10 las (get "slack" 3) q ρ sc else
+        if v == 11 then Las.processQ11 las q ρ sc else
+        if v == 12 then Las.processQ12 las q ρ sc else
+        if v == 13 then Las.processQ13 las (get "slack" 2) q ρ sc else Las.processQWith las q ρ sc
+      sc := sc'
+      total := total + rels.size
+      for r in rels do
+        h.putStrLn s!"{r.a},{r.b} {q} {ρ}"
   let t1 ← IO.monoNanosNow
   IO.println s!"{qs.size} special-q (last q {qs.back?.map (·.1)}): {total} relations in {(t1 - t0) / 1000000} ms ({(t1 - t0) / 1000 / max 1 qs.size} us per q)"
 
@@ -383,6 +390,7 @@ def lasParFile (path : String) (q0 per : Nat) (ts : List Nat) (kvs : List String
           if v == 9 then Las.processQ9 las slack q ρ sc else
           if v == 10 then Las.processQ10 las slack q ρ sc else
           if v == 11 then Las.processQ11 las q ρ sc else
+          if v == 13 then Las.processQ13 las slack q ρ sc else
       if v == 12 then Las.processQ12 las q ρ sc else Las.processQWith las q ρ sc
         sc := sc'
         c := c + rels.size

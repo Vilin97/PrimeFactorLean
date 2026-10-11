@@ -24,7 +24,7 @@ private def check (algorithm : Algorithm) (c : Tests.DatasetCase) (cfg : Config)
     return false
   return true
 
-def main : IO UInt32 := do
+private def runTests : IO UInt32 := do
   let cfg : Config := { threads := 4 }
   let mut checked := 0
   for algorithm in Algorithm.all do
@@ -76,3 +76,11 @@ def main : IO UInt32 := do
   if !primeChecks then return 1
   IO.println s!"PASS: {checked} dataset factorizations, signed cases, raw splitters, failure bounds, and certificates."
   return 0
+
+/-- Exits explicitly, as the CLI does (`Main.lean`): leftover tasks of parallel
+searches must not keep the process alive after the result. -/
+def main : IO UInt32 := do
+  let code ← runTests
+  (← IO.getStdout).flush
+  (← IO.getStderr).flush
+  IO.Process.exit code.toUInt8

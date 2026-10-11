@@ -62,6 +62,11 @@ below 30, which are not sieved). -/
   lasFudge : Nat := 8
   /-- Target average row weight of the merged matrix. -/
   mergeDensity : Nat := 100
+  /-- Excess (rows less columns) kept by clique removal before merging (`0`: no
+  clique removal). -/
+  purgeExcess : Nat := 200
+  /-- Variant of the Franke–Kleinjung siever (`Las.LasParams.variant`). -/
+  lasVariant : Nat := 12
   /-- Kleinjung polynomial search: leading coefficients `psAdStep · [1, psAdCount]`,
   moduli from two primes of `[psQlo, psQhi)`, rotations up to `psRotV`. -/
   psAdStep : Nat := 60
@@ -102,7 +107,13 @@ def paramTable : List (Nat × Params) :=
    -- From 60 digits: the Franke–Kleinjung siever (`NFS.Las`) with CADO-NFS's
    -- bounds (factor bases, large-prime bits `lpb`, cofactor bits `mfb`, `log₂ I`,
    -- first special-q) and CADO-NFS's collision polynomial selection parameters
-   -- (`P`, special-q count, leading coefficients; twice its root-optimized pool).
+   -- (`P`, special-q count, leading coefficients; twice its root-optimized pool,
+   -- except at 100 digits, where the selection itself takes seconds).
+   -- From 85 digits, with two large primes on both sides, the siever variant 14
+   -- (thresholds per 64-column segment, the tiny primes counted exactly at the
+   -- survivors, lattice roots of four special-q at once): at 100 digits it finds
+   -- 3225 relations on 42 special-q at q = 180000 (CADO-NFS 3604, variant 12
+   -- 2005); below, one rational large prime gains nothing from it.
    -- From 75 digits a single rational large prime (`mfbR ≤ lpbR + 1`) with a
    -- larger rational factor base: our survivors cost more to process than
    -- CADO-NFS's, and two rational large primes multiply them (76 digits: sieve
@@ -124,16 +135,17 @@ def paramTable : List (Nat × Params) :=
           qPerTask := 2, psP := 10000, psAdMax := 100000 }),
    (85, { degree := 4, ratBound := 393000, algBound := 551000, halfWidth := 262144,
           lasLogI := 11, lpbR := 22, lpbA := 22, mfbR := 44, mfbA := 44, qmin := 146453,
-          qPerTask := 2, psP := 10000, psNq := 256, psAdMax := 50000 }),
+          qPerTask := 2, psP := 10000, psNq := 256, psAdMax := 50000, lasVariant := 14 }),
    (90, { degree := 4, ratBound := 404000, algBound := 811000, halfWidth := 262144,
           lasLogI := 11, lpbR := 23, lpbA := 23, mfbR := 46, mfbA := 46, qmin := 200000,
-          qPerTask := 2, psP := 10000, psNq := 256, psAdMax := 100000 }),
+          qPerTask := 2, psP := 10000, psNq := 256, psAdMax := 100000, lasVariant := 14 }),
    (95, { degree := 4, ratBound := 450000, algBound := 550000, halfWidth := 262144,
           lasLogI := 11, lpbR := 24, lpbA := 25, mfbR := 47, mfbA := 48, qmin := 100000,
-          qPerTask := 2, psP := 11000, psNq := 65536, psIncr := 12, psAdMax := 288 }),
+          qPerTask := 2, psP := 11000, psNq := 65536, psIncr := 12, psAdMax := 288, lasVariant := 14 }),
    (100, { degree := 5, ratBound := 650000, algBound := 800000, halfWidth := 262144,
            lasLogI := 11, lpbR := 25, lpbA := 26, mfbR := 48, mfbA := 51, qmin := 180000,
-           qPerTask := 2, psP := 7000, psNq := 15625, psIncr := 30, psAdMax := 1680 })]
+           qPerTask := 2, psP := 7000, psNq := 15625, psIncr := 30, psAdMax := 1680,
+           psKeep := 24, lasVariant := 14 })]
 
 def chooseParams (digits : Nat) : Params :=
   if digits ≥ 58 then
@@ -305,14 +317,20 @@ def buildFactorBase (sel : Selection) (params : Params) (lpA : Nat) : FactorBase
   let mut algLogs := ByteArray.emptyWithCapacity primes.size
   let cs := sel.coeffs
   let d := sel.degree
-  for p in primes do
+  -- the roots of `f` modulo each prime (most of the cost), in parallel chunks
+  let chunk := 2048
+  let rootTasks := (List.range ((primes.size + chunk - 1) / chunk)).map fun c =>
+    Task.spawn fun _ => (primes.extract (c * chunk) ((c + 1) * chunk)).map fun p =>
+      if p ≤ params.algBound then ModP.roots p (ModP.ofInts p cs.toList) else #[]
+  let algRootLists := rootTasks.foldl (fun acc t => acc ++ t.get) #[]
+  for h : i in [0:primes.size] do
+    let p := primes[i]
     if p ≤ params.ratBound then
       ratPrimes := ratPrimes.push p
       ratRoots := ratRoots.push (sel.ratRoot p)
       ratLogs := ratLogs.push (logByte p)
     if p ≤ params.algBound then
-      let f := ModP.ofInts p cs.toList
-      for r in ModP.roots p f do
+      for r in algRootLists[i]! do
         algPrimes := algPrimes.push p
         algRoots := algRoots.push r
         algLogs := algLogs.push (logByte p)

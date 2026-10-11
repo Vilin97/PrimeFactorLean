@@ -65,3 +65,51 @@ def ecmBench (n b1 curves threads : Nat) : IO Unit := do
   let r3 ← IO.lazyPure fun _ => (ECMF.split n { b1 := b1, curves := curves * 4, threads := threads }).map (·.val)
   let t4 ← IO.monoNanosNow
   IO.println s!"parallel split {curves * 4} curves: {(t4 - t3).toFloat / 1.0e6} ms -> {r3}"
+
+/-- `k` dependent Montgomery products `a ← a b`. -/
+def mulChain (m : Mod10) (b : N10) : N10 → Nat → N10
+  | a, 0 => a
+  | a, k + 1 => mulChain m b (N10.mul m a b) k
+
+/-- Two independent chains in one loop. -/
+def mulChain2 (m : Mod10) (b : N10) : N10 → N10 → Nat → N10 × N10
+  | a, c, 0 => (a, c)
+  | a, c, k + 1 => mulChain2 m b (N10.mul m a b) (N10.mul m c b) k
+
+/-- Timings (ns per product) of one and two interleaved product chains, and of
+the stage-1 ladder per bit, at 80 digits on one thread. -/
+def mulBench (k : Nat) : IO Unit := do
+  let n := 10 ^ 79 + 5923
+  let m := Mod10.ofNat n
+  let a : N10 := Arith.toMont m 1234567891011
+  let b : N10 := Arith.toMont m 98765432123456789
+  let t0 ← IO.monoNanosNow
+  let r1 ← IO.lazyPure fun _ => mulChain m b a k
+  let t1 ← IO.monoNanosNow
+  let r2 ← IO.lazyPure fun _ => mulChain2 m b a b k
+  let t2 ← IO.monoNanosNow
+  IO.println s!"one chain: {(t1 - t0).toFloat / k.toFloat} ns/product ({r1.l0}); two chains: {(t2 - t1).toFloat / (2 * k).toFloat} ns/product ({r2.1.l0 + r2.2.l0})"
+  let bits := ECMF.natBits (3 ^ (k / 16))
+  let a24 : N10 := Arith.toMont m 12345
+  let x0 : N10 := Arith.toMont m 7
+  let one : N10 := Arith.toMont m 1
+  let P : ECMF.Pt N10 := ⟨x0, one⟩
+  let t3 ← IO.monoNanosNow
+  let Q ← IO.lazyPure fun _ => ECMF.ladderLoop m a24 x0 bits P (ECMF.dbl m a24 P) (bits.size - 1)
+  let t4 ← IO.monoNanosNow
+  IO.println s!"ladder: {bits.size} bits, {(t4 - t3).toFloat / bits.size.toFloat} ns/bit ({Q.x.l0})"
+
+/-- Fast ECM, one thread: milliseconds per curve with stage 2 (`B2 = 100 B1`)
+and with stage 1 only. -/
+def ecmCurveBench (n b1 curves : Nat) : IO Unit := do
+  let full := ECMF.mkFast b1 (100 * b1)
+  let one := ECMF.mkFast b1 b1
+  let _ ← IO.lazyPure fun _ => full.plan.isPrime.size + one.bits.size
+  let t0 ← IO.monoNanosNow
+  let r1 ← IO.lazyPure fun _ => (List.range curves).filterMap fun c =>
+    (ECMF.runCurve n full (1000 + c)).map (·.val)
+  let t1 ← IO.monoNanosNow
+  let r2 ← IO.lazyPure fun _ => (List.range curves).filterMap fun c =>
+    (ECMF.runCurve n one (1000 + c)).map (·.val)
+  let t2 ← IO.monoNanosNow
+  IO.println s!"B1={b1}: {(t1 - t0).toFloat / 1.0e6 / curves.toFloat} ms/curve (found {r1.length}), stage 1 only {(t2 - t1).toFloat / 1.0e6 / curves.toFloat} ms/curve (found {r2.length})"

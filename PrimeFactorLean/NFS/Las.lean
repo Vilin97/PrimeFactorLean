@@ -680,6 +680,72 @@ def latticeRoots (side : Side) (ua ub va vb : Int) : Array Nat := Id.run do
         (modW vb p)).toNat
   return out
 
+/-- `(u_a - r u_b) mod p` and `(v_a - r v_b) mod p` (`u_b`, `v_b` for the
+projective root `r = p`). -/
+@[inline] def latticeAB (p r : UInt64) (ua ub va vb : Int64) : UInt64 × UInt64 :=
+  let pi := p.toInt64
+  if r == p then (smodW ub pi, smodW vb pi)
+  else (smodW (ua - r.toInt64 * ub) pi, smodW (va - r.toInt64 * vb) pi)
+
+/-- The lattice root `-β/α mod p` from `α⁻¹` (`α = 0`: the projective root `p`). -/
+@[inline] def rootOf (p α β inv : UInt64) : Nat :=
+  if α == 0 then p.toNat
+  else
+    let t := β * inv % p
+    if t == 0 then 0 else (p - t).toNat
+
+/-- The lattice roots of the ideals `[k, …)` for four special-`q` bases at once:
+the four inverses modulo each prime come from one extended Euclid and nine
+products (Montgomery's trick) instead of four extended Euclids. -/
+def roots4Go (primes roots : Array Nat)
+    (a0 b0 c0 d0 a1 b1 c1 d1 a2 b2 c2 d2 a3 b3 c3 d3 : Int64) (k : Nat)
+    (o0 o1 o2 o3 : Array Nat) : Array Nat × Array Nat × Array Nat × Array Nat :=
+  if h : k < primes.size ∧ k < roots.size then
+    let p := primes[k].toUInt64
+    let r := roots[k].toUInt64
+    let (x0, y0) := latticeAB p r a0 b0 c0 d0
+    let (x1, y1) := latticeAB p r a1 b1 c1 d1
+    let (x2, y2) := latticeAB p r a2 b2 c2 d2
+    let (x3, y3) := latticeAB p r a3 b3 c3 d3
+    let z0 := if x0 == 0 then 1 else x0
+    let z1 := if x1 == 0 then 1 else x1
+    let z2 := if x2 == 0 then 1 else x2
+    let z3 := if x3 == 0 then 1 else x3
+    let p01 := z0 * z1 % p
+    let p012 := p01 * z2 % p
+    let inv := invMod32 (p012 * z3 % p).toUInt32 p.toUInt32
+    let i3 := inv * p012 % p
+    let j2 := inv * z3 % p
+    let i2 := j2 * p01 % p
+    let j1 := j2 * z2 % p
+    let i1 := j1 * z0 % p
+    let i0 := j1 * z1 % p
+    roots4Go primes roots a0 b0 c0 d0 a1 b1 c1 d1 a2 b2 c2 d2 a3 b3 c3 d3 (k + 1)
+      (o0.push (rootOf p x0 y0 i0)) (o1.push (rootOf p x1 y1 i1)) (o2.push (rootOf p x2 y2 i2))
+      (o3.push (rootOf p x3 y3 i3))
+  else (o0, o1, o2, o3)
+termination_by primes.size - k
+
+/-- `latticeRoots` for up to four bases `(u_a, u_b, v_a, v_b)` at once (`roots4Go`;
+bases beyond `2^31` take the general path). -/
+def latticeRoots4 (side : Side) (bs : Array (Int × Int × Int × Int)) : Array (Array Nat) :=
+  let small := bs.all fun (a, b, c, d) =>
+    a.natAbs < 2 ^ 31 && b.natAbs < 2 ^ 31 && c.natAbs < 2 ^ 31 && d.natAbs < 2 ^ 31
+  if bs.isEmpty || bs.size > 4 || !small then
+    bs.map fun (a, b, c, d) => latticeRoots side a b c d
+  else
+    let g (i : Nat) : Int64 × Int64 × Int64 × Int64 :=
+      let (a, b, c, d) := bs[min i (bs.size - 1)]!
+      (a.toInt64, b.toInt64, c.toInt64, d.toInt64)
+    let (a0, b0, c0, d0) := g 0
+    let (a1, b1, c1, d1) := g 1
+    let (a2, b2, c2, d2) := g 2
+    let (a3, b3, c3, d3) := g 3
+    let n := side.primes.size
+    let (o0, o1, o2, o3) := roots4Go side.primes side.roots a0 b0 c0 d0 a1 b1 c1 d1 a2 b2 c2 d2
+      a3 b3 c3 d3 0 (Array.mkEmpty n) (Array.mkEmpty n) (Array.mkEmpty n) (Array.mkEmpty n)
+    #[o0, o1, o2, o3].extract 0 bs.size
+
 /-- `n` zero bytes. -/
 def zeroBytes (n : Nat) : ByteArray := Id.run do
   let mut b := ByteArray.emptyWithCapacity n
@@ -1494,6 +1560,152 @@ def fillSegments (ctx : LasCtx) (buf : ByteArray) (alg : Bool) (q : Nat) (ua ub 
     b := b'
     bias := bias'
   return (b.set! (ctx.I * ctx.J) 0, bias)
+
+/-- The tiny prime ideals of a side (`p < sieveFrom`, nondegenerate, `2`
+included), which `processQ13` does not sieve (their powers it does):
+`(p, lattice root, log, p⁻¹ mod 2^32 (0 for 2), ⌊(2^32-1)/p⌋)` for `tinyAt2`. -/
+def tinyPrimes (ctx : LasCtx) (side : Side) (R : Array Nat) :
+    Array (Nat × Nat × Nat × UInt32 × UInt32) := Id.run do
+  let mut out := #[]
+  for k in [0:side.largeStart] do
+    let p := side.primes[k]!
+    if p ≥ ctx.params.sieveFrom || R[k]! ≥ p then continue
+    out := out.push (p, R[k]!, (side.logs.get! k).toNat,
+      if p == 2 then 0 else SIQS.inv32 p.toUInt32, (0xFFFFFFFF : UInt32) / p.toUInt32)
+  return out
+
+/-- `tinyAt` for `tinyPrimes` (the prime `2` tested by parity). -/
+def tinyAt2 (tiny : Array (Nat × Nat × Nat × UInt32 × UInt32)) (c j I : UInt64) : Nat := Id.run do
+  let mut acc := 0
+  for (p, R, lg, inv, lim) in tiny do
+    let y := c + I * p.toUInt64 - I / 2 - j * R.toUInt64
+    if (if p == 2 then y &&& 1 == 0 else y.toUInt32 * inv ≤ lim) then acc := acc + lg
+  return acc
+
+/-- `prefilterGap` counting the tiny prime ideals exactly (`tinyPrimes` of each
+side), so that `slack` only covers rounding. -/
+def prefilterGap4 (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (bufR bufA biasR biasA : ByteArray)
+    (tR tA : Array (Nat × Nat × Nat × UInt32 × UInt32)) (slack : Nat) (surv0 : Array Nat) :
+    Array Nat :=
+  let cs := coeffsF ctx
+  let d := cs.size - 1
+  let (uaf, ubf, vaf, vbf) := (intF ua, intF ub, intF va, intF vb)
+  let mF := nf ctx.base.sel.m
+  let y1F := nf ctx.base.sel.y1
+  let qF := nf q
+  let I := ctx.I
+  let segs := I / 64
+  let sl := nf slack
+  let limR := nf ctx.params.mfbR + sl
+  let limA := nf ctx.params.mfbA + sl
+  let gapR0 := nf ctx.params.lpbR + sl
+  let gapR1 := fc 2 * Float.log2 (nf ctx.limR) - sl - fc 1
+  let gapA0 := nf ctx.params.lpbA + sl
+  let gapA1 := fc 2 * Float.log2 (nf ctx.limA) - sl - fc 1
+  surv0.filter fun pos =>
+    let j := pos / I
+    let c := pos % I
+    let iF := nf c - nf (I / 2)
+    let jF := nf j
+    let seg := j * segs + c / 64
+    let estR := normBits false cs d uaf ubf vaf vbf mF y1F qF iF jF -
+      ((bufR.get! pos).toUInt64.toFloat - (biasR.get! seg).toUInt64.toFloat) -
+      nf (tinyAt2 tR c.toUInt64 j.toUInt64 I.toUInt64)
+    if estR > limR || (estR > gapR0 && estR < gapR1) then false
+    else
+      let estA := normBits true cs d uaf ubf vaf vbf mF y1F qF iF jF -
+        ((bufA.get! pos).toUInt64.toFloat - (biasA.get! seg).toUInt64.toFloat) -
+        nf (tinyAt2 tA c.toUInt64 j.toUInt64 I.toUInt64)
+      estA ≤ limA && !(estA > gapA0 && estA < gapA1)
+
+/-- `processQ12` with a threshold per 64-column segment (`fillSegments`: the
+largest norm on the segment, rather than on the whole row, which misses the
+smooth points of rows whose norms vary widely), the prime powers sieved and the
+gap prefilter (`slack` bits): the yield of `processQ8` with the kernels of
+`processQ12`. -/
+def processQ13 (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch :=
+  Id.run do
+  let ⟨b1, b2, bits⟩ := sc
+  let (u, v) := reduceLattice q ρ ctx.skew
+  let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
+  let len := ctx.I * ctx.J
+  let Rr := latticeRoots ctx.rat ua ub va vb
+  let Ra := latticeRoots ctx.alg ua ub va vb
+  let Pr := powerRoots ctx.rat ua ub va vb
+  let Pa := powerRoots ctx.alg ua ub va vb
+  let (fR, biasR) := fillSegments ctx b1 false q ua ub va vb ctx.params.mfbR (rowExtras ctx ctx.rat Rr)
+  let (fA, biasA) := fillSegments ctx b2 true q ua ub va vb ctx.params.mfbA (rowExtras ctx ctx.alg Ra)
+  let (bufR, Rr) := sieveLargeCached ctx ctx.rat Rr
+    (sievePowers ctx ctx.rat Pr (lineSieveSide ctx ctx.rat Rr fR))
+  let (bufA, Ra) := sieveLargeCached ctx ctx.alg Ra
+    (sievePowers ctx ctx.alg Pa (lineSieveSide ctx ctx.alg Ra fA))
+  let surv := prefilterGap4 ctx q ua ub va vb bufR bufA biasR biasA (tinyPrimes ctx ctx.rat Rr)
+    (tinyPrimes ctx ctx.alg Ra) slack
+    (dropSmallGcd ctx (survivors bufR bufA len))
+  if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
+  let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
+  let bits := markBits bits surv true
+  let listsR := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.rat Rr bits #[])
+  let listsA := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.alg Ra bits #[])
+  let bits := markBits bits surv false
+  let mut rels : Array Rel := #[]
+  for k in [0:surv.size] do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+      rels := rels.push rel
+  return (rels, ⟨bufR, lab, bits⟩)
+
+/-- `processQ13` for the basis `u, v` of `q` with the lattice roots `Rr`, `Ra`
+already computed. -/
+def processQ13R (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat)
+    (sc : Scratch) : Array Rel × Scratch := Id.run do
+  let ⟨b1, b2, bits⟩ := sc
+  let len := ctx.I * ctx.J
+  let Pr := powerRoots ctx.rat ua ub va vb
+  let Pa := powerRoots ctx.alg ua ub va vb
+  let (fR, biasR) := fillSegments ctx b1 false q ua ub va vb ctx.params.mfbR (rowExtras ctx ctx.rat Rr)
+  let (fA, biasA) := fillSegments ctx b2 true q ua ub va vb ctx.params.mfbA (rowExtras ctx ctx.alg Ra)
+  let (bufR, Rr) := sieveLargeCached ctx ctx.rat Rr
+    (sievePowers ctx ctx.rat Pr (lineSieveSide ctx ctx.rat Rr fR))
+  let (bufA, Ra) := sieveLargeCached ctx ctx.alg Ra
+    (sievePowers ctx ctx.alg Pa (lineSieveSide ctx ctx.alg Ra fA))
+  let surv := prefilterGap4 ctx q ua ub va vb bufR bufA biasR biasA (tinyPrimes ctx ctx.rat Rr)
+    (tinyPrimes ctx ctx.alg Ra) slack
+    (dropSmallGcd ctx (survivors bufR bufA len))
+  if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
+  let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
+  let bits := markBits bits surv true
+  let listsR := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.rat Rr bits #[])
+  let listsA := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.alg Ra bits #[])
+  let bits := markBits bits surv false
+  let mut rels : Array Rel := #[]
+  for k in [0:surv.size] do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+      rels := rels.push rel
+  return (rels, ⟨bufR, lab, bits⟩)
+
+/-- `processQ13` over a list of special-`q`, four at a time: the lattice roots of
+each group come from `latticeRoots4` (one modular inversion per prime for the
+four). -/
+def processQs14 (ctx : LasCtx) (slack : Nat) (qs : Array (Nat × Nat)) (sc : Scratch) :
+    Array Rel × Scratch := Id.run do
+  let mut out : Array Rel := #[]
+  let mut sc := sc
+  let mut i := 0
+  while i < qs.size do
+    let grp := qs.extract i (i + 4)
+    let bases := grp.map fun (q, ρ) =>
+      let (u, v) := reduceLattice q ρ ctx.skew
+      (u.1, u.2, v.1, v.2)
+    let Rrs := latticeRoots4 ctx.rat bases
+    let Ras := latticeRoots4 ctx.alg bases
+    for j in [0:grp.size] do
+      let (q, ρ) := grp[j]!
+      let (ua, ub, va, vb) := bases[j]!
+      let (rels, sc') := processQ13R ctx slack q ρ ua ub va vb Rrs[j]! Ras[j]! sc
+      sc := sc'
+      out := out ++ rels
+    i := i + 4
+  return (out, sc)
 
 /-- The tiny primes (below `sieveFrom`) with their largest powers `≤ 2^20`. -/
 def tinyPowers (bound : Nat) : Array (Nat × Nat) :=

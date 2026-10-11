@@ -61,14 +61,14 @@ everything downstream, is proved.
 
   `SquareCongruence.factor_isSome` proves the final gcd step succeeds whenever
   `X ≢ ±Y`.
-- **GNFS.** `nfs_square` proves `φ(β)² ≡ (φ(f')·c_d^k·Y₀)² (mod n)`. It relies
-  on three exactly checked facts:
-  - `f(c_d·m) ≡ 0 (mod n)`;
-  - the algebraic square root satisfies `β·β = γ` in `ℤ[ω]`;
-  - the rational product is `∏(a − b m) = Y₀²`.
-
-  It also uses kernel-checked multiplicativity of evaluation modulo `n`
-  (`eval_mulZ`, `eval_prodTree`).
+- **GNFS.** A congruence of squares is accepted only after checking
+  `X² ≡ Y² (mod n)` for `X = φ(β)·Y₁^k` and `Y = φ(f')·c_d^k·Z`, all modulo `n`
+  (`SquareCongruence.ofCheck`), so no exact square in `ℤ[ω]` is formed.
+  `nfs_square_lin` proves the check complete: it holds whenever
+  `f(c_d·x₀) ≡ 0 (mod n)`, the algebraic square root satisfies `β·β = γ` in
+  `ℤ[ω]`, and the rational product is `∏(Y₁a − m·b) = Z²`. That proof uses
+  kernel-checked multiplicativity of evaluation modulo `n` (`eval_mulZ`,
+  `eval_prodTree`).
 - **Prime leaves.** Pocklington's criterion is proved from scratch
   (`Pocklington.pocklington`). Certificates come from untrusted code and are
   accepted only by the proved checker.
@@ -318,6 +318,10 @@ negative inputs carry a separate sign. `1` gives an empty list; `0` gives
 `null`. `--split` runs only the named algorithm's search; a `null` divisor is a
 bounded search failure, not a claim of primality. Reports in `results/` are
 gzip-compressed JSON (`gzip -dc results/…json.gz`).
+
+`--threads T` bounds the parallelism: for inputs of 45 digits and more the CLI
+runs itself once more with `LEAN_NUM_THREADS=T`, so that at most `T` worker
+threads of the Lean runtime compute at once, even in nested parallel phases.
 
 ## Repository layout
 

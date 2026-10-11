@@ -159,6 +159,79 @@ def merge (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : Nat)
       outHist := outHist.push hist[i]!
   return (outRows, outHist, next)
 
+/-- The root of `x` in a union-find forest (`parent`; union by size keeps the
+trees shallow, so no path compression is needed). -/
+def findRoot (parent : Array Nat) (x : Nat) : Nat → Nat
+  | 0 => x
+  | fuel + 1 => let p := parent[x]!; if p == x then x else findRoot parent p fuel
+
+/-- Clique removal (Cavallar's filtering, CADO-NFS `purge`): while the excess
+(rows less active columns) of the rows `kept` exceeds `target`, delete whole
+*cliques*, the connected components of the graph whose edges are the columns of
+weight two (columns below `dense` are always active and never join rows),
+largest first, then remove the singleton columns this creates. Deleting a
+clique of `k` rows joined by `k - 1` columns of weight two lowers the excess by
+one, so the largest cliques shrink the matrix most per unit of excess. Returns
+the surviving rows (indices into `rows`). -/
+def purge (numCols dense : Nat) (rows : Array (Array Nat)) (kept : Array Nat) (target : Nat) :
+    Array Nat := Id.run do
+  let mut kept := kept
+  for _ in [0:12] do
+    let mut count : Array Nat := Array.replicate numCols 0
+    for i in kept do
+      for c in rows[i]! do
+        if c < numCols then count := count.set! c (count[c]! + 1)
+    let mut active := 0
+    for c in [0:numCols] do
+      if count[c]! > 0 || c < dense then active := active + 1
+    if kept.size ≤ active + target then return kept
+    -- seven eighths of the excess per pass: a clique with cycles, or the
+    -- singleton removal after it, may cost more than one unit of excess
+    let excess := max 1 ((kept.size - active - target) * 7 / 8)
+    -- union by size over positions in `kept`, joined by the columns of weight two
+    let K := kept.size
+    let mut parent : Array Nat := Array.range K
+    let mut size : Array Nat := Array.replicate K 1
+    let mut first : Array Nat := Array.replicate numCols K
+    for k in [0:K] do
+      for c in rows[kept[k]!]! do
+        if c ≥ dense && c < numCols && count[c]! == 2 then
+          let f := first[c]!
+          if f == K then first := first.set! c k
+          else
+            let rf := findRoot parent f 64
+            let rk := findRoot parent k 64
+            if rf != rk then
+              if size[rf]! ≥ size[rk]! then
+                parent := parent.set! rk rf
+                size := size.set! rf (size[rf]! + size[rk]!)
+              else
+                parent := parent.set! rf rk
+                size := size.set! rk (size[rk]! + size[rf]!)
+    -- the roots by clique size (buckets), largest first, `excess` of them
+    let mut maxSize := 0
+    for k in [0:K] do
+      if parent[k]! == k && size[k]! > maxSize then maxSize := size[k]!
+    let mut bySize : Array (Array Nat) := Array.replicate (maxSize + 1) #[]
+    for k in [0:K] do
+      if parent[k]! == k then bySize := bySize.modify size[k]! (·.push k)
+    let mut doomed : ByteArray := ByteArray.mk (Array.replicate K 0)
+    let mut left := excess
+    let mut sz := maxSize
+    while left > 0 && sz > 0 do
+      for r in bySize[sz]! do
+        if left > 0 then
+          doomed := doomed.set! r 1
+          left := left - 1
+      sz := sz - 1
+    let mut rest : Array Nat := #[]
+    for k in [0:K] do
+      if doomed.get! (findRoot parent k 64) == 0 then rest := rest.push kept[k]!
+    -- singleton removal on what is left
+    let alive := GF2.removeSingletons numCols (rest.map fun i => rows[i]!)
+    kept := alive.map fun j => rest[j]!
+  return kept
+
 /-- Map one dependency among merged rows back to a set of original rows: the
 rows occurring an odd number of times in the histories (`total` original rows). -/
 def unmergeOne (total : Nat) (hist : Array (Array Nat)) (dep : Array Nat) : Array Nat := Id.run do

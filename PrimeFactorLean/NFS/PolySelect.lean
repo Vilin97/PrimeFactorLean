@@ -410,14 +410,20 @@ def specialQList (sq : Array (Nat × Array Nat)) (k nq : Nat) : Array (Nat × Ar
   let mut idx : Array Nat := (Array.range k)
   let mut total := 0
   for _ in [0:100000] do
-    -- all root combinations for this subset
-    let mut combos : Array (Nat × Nat) := #[(1, 0)]   -- (Q², r mod Q²) partial products
+    -- all root combinations for this subset, combined modulo `Q²` one prime at a
+    -- time: every partial combination has the same modulus, so one inverse per
+    -- prime serves them all (`crt2` would invert once per combination)
+    let mut rsQ : Array Nat := #[0]
+    let mut QQ := 1
     for i in idx do
       let (q, rs) := sq[i]!
       let qq := q * q
-      combos := combos.foldl (fun acc (QQ, r) => acc ++ rs.map fun rq => (QQ * qq, crt2 r QQ rq qq)) #[]
+      let inv := (invModW (QQ % qq).toUInt64 qq.toUInt64).toNat
+      rsQ := rsQ.foldl (fun acc r => rs.foldl (fun acc rq =>
+        acc.push (r + QQ * (((rq + qq - r % qq) % qq) * inv % qq))) acc)
+        (Array.mkEmpty (rsQ.size * rs.size))
+      QQ := QQ * qq
     let Q := idx.foldl (fun acc i => acc * sq[i]!.1) 1
-    let rsQ := combos.map (·.2)
     let take := min rsQ.size (nq - total)
     out := out.push (Q, rsQ.extract 0 take)
     total := total + take
@@ -972,8 +978,10 @@ def selectCollision (n d P nq incr admax keep : Nat) (U V : Nat) (lpbR lpbA : Na
     (threads : Nat := 1) : Option Selection := Id.run do
   let t := max 1 threads
   let count := (admax + incr - 1) / incr
-  let per := (count + t - 1) / t
-  let tasks := (List.range t).map fun i =>
+  -- about four tasks per thread: leading coefficients cost unequal times, and
+  -- the task pool balances many small tasks (one per thread left threads idle)
+  let per := (count + 4 * t - 1) / (4 * t)
+  let tasks := (List.range ((count + per - 1) / per)).map fun i =>
     Task.spawn fun _ => collisionSearch n d P nq incr (1 + i * per * incr)
       (min (admax + 1) (1 + (i + 1) * per * incr)) keep
   let mut cands : Array CCand := tasks.foldl (fun acc tk => acc ++ tk.get) #[]

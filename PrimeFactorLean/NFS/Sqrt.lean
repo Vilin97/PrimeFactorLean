@@ -19,8 +19,12 @@ namespace PrimeFactorLean.NFS
 
 open Arith
 
-/-- Coefficients reduced to `[0, P)`. -/
-def modList (P : Nat) (xs : List Int) : List Int := xs.map fun c => c % (P : Int)
+/-- Coefficients reduced to `[0, P)` (in parallel tasks once they are large: each
+reduction is a long division). -/
+def modList (P : Nat) (xs : List Int) : List Int :=
+  if xs.any (fun c => c.natAbs.log2 ≥ 65536) then
+    (xs.map fun c => Task.spawn fun _ => c % (P : Int)).map Task.get
+  else xs.map fun c => c % (P : Int)
 
 /-- Centered representatives in `(-P/2, P/2]`. -/
 def centerList (P : Nat) (xs : List Int) : List Int :=
@@ -76,6 +80,17 @@ def sqrtZ (g γ : List Int) (p : Nat) : Option {β : List Int // mulZ g β β = 
   for bits in [base, 2 * base, maxBits γ + 4 * (g.length + 1) * (fBits + 1) + 128] do
     if let some β := sqrtCandidate g γ p bits then
       if h : mulZ g β β = normalize γ then return some ⟨β, h⟩
+  return none
+
+/-- The first candidate square root of `γ` (at the precisions `sqrtZ` tries)
+that `ok` accepts: the caller checks a cheap consequence of `β² = γ` instead of
+the exact square. -/
+def sqrtFind (g γ : List Int) (p : Nat) (ok : List Int → Bool) : Option (List Int) := Id.run do
+  let fBits := maxBits g
+  let base := maxBits γ / 2 + 2 * (g.length + 1) * (fBits + 1) + 64
+  for bits in [base, 2 * base, maxBits γ + 4 * (g.length + 1) * (fBits + 1) + 128] do
+    if let some β := sqrtCandidate g γ p bits then
+      if ok β then return some β
   return none
 
 end PrimeFactorLean.NFS

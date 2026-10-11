@@ -206,7 +206,7 @@ def run (rounds : Nat) : IO (Array Row) := do
 
 end Benchmark
 
-def main (args : List String) : IO UInt32 := do
+private def runBench (args : List String) : IO UInt32 := do
   let output := args.head?.getD "results/optimization.json"
   let rounds := max 1 ((args[1]?).bind String.toNat?).getD 3
   try
@@ -227,3 +227,11 @@ def main (args : List String) : IO UInt32 := do
   catch e =>
     IO.eprintln e.toString
     return 1
+
+/-- Exits explicitly, as the CLI does (`Main.lean`): leftover tasks of parallel
+searches must not keep the process alive after the report. -/
+def main (args : List String) : IO UInt32 := do
+  let code ← runBench args
+  (← IO.getStdout).flush
+  (← IO.getStderr).flush
+  IO.Process.exit code.toUInt8

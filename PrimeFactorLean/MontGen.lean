@@ -85,6 +85,39 @@ def Mod1.ofNat (n : Nat) : Mod1 :=
   let y0 := d0 + (m.n0 &&& s)
   ⟨y0 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N1.ladderGo (m : Mod1) (a24 xP : N1) (bits : ByteArray) (i : Nat)
+    (a0 b0 c0 d0 : UInt64) : N1 × N1 :=
+  match i with
+  | 0 => (⟨a0⟩, ⟨b0⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N1 := ⟨a0⟩
+    let Z0 : N1 := ⟨b0⟩
+    let X1 : N1 := ⟨c0⟩
+    let Z1 : N1 := ⟨d0⟩
+    let Ax : N1 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel)⟩
+    let Az : N1 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel)⟩
+    let s := N1.sqr m (N1.add m Ax Az)
+    let e := N1.sqr m (N1.sub m Ax Az)
+    let t := N1.sub m s e
+    let Dx := N1.mul m s e
+    let Dz := N1.mul m t (N1.add m e (N1.mul m a24 t))
+    let u := N1.mul m (N1.sub m X1 Z1) (N1.add m X0 Z0)
+    let v := N1.mul m (N1.add m X1 Z1) (N1.sub m X0 Z0)
+    let Sx := N1.sqr m (N1.add m u v)
+    let Sz := N1.mul m xP (N1.sqr m (N1.sub m u v))
+    N1.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel))
+
 instance : Arith N1 Mod1 where
   mul := N1.mul
   sqr := N1.sqr
@@ -95,6 +128,9 @@ instance : Arith N1 Mod1 where
   limbNat := N1.limbNat
   isZero := N1.isZero
   limbs := 1
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N1.ladderGo m a24 xP bits i
+    X0.l0 Z0.l0
+    X1.l0 Z1.l0
 
 /-- A residue modulo a `Mod2` in Montgomery form: 2 limbs of 28 bits. -/
 structure N2 where
@@ -202,6 +238,39 @@ def Mod2.ofNat (n : Nat) : Mod2 :=
   let y1 := d1 + (m.n1 &&& s) + e1
   ⟨y0 &&& msk, y1 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N2.ladderGo (m : Mod2) (a24 xP : N2) (bits : ByteArray) (i : Nat)
+    (a0 a1 b0 b1 c0 c1 d0 d1 : UInt64) : N2 × N2 :=
+  match i with
+  | 0 => (⟨a0, a1⟩, ⟨b0, b1⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N2 := ⟨a0, a1⟩
+    let Z0 : N2 := ⟨b0, b1⟩
+    let X1 : N2 := ⟨c0, c1⟩
+    let Z1 : N2 := ⟨d0, d1⟩
+    let Ax : N2 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel)⟩
+    let Az : N2 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel)⟩
+    let s := N2.sqr m (N2.add m Ax Az)
+    let e := N2.sqr m (N2.sub m Ax Az)
+    let t := N2.sub m s e
+    let Dx := N2.mul m s e
+    let Dz := N2.mul m t (N2.add m e (N2.mul m a24 t))
+    let u := N2.mul m (N2.sub m X1 Z1) (N2.add m X0 Z0)
+    let v := N2.mul m (N2.add m X1 Z1) (N2.sub m X0 Z0)
+    let Sx := N2.sqr m (N2.add m u v)
+    let Sz := N2.mul m xP (N2.sqr m (N2.sub m u v))
+    N2.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel))
+
 instance : Arith N2 Mod2 where
   mul := N2.mul
   sqr := N2.sqr
@@ -212,6 +281,9 @@ instance : Arith N2 Mod2 where
   limbNat := N2.limbNat
   isZero := N2.isZero
   limbs := 2
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N2.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 Z0.l0 Z0.l1
+    X1.l0 X1.l1 Z1.l0 Z1.l1
 
 /-- A residue modulo a `Mod3` in Montgomery form: 3 limbs of 28 bits. -/
 structure N3 where
@@ -350,6 +422,39 @@ def Mod3.ofNat (n : Nat) : Mod3 :=
   let y2 := d2 + (m.n2 &&& s) + e2
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N3.ladderGo (m : Mod3) (a24 xP : N3) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 b0 b1 b2 c0 c1 c2 d0 d1 d2 : UInt64) : N3 × N3 :=
+  match i with
+  | 0 => (⟨a0, a1, a2⟩, ⟨b0, b1, b2⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N3 := ⟨a0, a1, a2⟩
+    let Z0 : N3 := ⟨b0, b1, b2⟩
+    let X1 : N3 := ⟨c0, c1, c2⟩
+    let Z1 : N3 := ⟨d0, d1, d2⟩
+    let Ax : N3 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel)⟩
+    let Az : N3 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel)⟩
+    let s := N3.sqr m (N3.add m Ax Az)
+    let e := N3.sqr m (N3.sub m Ax Az)
+    let t := N3.sub m s e
+    let Dx := N3.mul m s e
+    let Dz := N3.mul m t (N3.add m e (N3.mul m a24 t))
+    let u := N3.mul m (N3.sub m X1 Z1) (N3.add m X0 Z0)
+    let v := N3.mul m (N3.add m X1 Z1) (N3.sub m X0 Z0)
+    let Sx := N3.sqr m (N3.add m u v)
+    let Sz := N3.mul m xP (N3.sqr m (N3.sub m u v))
+    N3.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel))
+
 instance : Arith N3 Mod3 where
   mul := N3.mul
   sqr := N3.sqr
@@ -360,6 +465,9 @@ instance : Arith N3 Mod3 where
   limbNat := N3.limbNat
   isZero := N3.isZero
   limbs := 3
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N3.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 Z0.l0 Z0.l1 Z0.l2
+    X1.l0 X1.l1 X1.l2 Z1.l0 Z1.l1 Z1.l2
 
 /-- A residue modulo a `Mod4` in Montgomery form: 4 limbs of 28 bits. -/
 structure N4 where
@@ -529,6 +637,39 @@ def Mod4.ofNat (n : Nat) : Mod4 :=
   let y3 := d3 + (m.n3 &&& s) + e3
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk, y3 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N4.ladderGo (m : Mod4) (a24 xP : N4) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 a3 b0 b1 b2 b3 c0 c1 c2 c3 d0 d1 d2 d3 : UInt64) : N4 × N4 :=
+  match i with
+  | 0 => (⟨a0, a1, a2, a3⟩, ⟨b0, b1, b2, b3⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N4 := ⟨a0, a1, a2, a3⟩
+    let Z0 : N4 := ⟨b0, b1, b2, b3⟩
+    let X1 : N4 := ⟨c0, c1, c2, c3⟩
+    let Z1 : N4 := ⟨d0, d1, d2, d3⟩
+    let Ax : N4 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel), a3 ^^^ ((a3 ^^^ c3) &&& sel)⟩
+    let Az : N4 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel), b3 ^^^ ((b3 ^^^ d3) &&& sel)⟩
+    let s := N4.sqr m (N4.add m Ax Az)
+    let e := N4.sqr m (N4.sub m Ax Az)
+    let t := N4.sub m s e
+    let Dx := N4.mul m s e
+    let Dz := N4.mul m t (N4.add m e (N4.mul m a24 t))
+    let u := N4.mul m (N4.sub m X1 Z1) (N4.add m X0 Z0)
+    let v := N4.mul m (N4.add m X1 Z1) (N4.sub m X0 Z0)
+    let Sx := N4.sqr m (N4.add m u v)
+    let Sz := N4.mul m xP (N4.sqr m (N4.sub m u v))
+    N4.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel)) (Dx.l3 ^^^ ((Dx.l3 ^^^ Sx.l3) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel)) (Dz.l3 ^^^ ((Dz.l3 ^^^ Sz.l3) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel)) (Sx.l3 ^^^ ((Sx.l3 ^^^ Dx.l3) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel)) (Sz.l3 ^^^ ((Sz.l3 ^^^ Dz.l3) &&& sel))
+
 instance : Arith N4 Mod4 where
   mul := N4.mul
   sqr := N4.sqr
@@ -539,6 +680,9 @@ instance : Arith N4 Mod4 where
   limbNat := N4.limbNat
   isZero := N4.isZero
   limbs := 4
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N4.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 X0.l3 Z0.l0 Z0.l1 Z0.l2 Z0.l3
+    X1.l0 X1.l1 X1.l2 X1.l3 Z1.l0 Z1.l1 Z1.l2 Z1.l3
 
 /-- A residue modulo a `Mod5` in Montgomery form: 5 limbs of 28 bits. -/
 structure N5 where
@@ -739,6 +883,39 @@ def Mod5.ofNat (n : Nat) : Mod5 :=
   let y4 := d4 + (m.n4 &&& s) + e4
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk, y3 &&& msk, y4 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N5.ladderGo (m : Mod5) (a24 xP : N5) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 a3 a4 b0 b1 b2 b3 b4 c0 c1 c2 c3 c4 d0 d1 d2 d3 d4 : UInt64) : N5 × N5 :=
+  match i with
+  | 0 => (⟨a0, a1, a2, a3, a4⟩, ⟨b0, b1, b2, b3, b4⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N5 := ⟨a0, a1, a2, a3, a4⟩
+    let Z0 : N5 := ⟨b0, b1, b2, b3, b4⟩
+    let X1 : N5 := ⟨c0, c1, c2, c3, c4⟩
+    let Z1 : N5 := ⟨d0, d1, d2, d3, d4⟩
+    let Ax : N5 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel), a3 ^^^ ((a3 ^^^ c3) &&& sel), a4 ^^^ ((a4 ^^^ c4) &&& sel)⟩
+    let Az : N5 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel), b3 ^^^ ((b3 ^^^ d3) &&& sel), b4 ^^^ ((b4 ^^^ d4) &&& sel)⟩
+    let s := N5.sqr m (N5.add m Ax Az)
+    let e := N5.sqr m (N5.sub m Ax Az)
+    let t := N5.sub m s e
+    let Dx := N5.mul m s e
+    let Dz := N5.mul m t (N5.add m e (N5.mul m a24 t))
+    let u := N5.mul m (N5.sub m X1 Z1) (N5.add m X0 Z0)
+    let v := N5.mul m (N5.add m X1 Z1) (N5.sub m X0 Z0)
+    let Sx := N5.sqr m (N5.add m u v)
+    let Sz := N5.mul m xP (N5.sqr m (N5.sub m u v))
+    N5.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel)) (Dx.l3 ^^^ ((Dx.l3 ^^^ Sx.l3) &&& sel)) (Dx.l4 ^^^ ((Dx.l4 ^^^ Sx.l4) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel)) (Dz.l3 ^^^ ((Dz.l3 ^^^ Sz.l3) &&& sel)) (Dz.l4 ^^^ ((Dz.l4 ^^^ Sz.l4) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel)) (Sx.l3 ^^^ ((Sx.l3 ^^^ Dx.l3) &&& sel)) (Sx.l4 ^^^ ((Sx.l4 ^^^ Dx.l4) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel)) (Sz.l3 ^^^ ((Sz.l3 ^^^ Dz.l3) &&& sel)) (Sz.l4 ^^^ ((Sz.l4 ^^^ Dz.l4) &&& sel))
+
 instance : Arith N5 Mod5 where
   mul := N5.mul
   sqr := N5.sqr
@@ -749,6 +926,9 @@ instance : Arith N5 Mod5 where
   limbNat := N5.limbNat
   isZero := N5.isZero
   limbs := 5
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N5.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 X0.l3 X0.l4 Z0.l0 Z0.l1 Z0.l2 Z0.l3 Z0.l4
+    X1.l0 X1.l1 X1.l2 X1.l3 X1.l4 Z1.l0 Z1.l1 Z1.l2 Z1.l3 Z1.l4
 
 /-- A residue modulo a `Mod6` in Montgomery form: 6 limbs of 28 bits. -/
 structure N6 where
@@ -980,6 +1160,39 @@ def Mod6.ofNat (n : Nat) : Mod6 :=
   let y5 := d5 + (m.n5 &&& s) + e5
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk, y3 &&& msk, y4 &&& msk, y5 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N6.ladderGo (m : Mod6) (a24 xP : N6) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 a3 a4 a5 b0 b1 b2 b3 b4 b5 c0 c1 c2 c3 c4 c5 d0 d1 d2 d3 d4 d5 : UInt64) : N6 × N6 :=
+  match i with
+  | 0 => (⟨a0, a1, a2, a3, a4, a5⟩, ⟨b0, b1, b2, b3, b4, b5⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N6 := ⟨a0, a1, a2, a3, a4, a5⟩
+    let Z0 : N6 := ⟨b0, b1, b2, b3, b4, b5⟩
+    let X1 : N6 := ⟨c0, c1, c2, c3, c4, c5⟩
+    let Z1 : N6 := ⟨d0, d1, d2, d3, d4, d5⟩
+    let Ax : N6 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel), a3 ^^^ ((a3 ^^^ c3) &&& sel), a4 ^^^ ((a4 ^^^ c4) &&& sel), a5 ^^^ ((a5 ^^^ c5) &&& sel)⟩
+    let Az : N6 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel), b3 ^^^ ((b3 ^^^ d3) &&& sel), b4 ^^^ ((b4 ^^^ d4) &&& sel), b5 ^^^ ((b5 ^^^ d5) &&& sel)⟩
+    let s := N6.sqr m (N6.add m Ax Az)
+    let e := N6.sqr m (N6.sub m Ax Az)
+    let t := N6.sub m s e
+    let Dx := N6.mul m s e
+    let Dz := N6.mul m t (N6.add m e (N6.mul m a24 t))
+    let u := N6.mul m (N6.sub m X1 Z1) (N6.add m X0 Z0)
+    let v := N6.mul m (N6.add m X1 Z1) (N6.sub m X0 Z0)
+    let Sx := N6.sqr m (N6.add m u v)
+    let Sz := N6.mul m xP (N6.sqr m (N6.sub m u v))
+    N6.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel)) (Dx.l3 ^^^ ((Dx.l3 ^^^ Sx.l3) &&& sel)) (Dx.l4 ^^^ ((Dx.l4 ^^^ Sx.l4) &&& sel)) (Dx.l5 ^^^ ((Dx.l5 ^^^ Sx.l5) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel)) (Dz.l3 ^^^ ((Dz.l3 ^^^ Sz.l3) &&& sel)) (Dz.l4 ^^^ ((Dz.l4 ^^^ Sz.l4) &&& sel)) (Dz.l5 ^^^ ((Dz.l5 ^^^ Sz.l5) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel)) (Sx.l3 ^^^ ((Sx.l3 ^^^ Dx.l3) &&& sel)) (Sx.l4 ^^^ ((Sx.l4 ^^^ Dx.l4) &&& sel)) (Sx.l5 ^^^ ((Sx.l5 ^^^ Dx.l5) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel)) (Sz.l3 ^^^ ((Sz.l3 ^^^ Dz.l3) &&& sel)) (Sz.l4 ^^^ ((Sz.l4 ^^^ Dz.l4) &&& sel)) (Sz.l5 ^^^ ((Sz.l5 ^^^ Dz.l5) &&& sel))
+
 instance : Arith N6 Mod6 where
   mul := N6.mul
   sqr := N6.sqr
@@ -990,6 +1203,9 @@ instance : Arith N6 Mod6 where
   limbNat := N6.limbNat
   isZero := N6.isZero
   limbs := 6
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N6.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 X0.l3 X0.l4 X0.l5 Z0.l0 Z0.l1 Z0.l2 Z0.l3 Z0.l4 Z0.l5
+    X1.l0 X1.l1 X1.l2 X1.l3 X1.l4 X1.l5 Z1.l0 Z1.l1 Z1.l2 Z1.l3 Z1.l4 Z1.l5
 
 /-- A residue modulo a `Mod7` in Montgomery form: 7 limbs of 28 bits. -/
 structure N7 where
@@ -1252,6 +1468,39 @@ def Mod7.ofNat (n : Nat) : Mod7 :=
   let y6 := d6 + (m.n6 &&& s) + e6
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk, y3 &&& msk, y4 &&& msk, y5 &&& msk, y6 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N7.ladderGo (m : Mod7) (a24 xP : N7) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 a3 a4 a5 a6 b0 b1 b2 b3 b4 b5 b6 c0 c1 c2 c3 c4 c5 c6 d0 d1 d2 d3 d4 d5 d6 : UInt64) : N7 × N7 :=
+  match i with
+  | 0 => (⟨a0, a1, a2, a3, a4, a5, a6⟩, ⟨b0, b1, b2, b3, b4, b5, b6⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N7 := ⟨a0, a1, a2, a3, a4, a5, a6⟩
+    let Z0 : N7 := ⟨b0, b1, b2, b3, b4, b5, b6⟩
+    let X1 : N7 := ⟨c0, c1, c2, c3, c4, c5, c6⟩
+    let Z1 : N7 := ⟨d0, d1, d2, d3, d4, d5, d6⟩
+    let Ax : N7 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel), a3 ^^^ ((a3 ^^^ c3) &&& sel), a4 ^^^ ((a4 ^^^ c4) &&& sel), a5 ^^^ ((a5 ^^^ c5) &&& sel), a6 ^^^ ((a6 ^^^ c6) &&& sel)⟩
+    let Az : N7 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel), b3 ^^^ ((b3 ^^^ d3) &&& sel), b4 ^^^ ((b4 ^^^ d4) &&& sel), b5 ^^^ ((b5 ^^^ d5) &&& sel), b6 ^^^ ((b6 ^^^ d6) &&& sel)⟩
+    let s := N7.sqr m (N7.add m Ax Az)
+    let e := N7.sqr m (N7.sub m Ax Az)
+    let t := N7.sub m s e
+    let Dx := N7.mul m s e
+    let Dz := N7.mul m t (N7.add m e (N7.mul m a24 t))
+    let u := N7.mul m (N7.sub m X1 Z1) (N7.add m X0 Z0)
+    let v := N7.mul m (N7.add m X1 Z1) (N7.sub m X0 Z0)
+    let Sx := N7.sqr m (N7.add m u v)
+    let Sz := N7.mul m xP (N7.sqr m (N7.sub m u v))
+    N7.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel)) (Dx.l3 ^^^ ((Dx.l3 ^^^ Sx.l3) &&& sel)) (Dx.l4 ^^^ ((Dx.l4 ^^^ Sx.l4) &&& sel)) (Dx.l5 ^^^ ((Dx.l5 ^^^ Sx.l5) &&& sel)) (Dx.l6 ^^^ ((Dx.l6 ^^^ Sx.l6) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel)) (Dz.l3 ^^^ ((Dz.l3 ^^^ Sz.l3) &&& sel)) (Dz.l4 ^^^ ((Dz.l4 ^^^ Sz.l4) &&& sel)) (Dz.l5 ^^^ ((Dz.l5 ^^^ Sz.l5) &&& sel)) (Dz.l6 ^^^ ((Dz.l6 ^^^ Sz.l6) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel)) (Sx.l3 ^^^ ((Sx.l3 ^^^ Dx.l3) &&& sel)) (Sx.l4 ^^^ ((Sx.l4 ^^^ Dx.l4) &&& sel)) (Sx.l5 ^^^ ((Sx.l5 ^^^ Dx.l5) &&& sel)) (Sx.l6 ^^^ ((Sx.l6 ^^^ Dx.l6) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel)) (Sz.l3 ^^^ ((Sz.l3 ^^^ Dz.l3) &&& sel)) (Sz.l4 ^^^ ((Sz.l4 ^^^ Dz.l4) &&& sel)) (Sz.l5 ^^^ ((Sz.l5 ^^^ Dz.l5) &&& sel)) (Sz.l6 ^^^ ((Sz.l6 ^^^ Dz.l6) &&& sel))
+
 instance : Arith N7 Mod7 where
   mul := N7.mul
   sqr := N7.sqr
@@ -1262,6 +1511,9 @@ instance : Arith N7 Mod7 where
   limbNat := N7.limbNat
   isZero := N7.isZero
   limbs := 7
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N7.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 X0.l3 X0.l4 X0.l5 X0.l6 Z0.l0 Z0.l1 Z0.l2 Z0.l3 Z0.l4 Z0.l5 Z0.l6
+    X1.l0 X1.l1 X1.l2 X1.l3 X1.l4 X1.l5 X1.l6 Z1.l0 Z1.l1 Z1.l2 Z1.l3 Z1.l4 Z1.l5 Z1.l6
 
 /-- A residue modulo a `Mod8` in Montgomery form: 8 limbs of 28 bits. -/
 structure N8 where
@@ -1555,6 +1807,39 @@ def Mod8.ofNat (n : Nat) : Mod8 :=
   let y7 := d7 + (m.n7 &&& s) + e7
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk, y3 &&& msk, y4 &&& msk, y5 &&& msk, y6 &&& msk, y7 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N8.ladderGo (m : Mod8) (a24 xP : N8) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 a3 a4 a5 a6 a7 b0 b1 b2 b3 b4 b5 b6 b7 c0 c1 c2 c3 c4 c5 c6 c7 d0 d1 d2 d3 d4 d5 d6 d7 : UInt64) : N8 × N8 :=
+  match i with
+  | 0 => (⟨a0, a1, a2, a3, a4, a5, a6, a7⟩, ⟨b0, b1, b2, b3, b4, b5, b6, b7⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N8 := ⟨a0, a1, a2, a3, a4, a5, a6, a7⟩
+    let Z0 : N8 := ⟨b0, b1, b2, b3, b4, b5, b6, b7⟩
+    let X1 : N8 := ⟨c0, c1, c2, c3, c4, c5, c6, c7⟩
+    let Z1 : N8 := ⟨d0, d1, d2, d3, d4, d5, d6, d7⟩
+    let Ax : N8 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel), a3 ^^^ ((a3 ^^^ c3) &&& sel), a4 ^^^ ((a4 ^^^ c4) &&& sel), a5 ^^^ ((a5 ^^^ c5) &&& sel), a6 ^^^ ((a6 ^^^ c6) &&& sel), a7 ^^^ ((a7 ^^^ c7) &&& sel)⟩
+    let Az : N8 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel), b3 ^^^ ((b3 ^^^ d3) &&& sel), b4 ^^^ ((b4 ^^^ d4) &&& sel), b5 ^^^ ((b5 ^^^ d5) &&& sel), b6 ^^^ ((b6 ^^^ d6) &&& sel), b7 ^^^ ((b7 ^^^ d7) &&& sel)⟩
+    let s := N8.sqr m (N8.add m Ax Az)
+    let e := N8.sqr m (N8.sub m Ax Az)
+    let t := N8.sub m s e
+    let Dx := N8.mul m s e
+    let Dz := N8.mul m t (N8.add m e (N8.mul m a24 t))
+    let u := N8.mul m (N8.sub m X1 Z1) (N8.add m X0 Z0)
+    let v := N8.mul m (N8.add m X1 Z1) (N8.sub m X0 Z0)
+    let Sx := N8.sqr m (N8.add m u v)
+    let Sz := N8.mul m xP (N8.sqr m (N8.sub m u v))
+    N8.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel)) (Dx.l3 ^^^ ((Dx.l3 ^^^ Sx.l3) &&& sel)) (Dx.l4 ^^^ ((Dx.l4 ^^^ Sx.l4) &&& sel)) (Dx.l5 ^^^ ((Dx.l5 ^^^ Sx.l5) &&& sel)) (Dx.l6 ^^^ ((Dx.l6 ^^^ Sx.l6) &&& sel)) (Dx.l7 ^^^ ((Dx.l7 ^^^ Sx.l7) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel)) (Dz.l3 ^^^ ((Dz.l3 ^^^ Sz.l3) &&& sel)) (Dz.l4 ^^^ ((Dz.l4 ^^^ Sz.l4) &&& sel)) (Dz.l5 ^^^ ((Dz.l5 ^^^ Sz.l5) &&& sel)) (Dz.l6 ^^^ ((Dz.l6 ^^^ Sz.l6) &&& sel)) (Dz.l7 ^^^ ((Dz.l7 ^^^ Sz.l7) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel)) (Sx.l3 ^^^ ((Sx.l3 ^^^ Dx.l3) &&& sel)) (Sx.l4 ^^^ ((Sx.l4 ^^^ Dx.l4) &&& sel)) (Sx.l5 ^^^ ((Sx.l5 ^^^ Dx.l5) &&& sel)) (Sx.l6 ^^^ ((Sx.l6 ^^^ Dx.l6) &&& sel)) (Sx.l7 ^^^ ((Sx.l7 ^^^ Dx.l7) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel)) (Sz.l3 ^^^ ((Sz.l3 ^^^ Dz.l3) &&& sel)) (Sz.l4 ^^^ ((Sz.l4 ^^^ Dz.l4) &&& sel)) (Sz.l5 ^^^ ((Sz.l5 ^^^ Dz.l5) &&& sel)) (Sz.l6 ^^^ ((Sz.l6 ^^^ Dz.l6) &&& sel)) (Sz.l7 ^^^ ((Sz.l7 ^^^ Dz.l7) &&& sel))
+
 instance : Arith N8 Mod8 where
   mul := N8.mul
   sqr := N8.sqr
@@ -1565,6 +1850,9 @@ instance : Arith N8 Mod8 where
   limbNat := N8.limbNat
   isZero := N8.isZero
   limbs := 8
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N8.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 X0.l3 X0.l4 X0.l5 X0.l6 X0.l7 Z0.l0 Z0.l1 Z0.l2 Z0.l3 Z0.l4 Z0.l5 Z0.l6 Z0.l7
+    X1.l0 X1.l1 X1.l2 X1.l3 X1.l4 X1.l5 X1.l6 X1.l7 Z1.l0 Z1.l1 Z1.l2 Z1.l3 Z1.l4 Z1.l5 Z1.l6 Z1.l7
 
 /-- A residue modulo a `Mod9` in Montgomery form: 9 limbs of 28 bits. -/
 structure N9 where
@@ -1889,6 +2177,39 @@ def Mod9.ofNat (n : Nat) : Mod9 :=
   let y8 := d8 + (m.n8 &&& s) + e8
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk, y3 &&& msk, y4 &&& msk, y5 &&& msk, y6 &&& msk, y7 &&& msk, y8 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N9.ladderGo (m : Mod9) (a24 xP : N9) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 a3 a4 a5 a6 a7 a8 b0 b1 b2 b3 b4 b5 b6 b7 b8 c0 c1 c2 c3 c4 c5 c6 c7 c8 d0 d1 d2 d3 d4 d5 d6 d7 d8 : UInt64) : N9 × N9 :=
+  match i with
+  | 0 => (⟨a0, a1, a2, a3, a4, a5, a6, a7, a8⟩, ⟨b0, b1, b2, b3, b4, b5, b6, b7, b8⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N9 := ⟨a0, a1, a2, a3, a4, a5, a6, a7, a8⟩
+    let Z0 : N9 := ⟨b0, b1, b2, b3, b4, b5, b6, b7, b8⟩
+    let X1 : N9 := ⟨c0, c1, c2, c3, c4, c5, c6, c7, c8⟩
+    let Z1 : N9 := ⟨d0, d1, d2, d3, d4, d5, d6, d7, d8⟩
+    let Ax : N9 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel), a3 ^^^ ((a3 ^^^ c3) &&& sel), a4 ^^^ ((a4 ^^^ c4) &&& sel), a5 ^^^ ((a5 ^^^ c5) &&& sel), a6 ^^^ ((a6 ^^^ c6) &&& sel), a7 ^^^ ((a7 ^^^ c7) &&& sel), a8 ^^^ ((a8 ^^^ c8) &&& sel)⟩
+    let Az : N9 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel), b3 ^^^ ((b3 ^^^ d3) &&& sel), b4 ^^^ ((b4 ^^^ d4) &&& sel), b5 ^^^ ((b5 ^^^ d5) &&& sel), b6 ^^^ ((b6 ^^^ d6) &&& sel), b7 ^^^ ((b7 ^^^ d7) &&& sel), b8 ^^^ ((b8 ^^^ d8) &&& sel)⟩
+    let s := N9.sqr m (N9.add m Ax Az)
+    let e := N9.sqr m (N9.sub m Ax Az)
+    let t := N9.sub m s e
+    let Dx := N9.mul m s e
+    let Dz := N9.mul m t (N9.add m e (N9.mul m a24 t))
+    let u := N9.mul m (N9.sub m X1 Z1) (N9.add m X0 Z0)
+    let v := N9.mul m (N9.add m X1 Z1) (N9.sub m X0 Z0)
+    let Sx := N9.sqr m (N9.add m u v)
+    let Sz := N9.mul m xP (N9.sqr m (N9.sub m u v))
+    N9.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel)) (Dx.l3 ^^^ ((Dx.l3 ^^^ Sx.l3) &&& sel)) (Dx.l4 ^^^ ((Dx.l4 ^^^ Sx.l4) &&& sel)) (Dx.l5 ^^^ ((Dx.l5 ^^^ Sx.l5) &&& sel)) (Dx.l6 ^^^ ((Dx.l6 ^^^ Sx.l6) &&& sel)) (Dx.l7 ^^^ ((Dx.l7 ^^^ Sx.l7) &&& sel)) (Dx.l8 ^^^ ((Dx.l8 ^^^ Sx.l8) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel)) (Dz.l3 ^^^ ((Dz.l3 ^^^ Sz.l3) &&& sel)) (Dz.l4 ^^^ ((Dz.l4 ^^^ Sz.l4) &&& sel)) (Dz.l5 ^^^ ((Dz.l5 ^^^ Sz.l5) &&& sel)) (Dz.l6 ^^^ ((Dz.l6 ^^^ Sz.l6) &&& sel)) (Dz.l7 ^^^ ((Dz.l7 ^^^ Sz.l7) &&& sel)) (Dz.l8 ^^^ ((Dz.l8 ^^^ Sz.l8) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel)) (Sx.l3 ^^^ ((Sx.l3 ^^^ Dx.l3) &&& sel)) (Sx.l4 ^^^ ((Sx.l4 ^^^ Dx.l4) &&& sel)) (Sx.l5 ^^^ ((Sx.l5 ^^^ Dx.l5) &&& sel)) (Sx.l6 ^^^ ((Sx.l6 ^^^ Dx.l6) &&& sel)) (Sx.l7 ^^^ ((Sx.l7 ^^^ Dx.l7) &&& sel)) (Sx.l8 ^^^ ((Sx.l8 ^^^ Dx.l8) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel)) (Sz.l3 ^^^ ((Sz.l3 ^^^ Dz.l3) &&& sel)) (Sz.l4 ^^^ ((Sz.l4 ^^^ Dz.l4) &&& sel)) (Sz.l5 ^^^ ((Sz.l5 ^^^ Dz.l5) &&& sel)) (Sz.l6 ^^^ ((Sz.l6 ^^^ Dz.l6) &&& sel)) (Sz.l7 ^^^ ((Sz.l7 ^^^ Dz.l7) &&& sel)) (Sz.l8 ^^^ ((Sz.l8 ^^^ Dz.l8) &&& sel))
+
 instance : Arith N9 Mod9 where
   mul := N9.mul
   sqr := N9.sqr
@@ -1899,6 +2220,9 @@ instance : Arith N9 Mod9 where
   limbNat := N9.limbNat
   isZero := N9.isZero
   limbs := 9
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N9.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 X0.l3 X0.l4 X0.l5 X0.l6 X0.l7 X0.l8 Z0.l0 Z0.l1 Z0.l2 Z0.l3 Z0.l4 Z0.l5 Z0.l6 Z0.l7 Z0.l8
+    X1.l0 X1.l1 X1.l2 X1.l3 X1.l4 X1.l5 X1.l6 X1.l7 X1.l8 Z1.l0 Z1.l1 Z1.l2 Z1.l3 Z1.l4 Z1.l5 Z1.l6 Z1.l7 Z1.l8
 
 /-- A residue modulo a `Mod10` in Montgomery form: 10 limbs of 28 bits. -/
 structure N10 where
@@ -2254,6 +2578,39 @@ def Mod10.ofNat (n : Nat) : Mod10 :=
   let y9 := d9 + (m.n9 &&& s) + e9
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk, y3 &&& msk, y4 &&& msk, y5 &&& msk, y6 &&& msk, y7 &&& msk, y8 &&& msk, y9 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N10.ladderGo (m : Mod10) (a24 xP : N10) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 d0 d1 d2 d3 d4 d5 d6 d7 d8 d9 : UInt64) : N10 × N10 :=
+  match i with
+  | 0 => (⟨a0, a1, a2, a3, a4, a5, a6, a7, a8, a9⟩, ⟨b0, b1, b2, b3, b4, b5, b6, b7, b8, b9⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N10 := ⟨a0, a1, a2, a3, a4, a5, a6, a7, a8, a9⟩
+    let Z0 : N10 := ⟨b0, b1, b2, b3, b4, b5, b6, b7, b8, b9⟩
+    let X1 : N10 := ⟨c0, c1, c2, c3, c4, c5, c6, c7, c8, c9⟩
+    let Z1 : N10 := ⟨d0, d1, d2, d3, d4, d5, d6, d7, d8, d9⟩
+    let Ax : N10 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel), a3 ^^^ ((a3 ^^^ c3) &&& sel), a4 ^^^ ((a4 ^^^ c4) &&& sel), a5 ^^^ ((a5 ^^^ c5) &&& sel), a6 ^^^ ((a6 ^^^ c6) &&& sel), a7 ^^^ ((a7 ^^^ c7) &&& sel), a8 ^^^ ((a8 ^^^ c8) &&& sel), a9 ^^^ ((a9 ^^^ c9) &&& sel)⟩
+    let Az : N10 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel), b3 ^^^ ((b3 ^^^ d3) &&& sel), b4 ^^^ ((b4 ^^^ d4) &&& sel), b5 ^^^ ((b5 ^^^ d5) &&& sel), b6 ^^^ ((b6 ^^^ d6) &&& sel), b7 ^^^ ((b7 ^^^ d7) &&& sel), b8 ^^^ ((b8 ^^^ d8) &&& sel), b9 ^^^ ((b9 ^^^ d9) &&& sel)⟩
+    let s := N10.sqr m (N10.add m Ax Az)
+    let e := N10.sqr m (N10.sub m Ax Az)
+    let t := N10.sub m s e
+    let Dx := N10.mul m s e
+    let Dz := N10.mul m t (N10.add m e (N10.mul m a24 t))
+    let u := N10.mul m (N10.sub m X1 Z1) (N10.add m X0 Z0)
+    let v := N10.mul m (N10.add m X1 Z1) (N10.sub m X0 Z0)
+    let Sx := N10.sqr m (N10.add m u v)
+    let Sz := N10.mul m xP (N10.sqr m (N10.sub m u v))
+    N10.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel)) (Dx.l3 ^^^ ((Dx.l3 ^^^ Sx.l3) &&& sel)) (Dx.l4 ^^^ ((Dx.l4 ^^^ Sx.l4) &&& sel)) (Dx.l5 ^^^ ((Dx.l5 ^^^ Sx.l5) &&& sel)) (Dx.l6 ^^^ ((Dx.l6 ^^^ Sx.l6) &&& sel)) (Dx.l7 ^^^ ((Dx.l7 ^^^ Sx.l7) &&& sel)) (Dx.l8 ^^^ ((Dx.l8 ^^^ Sx.l8) &&& sel)) (Dx.l9 ^^^ ((Dx.l9 ^^^ Sx.l9) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel)) (Dz.l3 ^^^ ((Dz.l3 ^^^ Sz.l3) &&& sel)) (Dz.l4 ^^^ ((Dz.l4 ^^^ Sz.l4) &&& sel)) (Dz.l5 ^^^ ((Dz.l5 ^^^ Sz.l5) &&& sel)) (Dz.l6 ^^^ ((Dz.l6 ^^^ Sz.l6) &&& sel)) (Dz.l7 ^^^ ((Dz.l7 ^^^ Sz.l7) &&& sel)) (Dz.l8 ^^^ ((Dz.l8 ^^^ Sz.l8) &&& sel)) (Dz.l9 ^^^ ((Dz.l9 ^^^ Sz.l9) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel)) (Sx.l3 ^^^ ((Sx.l3 ^^^ Dx.l3) &&& sel)) (Sx.l4 ^^^ ((Sx.l4 ^^^ Dx.l4) &&& sel)) (Sx.l5 ^^^ ((Sx.l5 ^^^ Dx.l5) &&& sel)) (Sx.l6 ^^^ ((Sx.l6 ^^^ Dx.l6) &&& sel)) (Sx.l7 ^^^ ((Sx.l7 ^^^ Dx.l7) &&& sel)) (Sx.l8 ^^^ ((Sx.l8 ^^^ Dx.l8) &&& sel)) (Sx.l9 ^^^ ((Sx.l9 ^^^ Dx.l9) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel)) (Sz.l3 ^^^ ((Sz.l3 ^^^ Dz.l3) &&& sel)) (Sz.l4 ^^^ ((Sz.l4 ^^^ Dz.l4) &&& sel)) (Sz.l5 ^^^ ((Sz.l5 ^^^ Dz.l5) &&& sel)) (Sz.l6 ^^^ ((Sz.l6 ^^^ Dz.l6) &&& sel)) (Sz.l7 ^^^ ((Sz.l7 ^^^ Dz.l7) &&& sel)) (Sz.l8 ^^^ ((Sz.l8 ^^^ Dz.l8) &&& sel)) (Sz.l9 ^^^ ((Sz.l9 ^^^ Dz.l9) &&& sel))
+
 instance : Arith N10 Mod10 where
   mul := N10.mul
   sqr := N10.sqr
@@ -2264,6 +2621,9 @@ instance : Arith N10 Mod10 where
   limbNat := N10.limbNat
   isZero := N10.isZero
   limbs := 10
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N10.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 X0.l3 X0.l4 X0.l5 X0.l6 X0.l7 X0.l8 X0.l9 Z0.l0 Z0.l1 Z0.l2 Z0.l3 Z0.l4 Z0.l5 Z0.l6 Z0.l7 Z0.l8 Z0.l9
+    X1.l0 X1.l1 X1.l2 X1.l3 X1.l4 X1.l5 X1.l6 X1.l7 X1.l8 X1.l9 Z1.l0 Z1.l1 Z1.l2 Z1.l3 Z1.l4 Z1.l5 Z1.l6 Z1.l7 Z1.l8 Z1.l9
 
 /-- A residue modulo a `Mod11` in Montgomery form: 11 limbs of 28 bits. -/
 structure N11 where
@@ -2650,6 +3010,39 @@ def Mod11.ofNat (n : Nat) : Mod11 :=
   let y10 := d10 + (m.n10 &&& s) + e10
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk, y3 &&& msk, y4 &&& msk, y5 &&& msk, y6 &&& msk, y7 &&& msk, y8 &&& msk, y9 &&& msk, y10 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N11.ladderGo (m : Mod11) (a24 xP : N11) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 b10 c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 d0 d1 d2 d3 d4 d5 d6 d7 d8 d9 d10 : UInt64) : N11 × N11 :=
+  match i with
+  | 0 => (⟨a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩, ⟨b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N11 := ⟨a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩
+    let Z0 : N11 := ⟨b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10⟩
+    let X1 : N11 := ⟨c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10⟩
+    let Z1 : N11 := ⟨d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10⟩
+    let Ax : N11 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel), a3 ^^^ ((a3 ^^^ c3) &&& sel), a4 ^^^ ((a4 ^^^ c4) &&& sel), a5 ^^^ ((a5 ^^^ c5) &&& sel), a6 ^^^ ((a6 ^^^ c6) &&& sel), a7 ^^^ ((a7 ^^^ c7) &&& sel), a8 ^^^ ((a8 ^^^ c8) &&& sel), a9 ^^^ ((a9 ^^^ c9) &&& sel), a10 ^^^ ((a10 ^^^ c10) &&& sel)⟩
+    let Az : N11 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel), b3 ^^^ ((b3 ^^^ d3) &&& sel), b4 ^^^ ((b4 ^^^ d4) &&& sel), b5 ^^^ ((b5 ^^^ d5) &&& sel), b6 ^^^ ((b6 ^^^ d6) &&& sel), b7 ^^^ ((b7 ^^^ d7) &&& sel), b8 ^^^ ((b8 ^^^ d8) &&& sel), b9 ^^^ ((b9 ^^^ d9) &&& sel), b10 ^^^ ((b10 ^^^ d10) &&& sel)⟩
+    let s := N11.sqr m (N11.add m Ax Az)
+    let e := N11.sqr m (N11.sub m Ax Az)
+    let t := N11.sub m s e
+    let Dx := N11.mul m s e
+    let Dz := N11.mul m t (N11.add m e (N11.mul m a24 t))
+    let u := N11.mul m (N11.sub m X1 Z1) (N11.add m X0 Z0)
+    let v := N11.mul m (N11.add m X1 Z1) (N11.sub m X0 Z0)
+    let Sx := N11.sqr m (N11.add m u v)
+    let Sz := N11.mul m xP (N11.sqr m (N11.sub m u v))
+    N11.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel)) (Dx.l3 ^^^ ((Dx.l3 ^^^ Sx.l3) &&& sel)) (Dx.l4 ^^^ ((Dx.l4 ^^^ Sx.l4) &&& sel)) (Dx.l5 ^^^ ((Dx.l5 ^^^ Sx.l5) &&& sel)) (Dx.l6 ^^^ ((Dx.l6 ^^^ Sx.l6) &&& sel)) (Dx.l7 ^^^ ((Dx.l7 ^^^ Sx.l7) &&& sel)) (Dx.l8 ^^^ ((Dx.l8 ^^^ Sx.l8) &&& sel)) (Dx.l9 ^^^ ((Dx.l9 ^^^ Sx.l9) &&& sel)) (Dx.l10 ^^^ ((Dx.l10 ^^^ Sx.l10) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel)) (Dz.l3 ^^^ ((Dz.l3 ^^^ Sz.l3) &&& sel)) (Dz.l4 ^^^ ((Dz.l4 ^^^ Sz.l4) &&& sel)) (Dz.l5 ^^^ ((Dz.l5 ^^^ Sz.l5) &&& sel)) (Dz.l6 ^^^ ((Dz.l6 ^^^ Sz.l6) &&& sel)) (Dz.l7 ^^^ ((Dz.l7 ^^^ Sz.l7) &&& sel)) (Dz.l8 ^^^ ((Dz.l8 ^^^ Sz.l8) &&& sel)) (Dz.l9 ^^^ ((Dz.l9 ^^^ Sz.l9) &&& sel)) (Dz.l10 ^^^ ((Dz.l10 ^^^ Sz.l10) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel)) (Sx.l3 ^^^ ((Sx.l3 ^^^ Dx.l3) &&& sel)) (Sx.l4 ^^^ ((Sx.l4 ^^^ Dx.l4) &&& sel)) (Sx.l5 ^^^ ((Sx.l5 ^^^ Dx.l5) &&& sel)) (Sx.l6 ^^^ ((Sx.l6 ^^^ Dx.l6) &&& sel)) (Sx.l7 ^^^ ((Sx.l7 ^^^ Dx.l7) &&& sel)) (Sx.l8 ^^^ ((Sx.l8 ^^^ Dx.l8) &&& sel)) (Sx.l9 ^^^ ((Sx.l9 ^^^ Dx.l9) &&& sel)) (Sx.l10 ^^^ ((Sx.l10 ^^^ Dx.l10) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel)) (Sz.l3 ^^^ ((Sz.l3 ^^^ Dz.l3) &&& sel)) (Sz.l4 ^^^ ((Sz.l4 ^^^ Dz.l4) &&& sel)) (Sz.l5 ^^^ ((Sz.l5 ^^^ Dz.l5) &&& sel)) (Sz.l6 ^^^ ((Sz.l6 ^^^ Dz.l6) &&& sel)) (Sz.l7 ^^^ ((Sz.l7 ^^^ Dz.l7) &&& sel)) (Sz.l8 ^^^ ((Sz.l8 ^^^ Dz.l8) &&& sel)) (Sz.l9 ^^^ ((Sz.l9 ^^^ Dz.l9) &&& sel)) (Sz.l10 ^^^ ((Sz.l10 ^^^ Dz.l10) &&& sel))
+
 instance : Arith N11 Mod11 where
   mul := N11.mul
   sqr := N11.sqr
@@ -2660,6 +3053,9 @@ instance : Arith N11 Mod11 where
   limbNat := N11.limbNat
   isZero := N11.isZero
   limbs := 11
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N11.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 X0.l3 X0.l4 X0.l5 X0.l6 X0.l7 X0.l8 X0.l9 X0.l10 Z0.l0 Z0.l1 Z0.l2 Z0.l3 Z0.l4 Z0.l5 Z0.l6 Z0.l7 Z0.l8 Z0.l9 Z0.l10
+    X1.l0 X1.l1 X1.l2 X1.l3 X1.l4 X1.l5 X1.l6 X1.l7 X1.l8 X1.l9 X1.l10 Z1.l0 Z1.l1 Z1.l2 Z1.l3 Z1.l4 Z1.l5 Z1.l6 Z1.l7 Z1.l8 Z1.l9 Z1.l10
 
 /-- A residue modulo a `Mod12` in Montgomery form: 12 limbs of 28 bits. -/
 structure N12 where
@@ -3077,6 +3473,39 @@ def Mod12.ofNat (n : Nat) : Mod12 :=
   let y11 := d11 + (m.n11 &&& s) + e11
   ⟨y0 &&& msk, y1 &&& msk, y2 &&& msk, y3 &&& msk, y4 &&& msk, y5 &&& msk, y6 &&& msk, y7 &&& msk, y8 &&& msk, y9 &&& msk, y10 &&& msk, y11 &&& msk⟩
 
+set_option maxRecDepth 200000 in
+/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from
+`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point
+`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and
+adds `r0 + r1`; the coordinates stay in machine words, so a step allocates
+nothing. -/
+def N12.ladderGo (m : Mod12) (a24 xP : N12) (bits : ByteArray) (i : Nat)
+    (a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 b10 b11 c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 d0 d1 d2 d3 d4 d5 d6 d7 d8 d9 d10 d11 : UInt64) : N12 × N12 :=
+  match i with
+  | 0 => (⟨a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11⟩, ⟨b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11⟩)
+  | i + 1 =>
+    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * 0xFFFFFFF
+    let X0 : N12 := ⟨a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11⟩
+    let Z0 : N12 := ⟨b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11⟩
+    let X1 : N12 := ⟨c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11⟩
+    let Z1 : N12 := ⟨d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11⟩
+    let Ax : N12 := ⟨a0 ^^^ ((a0 ^^^ c0) &&& sel), a1 ^^^ ((a1 ^^^ c1) &&& sel), a2 ^^^ ((a2 ^^^ c2) &&& sel), a3 ^^^ ((a3 ^^^ c3) &&& sel), a4 ^^^ ((a4 ^^^ c4) &&& sel), a5 ^^^ ((a5 ^^^ c5) &&& sel), a6 ^^^ ((a6 ^^^ c6) &&& sel), a7 ^^^ ((a7 ^^^ c7) &&& sel), a8 ^^^ ((a8 ^^^ c8) &&& sel), a9 ^^^ ((a9 ^^^ c9) &&& sel), a10 ^^^ ((a10 ^^^ c10) &&& sel), a11 ^^^ ((a11 ^^^ c11) &&& sel)⟩
+    let Az : N12 := ⟨b0 ^^^ ((b0 ^^^ d0) &&& sel), b1 ^^^ ((b1 ^^^ d1) &&& sel), b2 ^^^ ((b2 ^^^ d2) &&& sel), b3 ^^^ ((b3 ^^^ d3) &&& sel), b4 ^^^ ((b4 ^^^ d4) &&& sel), b5 ^^^ ((b5 ^^^ d5) &&& sel), b6 ^^^ ((b6 ^^^ d6) &&& sel), b7 ^^^ ((b7 ^^^ d7) &&& sel), b8 ^^^ ((b8 ^^^ d8) &&& sel), b9 ^^^ ((b9 ^^^ d9) &&& sel), b10 ^^^ ((b10 ^^^ d10) &&& sel), b11 ^^^ ((b11 ^^^ d11) &&& sel)⟩
+    let s := N12.sqr m (N12.add m Ax Az)
+    let e := N12.sqr m (N12.sub m Ax Az)
+    let t := N12.sub m s e
+    let Dx := N12.mul m s e
+    let Dz := N12.mul m t (N12.add m e (N12.mul m a24 t))
+    let u := N12.mul m (N12.sub m X1 Z1) (N12.add m X0 Z0)
+    let v := N12.mul m (N12.add m X1 Z1) (N12.sub m X0 Z0)
+    let Sx := N12.sqr m (N12.add m u v)
+    let Sz := N12.mul m xP (N12.sqr m (N12.sub m u v))
+    N12.ladderGo m a24 xP bits i
+      (Dx.l0 ^^^ ((Dx.l0 ^^^ Sx.l0) &&& sel)) (Dx.l1 ^^^ ((Dx.l1 ^^^ Sx.l1) &&& sel)) (Dx.l2 ^^^ ((Dx.l2 ^^^ Sx.l2) &&& sel)) (Dx.l3 ^^^ ((Dx.l3 ^^^ Sx.l3) &&& sel)) (Dx.l4 ^^^ ((Dx.l4 ^^^ Sx.l4) &&& sel)) (Dx.l5 ^^^ ((Dx.l5 ^^^ Sx.l5) &&& sel)) (Dx.l6 ^^^ ((Dx.l6 ^^^ Sx.l6) &&& sel)) (Dx.l7 ^^^ ((Dx.l7 ^^^ Sx.l7) &&& sel)) (Dx.l8 ^^^ ((Dx.l8 ^^^ Sx.l8) &&& sel)) (Dx.l9 ^^^ ((Dx.l9 ^^^ Sx.l9) &&& sel)) (Dx.l10 ^^^ ((Dx.l10 ^^^ Sx.l10) &&& sel)) (Dx.l11 ^^^ ((Dx.l11 ^^^ Sx.l11) &&& sel))
+      (Dz.l0 ^^^ ((Dz.l0 ^^^ Sz.l0) &&& sel)) (Dz.l1 ^^^ ((Dz.l1 ^^^ Sz.l1) &&& sel)) (Dz.l2 ^^^ ((Dz.l2 ^^^ Sz.l2) &&& sel)) (Dz.l3 ^^^ ((Dz.l3 ^^^ Sz.l3) &&& sel)) (Dz.l4 ^^^ ((Dz.l4 ^^^ Sz.l4) &&& sel)) (Dz.l5 ^^^ ((Dz.l5 ^^^ Sz.l5) &&& sel)) (Dz.l6 ^^^ ((Dz.l6 ^^^ Sz.l6) &&& sel)) (Dz.l7 ^^^ ((Dz.l7 ^^^ Sz.l7) &&& sel)) (Dz.l8 ^^^ ((Dz.l8 ^^^ Sz.l8) &&& sel)) (Dz.l9 ^^^ ((Dz.l9 ^^^ Sz.l9) &&& sel)) (Dz.l10 ^^^ ((Dz.l10 ^^^ Sz.l10) &&& sel)) (Dz.l11 ^^^ ((Dz.l11 ^^^ Sz.l11) &&& sel))
+      (Sx.l0 ^^^ ((Sx.l0 ^^^ Dx.l0) &&& sel)) (Sx.l1 ^^^ ((Sx.l1 ^^^ Dx.l1) &&& sel)) (Sx.l2 ^^^ ((Sx.l2 ^^^ Dx.l2) &&& sel)) (Sx.l3 ^^^ ((Sx.l3 ^^^ Dx.l3) &&& sel)) (Sx.l4 ^^^ ((Sx.l4 ^^^ Dx.l4) &&& sel)) (Sx.l5 ^^^ ((Sx.l5 ^^^ Dx.l5) &&& sel)) (Sx.l6 ^^^ ((Sx.l6 ^^^ Dx.l6) &&& sel)) (Sx.l7 ^^^ ((Sx.l7 ^^^ Dx.l7) &&& sel)) (Sx.l8 ^^^ ((Sx.l8 ^^^ Dx.l8) &&& sel)) (Sx.l9 ^^^ ((Sx.l9 ^^^ Dx.l9) &&& sel)) (Sx.l10 ^^^ ((Sx.l10 ^^^ Dx.l10) &&& sel)) (Sx.l11 ^^^ ((Sx.l11 ^^^ Dx.l11) &&& sel))
+      (Sz.l0 ^^^ ((Sz.l0 ^^^ Dz.l0) &&& sel)) (Sz.l1 ^^^ ((Sz.l1 ^^^ Dz.l1) &&& sel)) (Sz.l2 ^^^ ((Sz.l2 ^^^ Dz.l2) &&& sel)) (Sz.l3 ^^^ ((Sz.l3 ^^^ Dz.l3) &&& sel)) (Sz.l4 ^^^ ((Sz.l4 ^^^ Dz.l4) &&& sel)) (Sz.l5 ^^^ ((Sz.l5 ^^^ Dz.l5) &&& sel)) (Sz.l6 ^^^ ((Sz.l6 ^^^ Dz.l6) &&& sel)) (Sz.l7 ^^^ ((Sz.l7 ^^^ Dz.l7) &&& sel)) (Sz.l8 ^^^ ((Sz.l8 ^^^ Dz.l8) &&& sel)) (Sz.l9 ^^^ ((Sz.l9 ^^^ Dz.l9) &&& sel)) (Sz.l10 ^^^ ((Sz.l10 ^^^ Dz.l10) &&& sel)) (Sz.l11 ^^^ ((Sz.l11 ^^^ Dz.l11) &&& sel))
+
 instance : Arith N12 Mod12 where
   mul := N12.mul
   sqr := N12.sqr
@@ -3087,5 +3516,8 @@ instance : Arith N12 Mod12 where
   limbNat := N12.limbNat
   isZero := N12.isZero
   limbs := 12
+  ladder m a24 xP bits i X0 Z0 X1 Z1 := N12.ladderGo m a24 xP bits i
+    X0.l0 X0.l1 X0.l2 X0.l3 X0.l4 X0.l5 X0.l6 X0.l7 X0.l8 X0.l9 X0.l10 X0.l11 Z0.l0 Z0.l1 Z0.l2 Z0.l3 Z0.l4 Z0.l5 Z0.l6 Z0.l7 Z0.l8 Z0.l9 Z0.l10 Z0.l11
+    X1.l0 X1.l1 X1.l2 X1.l3 X1.l4 X1.l5 X1.l6 X1.l7 X1.l8 X1.l9 X1.l10 X1.l11 Z1.l0 Z1.l1 Z1.l2 Z1.l3 Z1.l4 Z1.l5 Z1.l6 Z1.l7 Z1.l8 Z1.l9 Z1.l10 Z1.l11
 
 end PrimeFactorLean.Mont

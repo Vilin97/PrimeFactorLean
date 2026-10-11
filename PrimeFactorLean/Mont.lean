@@ -31,6 +31,10 @@ class Arith (α : Type) (μ : outParam Type) where
   limbNat : α → Nat
   isZero : α → Bool
   limbs : Nat
+  /-- The stage-1 Montgomery ladder of ECM (`x`-only, curve `a24`, base point
+  `(xP : 1)`) over `bits[i-1], …, bits[0]` from `(r0, r1) = ((X0 : Z0), (X1 : Z1))`;
+  returns `r0`. -/
+  ladder : μ → α → α → ByteArray → Nat → α → α → α → α → α × α
 
 namespace Arith
 

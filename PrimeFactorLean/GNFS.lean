@@ -31,13 +31,14 @@ Pipeline (each stage in `PrimeFactorLean.NFS.*`):
    `f(y) = c_d^{d-1} F(y / c_d)` is monic and `ω = c_d α` (`NFS.sqrtZ`).
 6. `X = φ(β)`, `Y = f'(c_d m) · c_d^{|S|/2} · Y₀` with `φ(ω) = c_d m mod n`.
 
-**What is proved.** `nfs_square` proves `X² ≡ Y² (mod n)` from three facts that
-are checked at run time on exact integers: `f(c_d m) ≡ 0 (mod n)`,
-`β · β = γ` in `ℤ[ω]` (list equality after the executable multiplication),
-and `∏ (a - b m) = Y₀²`. It uses the kernel-checked multiplicativity of
-evaluation (`NFS.eval_mulZ`, `NFS.eval_prodTree`). Hence every
-`SquareCongruence` produced here is genuine, the extracted factor is a
-`ProperFactor n`, and `split_sound` holds. Polynomial selection, sieving, the
+**What is proved.** Every `SquareCongruence` produced here is genuine: the
+congruence `X² ≡ Y² (mod n)` is checked modulo `n` when it is created
+(`SquareCongruence.ofCheck`), so the extracted factor is a `ProperFactor n` and
+`split_sound` holds. The check is also complete: `nfs_square` and
+`nfs_square_lin` prove `X² ≡ Y² (mod n)` whenever `f(c_d m) ≡ 0 (mod n)`,
+`β · β = γ` in `ℤ[ω]` and `∏ (a - b m) = Y₀²`, using the kernel-checked
+multiplicativity of evaluation (`NFS.eval_mulZ`, `NFS.eval_prodTree`), so a
+true square root always passes the check. Polynomial selection, sieving, the
 GF(2) solver and the `p`-adic square-root search are untrusted.
 -/
 
@@ -215,52 +216,45 @@ def rationalRoot (rels : List Rel) : Option Int := Id.run do
     y := y * (p : Int) ^ (e / 2)
   return some y
 
+/-- The rational square root modulo `n`: `∏ p^{e/2} mod n` over the rational
+factorizations of `rels` (`none` if the sign or an exponent is odd). Untrusted:
+`congruence` checks the congruence it leads to. -/
+def rationalRootMod (n : Nat) (rels : List Rel) : Option Nat := Id.run do
+  let mut exps : Std.HashMap Nat Nat := {}
+  let mut neg := 0
+  for r in rels do
+    if r.ratNeg then neg := neg + 1
+    for (p, e) in r.rat do
+      exps := exps.insert p (exps.getD p 0 + e)
+  if neg % 2 == 1 then return none
+  let mut y : Nat := 1 % n
+  for (p, e) in exps.toList do
+    if e % 2 == 1 then return none
+    y := y * powMod p (e / 2) n % n
+  return some y
+
+/-- The congruence of squares of a dependency `rels` (`|S| = 2k` pairs `(a, b)`):
+`X = φ(β) Y₁^k` for a candidate square root `β` of `γ = f'(ω)² ∏ (c_d a - b ω)`
+(`NFS.sqrtFind`) and `Y = φ(f') c_d^k Z` for the rational square root `Z`
+modulo `n`. The congruence `X² ≡ Y² (mod n)` itself is checked modulo `n`
+(`SquareCongruence.ofCheck`), which is what soundness needs: no exact square in
+`ℤ[ω]` or `ℤ` has to be formed or verified. `nfs_square_lin` shows the check
+accepts every true square root. -/
 def congruence {n : Nat} (st : Setup n) (rels : List Rel) (p : Nat) :
     Option (SquareCongruence n) :=
   let S : List (Int × Int) := rels.map fun r => (r.a, (r.b : Int))
   let k := S.length / 2
-  if hk : S.length = 2 * k then
-    match rationalRoot rels with
+  if S.length % 2 == 1 then none else
+  match rationalRootMod n rels with
+  | none => none
+  | some z =>
+    let y := evalMod n st.r st.fp * powMod st.cd k n % n * z % n
+    let yk := powMod st.sel.y1 k n
+    let xOf (β : List Int) : Nat := evalMod n st.r β * yk % n
+    let γ := prodTreePar st.g 3 (st.fp :: st.fp :: S.map fun ab => [(st.cd : Int) * ab.1, -ab.2])
+    match sqrtFind st.g γ p (fun β => xOf β * xOf β % n == y * y % n) with
+    | some β => SquareCongruence.ofCheck n (xOf β) y
     | none => none
-    | some Z =>
-      -- products by balanced trees, the top levels in parallel (`prodL` and
-      -- `prodTree` are what the congruence theorem speaks about)
-      if hrat0 : prodTreeInt 3 (S.map fun ab => (st.sel.y1 : Int) * ab.1 - (st.sel.m : Int) * ab.2) =
-          Z * Z then
-        have hrat := (prodTreeInt_eq 3 _).symm.trans hrat0
-        let γ := prodTreePar st.g 3 (st.fp :: st.fp :: S.map fun ab => [(st.cd : Int) * ab.1, -ab.2])
-        match sqrtZ st.g γ p with
-        | none => none
-        | some ⟨β, hβ0⟩ =>
-          if hγ : normalize γ = γ then
-            have hβ := hβ0.trans (hγ.trans (prodTreePar_eq _ _ _))
-            some ⟨evalMod n st.r β * powMod st.sel.y1 k n % n,
-              evalMod n st.r st.fp * powMod st.cd k n % n * (Z % (n : Int)).toNat % n, by
-                have key := nfs_square_lin st.g st.fp β st.cd st.sel.y1 st.sel.m (st.x0 : Int) S Z k
-                  (st.r : Int) st.hroot st.hr st.hx hβ hrat hk
-                have hpow (b : Nat) : ModEq n ((powMod b k n : Nat) : Int) ((b : Int) ^ k) := by
-                  rw [powMod_eq]
-                  exact (ModEq.natCast_mod _ n).trans (ModEq.of_eq (by push_cast; rfl))
-                have hxx : ModEq n ((evalMod n st.r β * powMod st.sel.y1 k n % n : Nat) : Int)
-                    (eval (st.r : Int) β * (st.sel.y1 : Int) ^ k) := by
-                  refine (ModEq.natCast_mod _ n).trans ?_
-                  rw [Int.natCast_mul]
-                  exact (evalMod_modEq st.hn st.r β).mul (hpow st.sel.y1)
-                have hab : ModEq n ((evalMod n st.r st.fp * powMod st.cd k n % n : Nat) : Int)
-                    (eval (st.r : Int) st.fp * (st.cd : Int) ^ k) := by
-                  refine (ModEq.natCast_mod _ n).trans ?_
-                  rw [Int.natCast_mul]
-                  exact (evalMod_modEq st.hn st.r st.fp).mul (hpow st.cd)
-                have hy : ModEq n
-                    ((evalMod n st.r st.fp * powMod st.cd k n % n * (Z % (n : Int)).toNat % n : Nat) : Int)
-                    (eval (st.r : Int) st.fp * (st.cd : Int) ^ k * Z) := by
-                  refine (ModEq.natCast_mod _ n).trans ?_
-                  rw [Int.natCast_mul]
-                  exact hab.mul (toNat_emod_modEq st.hn Z)
-                exact (hxx.pow 2).trans (key.trans (hy.pow 2).symm)⟩
-          else none
-      else none
-  else none
 
 /-! ## Matrix construction -/
 
@@ -458,9 +452,10 @@ def collectRound (ctx : Ctx) (params : Params) (threads : Nat) (st : Collection)
   return { st with rels := rels, seen := seen }
 
 /-- One parallel round of special-`q` lattice sieving over the next `count`
-special-`q` ideals from `st.nextQ`: they are dealt round-robin to the tasks (so
-that every task gets a similar mix), and each task keeps its sieve buffers
-from one round to the next (`scratch`, consumed and returned). -/
+special-`q` ideals from `st.nextQ`: they are dealt round-robin to twice as many
+tasks as threads (so that every task gets a similar mix), and each task keeps
+its sieve buffers from one round to the next (`scratch`, consumed and
+returned). -/
 def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (st : Collection)
     (scratch : List Las.Scratch) : Collection × List Las.Scratch := Id.run do
   let lo := max st.nextQ params.qmin
@@ -469,10 +464,15 @@ def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (
   while qs.size < count do
     qs := qs ++ specialQsIn las.base.sel hi (hi + 512)
     hi := hi + 512
-  let T := max 1 threads
+  -- twice as many tasks as threads: a round waits for its slowest task, and
+  -- the pool rebalances smaller tasks
+  let T := max 1 (2 * threads)
   let scs := scratch ++ (List.range (T - min T scratch.length)).map fun _ => Las.Scratch.new las
   let tasks := (scs.zip (List.range T)).map fun (sc0, t) =>
     Task.spawn fun _ => Id.run do
+      if las.params.variant == 14 then
+        let mine := (Array.range ((qs.size + T - 1 - t) / T)).map fun k => qs[t + k * T]!
+        return Las.processQs14 las las.params.gapSlack mine sc0
       let mut out : Array Rel := #[]
       let mut sc := sc0
       for k in [0:(qs.size + T - 1 - t) / T] do
@@ -480,6 +480,7 @@ def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (
         let (rels, sc') := if las.params.variant == 0 then Las.processQWith las q ρ sc
           else if las.params.variant == 11 then Las.processQ11 las q ρ sc
           else if las.params.variant == 12 then Las.processQ12 las q ρ sc
+          else if las.params.variant == 13 then Las.processQ13 las las.params.gapSlack q ρ sc
           else Las.processQ10 las las.params.gapSlack q ρ sc
         sc := sc'
         out := out ++ rels
@@ -515,6 +516,25 @@ def matrixReady (ctx : Ctx) (params : Params) (rels : Array Rel) : Bool :=
     let rs := rels.foldl Rows.add (Rows.empty ctx.fb)
     rowsReady rs (2 + ctx.fb.chars.size) params.extra
 
+/-- Readiness bookkeeping after a check `(excess, ok, kept)` of `size` relations:
+whether the matrix is ready, the last measurement (none while nothing survives
+singleton removal) and the extrapolated relation target (`0`: none). The target
+extrapolates the last two excesses, with a tenth more since the excess grows
+faster than linearly. -/
+def readiness (extra size : Nat) (prev : Option (Nat × Int)) (chk : Int × Bool × Nat) :
+    Bool × Option (Nat × Int) × Nat :=
+  let (excess, ok, kept) := chk
+  if kept == 0 then (ok, none, 0)
+  else
+    let target := match prev with
+      | some (r0, e0) =>
+        if excess > e0 && size > r0 then
+          let need := ((extra : Int) - excess) * ((size - r0 : Nat) : Int) / (excess - e0)
+          size + (11 * need.toNat) / 10
+        else 0
+      | none => 0
+    (ok, some (size, excess), target)
+
 /-- Sieve until the matrix has a healthy excess of relations, then try dependencies. -/
 def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {}) :
     Option (ProperFactor n) := Id.run do
@@ -539,7 +559,7 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   let mut lastCheck := 0
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
-      mfbA := params.mfbA, fudge := params.lasFudge }
+      mfbA := params.mfbA, fudge := params.lasFudge, variant := params.lasVariant }
   let las := Las.mkLasCtx ctx lasParams
   -- special-q per round: at least six per task, and about a tenth of the
   -- relations collected so far once the yield is known
@@ -548,61 +568,84 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   let mut prev : Option (Nat × Int) := none
   let mut rows := Rows.empty ctx.fb
   let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
+  let dense := 2 + ctx.fb.chars.size
   while !ready && round < cfg.maxRounds do
     round := round + 1
     let before := coll.rels.size
+    -- Readiness is a full singleton removal: once the relation count can
+    -- suffice and after every tenth of growth, then after every round once an
+    -- excess has been measured (it grows fast near the end). Far from ready
+    -- (no excess measured yet), the rows of the relations so far are built and
+    -- checked in a task while this round sieves; near the end the check
+    -- follows the round, since one a round late would oversieve.
+    let due := coll.rels.size ≥ base && coll.rels.size * 10 ≥ lastCheck * 11
+    let mut bg : Option (Task (Rows × Option (Int × Bool × Nat))) := none
+    if prev.isNone && params.lasLogI > 0 then
+      let fresh := coll.rels.extract rows.sparse.size coll.rels.size
+      let r0 := rows
+      rows := default
+      bg := some (Task.spawn fun _ =>
+        let r := fresh.foldl Rows.add r0
+        (r, if due then some (rowsExcess r dense params.extra) else none))
     if params.lasLogI > 0 then
       let (c, sc) := collectRoundLas las params threads count coll scratch
       coll := c
       scratch := sc
     else coll := collectRound ctx params threads coll
-    -- readiness is a full singleton removal: run it once the relation count
-    -- can suffice and after every tenth of growth, then after every round once
-    -- an excess has been measured (it grows fast near the end)
-    for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
     let mut target := 0
-    if coll.rels.size ≥ base && (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11) then
+    if let some t := bg then
+      let (r, chk) := t.get
+      rows := r
+      if let some c := chk then
+        lastCheck := before
+        let (ok, p', tg) := readiness params.extra before prev c
+        ready := ok
+        prev := p'
+        target := tg
+    -- (far from ready, the next round's task adds this round's rows)
+    if bg.isNone then
+      for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
+    if !ready && bg.isNone && coll.rels.size ≥ base &&
+        (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11) then
       lastCheck := coll.rels.size
-      let (excess, ok, kept) := rowsExcess rows (2 + ctx.fb.chars.size) params.extra
+      let (ok, p', tg) := readiness params.extra coll.rels.size prev
+        (rowsExcess rows dense params.extra)
       ready := ok
-      if kept == 0 then
-        -- nothing survives singleton removal yet: far from ready, check again
-        -- after two fifths more relations
-        prev := none
-        lastCheck := coll.rels.size * 14 / 11
-      else
-        -- the relations still needed, extrapolated from the last two checks
-        -- (with a tenth more: the excess grows faster than linearly)
-        if let some (r0, e0) := prev then
-          if excess > e0 && coll.rels.size > r0 then
-            let need := ((params.extra : Int) - excess) * ((coll.rels.size - r0 : Nat) : Int) /
-              (excess - e0)
-            target := coll.rels.size + (11 * need.toNat) / 10
-        prev := some (coll.rels.size, excess)
+      prev := p'
+      target := tg
     let gained := coll.rels.size - before
     if params.lasLogI > 0 && gained > 0 then
       count := max (6 * threads) (count * (coll.rels.size / 10 + 1) / gained)
       if target > coll.rels.size then
         count := max (6 * threads) (min count ((target - coll.rels.size) * count / gained + 1))
+      else if prev.isSome then
+        -- an excess was measured but cannot be extrapolated yet: a short round
+        -- (a twenty-fifth of growth) for the second measurement
+        count := max (6 * threads) (min count (count * (coll.rels.size / 25 + 1) / gained))
   if !ready then return none
   let rels := coll.rels
   for k in [rows.sparse.size:rels.size] do rows := rows.add rels[k]!
   let numCols := rows.next
-  -- the character columns cost a Jacobi symbol each: rows in parallel chunks
-  let chunk := (rels.size + threads - 1) / threads
+  -- filtering on the sparse rows (the dense sign, parity and character columns
+  -- that `fullRow` adds are never removed): singletons, then cliques down to
+  -- an excess of `purgeExcess`, which beyond that only enlarges the matrix
+  let kept := GF2.removeSingletons numCols rows.sparse
+  let kept := if params.purgeExcess == 0 then kept
+    else Merge.purge numCols dense rows.sparse kept params.purgeExcess
+  -- full rows of the survivors only (a Jacobi symbol per character), in
+  -- parallel chunks
+  let chunk := (kept.size + threads - 1) / threads
   let rowTasks := (List.range threads).map fun t => Task.spawn fun _ =>
-    (Array.range (min rels.size ((t + 1) * chunk) - min rels.size (t * chunk))).map fun i =>
-      let k := t * chunk + i
+    (Array.range (min kept.size ((t + 1) * chunk) - min kept.size (t * chunk))).map fun i =>
+      let k := kept[t * chunk + i]!
       fullRow ctx.fb rels[k]! rows.sparse[k]!
-  let matRows := rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
-  -- filtering: merge light columns into a smaller, denser matrix (the sign,
-  -- parity and character columns are dense and never eliminated)
-  let kept := GF2.removeSingletons numCols matRows
-  let (mrows, hist, mcols) := Merge.merge numCols (2 + ctx.fb.chars.size)
-    (kept.map fun i => matRows[i]!) params.mergeDensity 32
+  let keptRows := rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
+  -- merge light columns into a smaller, denser matrix
+  let (mrows, hist, mcols) := Merge.merge numCols dense keptRows params.mergeDensity 32
   let mdeps := Lanczos.dependencies mcols mrows 64 threads
-  let deps := (Merge.unmerge kept.size hist mdeps).map fun dep => dep.map fun i => kept[i]!
-  let deps := if deps.isEmpty then GF2.dependencies numCols matRows 64 else deps
+  let deps := Merge.unmerge kept.size hist mdeps
+  let deps := if deps.isEmpty then GF2.dependencies numCols keptRows 64 else deps
+  let deps := deps.map fun dep => dep.map fun i => kept[i]!
   -- each dependency splits `n` with probability about 1/2: square roots in
   -- parallel batches of four
   let mut i := 0

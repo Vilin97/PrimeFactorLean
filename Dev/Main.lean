@@ -22,7 +22,7 @@ def timed (label : String) (f : Unit → Option Nat) : IO Unit := do
   let t1 ← IO.monoNanosNow
   IO.println s!"{label} -> {r} in {(t1 - t0) / 1000000} ms"
 
-def main (args : List String) : IO Unit := do
+def devMain (args : List String) : IO Unit := do
   warmPool 32
   match args with
   | ["micro"] => microMain
@@ -133,8 +133,9 @@ def main (args : List String) : IO Unit := do
       (SIQS.split n { threads := ts.toNat! }).map (·.val)
   | ["fastsiqsp", ns, ts, fbs, m, lp, dlp, spv, slack] =>
     let n := ns.toNat!
-    let params : SIQS.Params := { fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!,
-                                  dlpDiv := dlp.toNat!, spv := spv.toNat!, slack := slack.toNat! }
+    let params : SIQS.Params := { SIQS.chooseParams (QS.decimalDigits n) with
+      fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!, dlpDiv := dlp.toNat!,
+      spv := spv.toNat!, slack := slack.toNat! }
     timed s!"fast siqs n={n} digits={QS.decimalDigits n}" fun _ =>
       (SIQS.split n { threads := ts.toNat!, params := some params }).map (·.val)
   | ["micro2"] => micro2Main
@@ -161,8 +162,12 @@ def main (args : List String) : IO Unit := do
     strideBench 262144 500
   | ["siqstimes", ns, ts, reps] => siqsPhaseTimes ns.toNat! ts.toNat! reps.toNat!
   | ["monttest"] => montTestMain
+  | ["mulbench", k] => mulBench k.toNat!
+  | ["ecmcurves", ns, b1, c] => ecmCurveBench ns.toNat! b1.toNat! c.toNat!
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
   | "gnfsover" :: ns :: ts :: kvs => gnfsPhases ns.toNat! ts.toNat! 0 0 none kvs
+  | "gnfspost" :: path :: ts :: kvs => gnfsPostFile path ts.toNat! kvs
+  | "polystages" :: ns :: ts :: kvs => polyStages ns.toNat! ts.toNat! kvs
   | "snfsover" :: ns :: ts :: b :: k :: sgn :: d :: kvs =>
     let sel := GNFS.snfsSelection b.toNat! k.toNat! d.toNat! (sgn == "+")
     gnfsPhases ns.toNat! ts.toNat! 0 0 (some (sel, GNFS.decimalDigits (b.toNat! ^ k.toNat!))) kvs
@@ -194,11 +199,11 @@ def main (args : List String) : IO Unit := do
       (ECMM.split n { b1 := b1.toNat!, curves := curves.toNat!, threads := ts.toNat! }).map (·.val)
   | ["nfsdebug", ns, ts, d, fbB, a, lp, fudge, lines, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 100 60 300 2000 20000 100 0 64 60 0 40
+    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 100 200 12 60 300 2000 20000 100 0 64 60 0 40
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfslattice", ns, ts, d, fbB, a, lp, fudge, li, lj, qpt, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 100 60 300 2000 20000 100 0 64 60 0 40) with }
+    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 100 200 12 60 300 2000 20000 100 0 64 60 0 40) with }
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfsdebug", ns, ts] =>
     let n := ns.toNat!
@@ -234,3 +239,11 @@ def main (args : List String) : IO Unit := do
     timed s!"{v} n={n} digits={QS.decimalDigits n}" fun _ =>
       (QS.split n { variant := variant, threads := ts.toNat! }).map (·.val)
   | _ => IO.println "usage: dev VARIANT N THREADS | dev ecm B1 CURVES N THREADS"
+
+/-- Exits explicitly, as the CLI does (`Main.lean`): leftover tasks of parallel
+searches must not keep the process alive. -/
+def main (args : List String) : IO Unit := do
+  devMain args
+  (← IO.getStdout).flush
+  (← IO.getStderr).flush
+  IO.Process.exit 0

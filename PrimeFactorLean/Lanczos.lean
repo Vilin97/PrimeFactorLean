@@ -121,6 +121,35 @@ theorem nat_toUSize_le (n : Nat) : n.toUSize.toNat ≤ n := by
   ((b.uget (i + 6) (usize_add_lt i 6 _ (usize_lit_lt 6 (by decide)) h)).toUInt64 <<< 48) |||
   ((b.uget (i + 7) (usize_add_lt i 7 _ (usize_lit_lt 7 (by decide)) h)).toUInt64 <<< 56)
 
+theorem usize_lit_le (k : Nat) : (OfNat.ofNat k : USize).toNat ≤ k := by
+  show (USize.ofNat k).toNat ≤ k
+  have : (USize.ofNat k).toNat = k % 2 ^ System.Platform.numBits := rfl
+  rw [this]
+  exact Nat.mod_le _ _
+
+theorem usize_add_lt' (a j : USize) (s k : Nat) (hj : j.toNat ≤ k) (h : a.toNat + k < s) :
+    (a + j).toNat < s := by
+  rw [USize.toNat_add]
+  exact Nat.lt_of_le_of_lt (Nat.mod_le _ _) (by omega)
+
+theorem mul4_toNat (j : USize) (hj : j.toNat * 4 < USize.size) : (j * 4).toNat = j.toNat * 4 := by
+  rw [USize.toNat_mul]
+  have h4 : (4 : USize).toNat = 4 := by
+    show (USize.ofNat 4).toNat = 4
+    have : (USize.ofNat 4).toNat = 4 % 2 ^ System.Platform.numBits := rfl
+    rw [this]
+    apply Nat.mod_eq_of_lt
+    rcases System.Platform.numBits_eq with h | h <;> rw [h] <;> decide
+  rw [h4]
+  exact Nat.mod_eq_of_lt hj
+
+/-- The 32-bit little-endian word at byte offset `i` (machine-word indices). -/
+@[inline] def bget32U (b : ByteArray) (i : USize) (h : i.toNat + 4 ≤ b.size) : UInt32 :=
+  (b.uget i (by omega)).toUInt32 |||
+  ((b.uget (i + 1) (usize_add_lt' i 1 _ 1 (usize_lit_le 1) (by omega))).toUInt32 <<< 8) |||
+  ((b.uget (i + 2) (usize_add_lt' i 2 _ 2 (usize_lit_le 2) (by omega))).toUInt32 <<< 16) |||
+  ((b.uget (i + 3) (usize_add_lt' i 3 _ 3 (usize_lit_le 3) (by omega))).toUInt32 <<< 24)
+
 /-- A vector of 64-bit words as little-endian bytes. -/
 structure Vec where
   b : ByteArray
@@ -214,24 +243,90 @@ def Mat.isZero (M : Mat) : Bool := (List.range 64).all fun i => M.get i == 0
 
 /-! ## Products with blocks -/
 
+/-! ## Byte tables with machine-word access
+
+The products with 64 × 64 matrices and the inner products go through tables of
+2048 words (eight bytes × 256 values). `Tab` keeps them as two `UInt32` halves
+of fixed size, so that every access is a machine-word index with no bounds
+test, and the blocks are read with one 64-bit load per word (`wordAt`). -/
+
+/-- 2048 words as two `UInt32` halves. -/
+structure Tab where
+  lo : Array UInt32
+  hi : Array UInt32
+  hlo : lo.size = 2048
+  hhi : hi.size = 2048
+
+def Tab.zero : Tab := ⟨Array.replicate 2048 0, Array.replicate 2048 0, by simp, by simp⟩
+
+@[inline] def Tab.get (t : Tab) (i : USize) (h : i.toNat < 2048) : UInt64 :=
+  (t.lo.uget i (by rw [t.hlo]; exact h)).toUInt64 |||
+    ((t.hi.uget i (by rw [t.hhi]; exact h)).toUInt64 <<< 32)
+
+/-- `t[i] ← t[i] ⊕ x`. -/
+@[inline] def Tab.xorAt (t : Tab) (i : USize) (h : i.toNat < 2048) (x : UInt64) : Tab :=
+  match t with
+  | ⟨lo, hi, hlo, hhi⟩ =>
+    let a := lo.uget i (by rw [hlo]; exact h) ^^^ x.toUInt32
+    let b := hi.uget i (by rw [hhi]; exact h) ^^^ (x >>> 32).toUInt32
+    ⟨lo.uset i a (by rw [hlo]; exact h), hi.uset i b (by rw [hhi]; exact h),
+      by simp [hlo], by simp [hhi]⟩
+
+/-- Entry `i` (`0` beyond the table), for code off the hot paths. -/
+def Tab.getN (t : Tab) (i : Nat) : UInt64 :=
+  if h : i < 2048 then t.get i.toUSize (by
+    have : i.toUSize.toNat ≤ i := nat_toUSize_le i
+    omega) else 0
+
+/-- The table index `256 b + (byte b of w)`. -/
+@[inline] def tabIdx (w b : UInt64) : USize := ((w >>> (8 * b)) % 256 + 256 * b).toUSize
+
+theorem tabIdx_lt (w b : UInt64) (hb : b.toNat < 8) : (tabIdx w b).toNat < 2048 := by
+  unfold tabIdx
+  have h1 : ((w >>> (8 * b)) % 256).toNat < 256 := by
+    rw [UInt64.toNat_mod]; exact Nat.mod_lt _ (by decide)
+  have h2 : (256 * b).toNat = 256 * b.toNat := by
+    rw [UInt64.toNat_mul]; simp; omega
+  have h3 : ((w >>> (8 * b)) % 256 + 256 * b).toNat < 2048 := by
+    rw [UInt64.toNat_add, h2]; omega
+  have h4 : 2048 < 2 ^ System.Platform.numBits := by
+    rcases System.Platform.numBits_eq with h | h <;> rw [h] <;> decide
+  rw [UInt64.toNat_toUSize, Nat.mod_eq_of_lt (by omega)]
+  exact h3
+
+theorem nat_toUSize_toNat {k : Nat} (h : k < USize.size) : k.toUSize.toNat = k := by
+  show (USize.ofNat k).toNat = k
+  have : (USize.ofNat k).toNat = k % 2 ^ System.Platform.numBits := rfl
+  rw [this]
+  exact Nat.mod_eq_of_lt h
+
+/-- Word `k` of `b` with one machine-word load. -/
+@[inline] def wordAt (b : ByteArray) (k : Nat) (h : 8 * k + 8 ≤ b.size) (hs : b.size < USize.size) :
+    UInt64 :=
+  have hk : k.toUSize.toNat = k := nat_toUSize_toNat (by omega)
+  bget64U b (k.toUSize * 8) (by rw [mul8_toNat k.toUSize (by omega), hk]; omega)
+
 /-- Eight byte-indexed tables of `⊕` combinations of the rows of `M`, so that
-`w · M` costs eight lookups: `table[256 b + v]` for byte `b` of value `v`. -/
-def tables (M : Mat) : Words := Id.run do
-  let mut t := Words.zeros 2048
+`V M` costs eight table reads per row (`applyTables`). -/
+def tables (M : Mat) : Tab := Id.run do
+  let mut t := Tab.zero
   for b in [0:8] do
     for v in [1:256] do
       -- lowest set bit of v: reuse the entry without it
       let low := v &&& (256 - v)
       let j := (Nat.log2 low) + 8 * b
-      let x := t.get (256 * b + (v - low)) ^^^ M.get j
-      t := t.set (256 * b + v) x
+      let i := 256 * b + v
+      if h : i < 2048 then
+        t := t.xorAt i.toUSize (by have := nat_toUSize_le i; omega)
+          (t.getN (256 * b + (v - low)) ^^^ M.get j)
   return t
 
-@[inline] def applyTables (t : Words) (w : UInt64) : UInt64 :=
-  t.get (w &&& 255).toNat ^^^ t.get (256 + ((w >>> 8) &&& 255).toNat) ^^^
-  t.get (512 + ((w >>> 16) &&& 255).toNat) ^^^ t.get (768 + ((w >>> 24) &&& 255).toNat) ^^^
-  t.get (1024 + ((w >>> 32) &&& 255).toNat) ^^^ t.get (1280 + ((w >>> 40) &&& 255).toNat) ^^^
-  t.get (1536 + ((w >>> 48) &&& 255).toNat) ^^^ t.get (1792 + (w >>> 56).toNat)
+/-- `w M` from the tables of `M` (eight machine-word reads). -/
+@[inline] def applyTables (t : Tab) (w : UInt64) : UInt64 :=
+  t.get (tabIdx w 0) (tabIdx_lt w 0 (by decide)) ^^^ t.get (tabIdx w 1) (tabIdx_lt w 1 (by decide)) ^^^
+  t.get (tabIdx w 2) (tabIdx_lt w 2 (by decide)) ^^^ t.get (tabIdx w 3) (tabIdx_lt w 3 (by decide)) ^^^
+  t.get (tabIdx w 4) (tabIdx_lt w 4 (by decide)) ^^^ t.get (tabIdx w 5) (tabIdx_lt w 5 (by decide)) ^^^
+  t.get (tabIdx w 6) (tabIdx_lt w 6 (by decide)) ^^^ t.get (tabIdx w 7) (tabIdx_lt w 7 (by decide))
 
 /-- `acc ⊕ V M` (an `n × 64` block times a 64 × 64 matrix). -/
 def mulAcc (V : Block) (M : Mat) (acc : Block) : Block := Id.run do
@@ -244,35 +339,59 @@ def mulAcc (V : Block) (M : Mat) (acc : Block) : Block := Id.run do
       a := a.set k x
   return ⟨a⟩
 
-/-- `acc ⊕` the byte tables of `Vᵀ W` over the rows `[lo, hi)`: entry
-`256 b + v` accumulates `W[k]` over the `k` whose byte `b` of `V[k]` is `v`. -/
-def innerAcc (V W : Block) (lo hi : Nat) (acc : Words) : Words := Id.run do
-  let mut acc := acc
-  for k in [lo:hi] do
-    let v := V.get k
-    if v == 0 then continue
-    let w := W.get k
-    for b in [0:8] do
-      let byte := ((v >>> (8 * b).toUInt64) &&& 255).toNat
-      if byte != 0 then
-        let idx := 256 * b + byte
-        let x := acc.get idx ^^^ w
-        acc := acc.set idx x
-  return acc
+/-- The updates of the byte tables of `Vᵀ W` for one row (`v`, `w`): entry
+`256 b + v_b` accumulates `w`. A zero byte updates entry `256 b`, which
+`tablesMat` never reads, so the updates need no tests. -/
+@[inline] def rowAcc (t : Tab) (v w : UInt64) : Tab :=
+  let t := t.xorAt (tabIdx v 0) (tabIdx_lt v 0 (by decide)) w
+  let t := t.xorAt (tabIdx v 1) (tabIdx_lt v 1 (by decide)) w
+  let t := t.xorAt (tabIdx v 2) (tabIdx_lt v 2 (by decide)) w
+  let t := t.xorAt (tabIdx v 3) (tabIdx_lt v 3 (by decide)) w
+  let t := t.xorAt (tabIdx v 4) (tabIdx_lt v 4 (by decide)) w
+  let t := t.xorAt (tabIdx v 5) (tabIdx_lt v 5 (by decide)) w
+  let t := t.xorAt (tabIdx v 6) (tabIdx_lt v 6 (by decide)) w
+  t.xorAt (tabIdx v 7) (tabIdx_lt v 7 (by decide)) w
+
+/-- The byte tables of `Vᵀ W` over the rows `[k, hi)`. -/
+def innerGo (V W : ByteArray) (hi : Nat) (hV : 8 * hi ≤ V.size) (hW : 8 * hi ≤ W.size)
+    (hs : V.size < USize.size ∧ W.size < USize.size) (k : Nat) (t : Tab) : Tab :=
+  if hk : k < hi then
+    innerGo V W hi hV hW hs (k + 1)
+      (rowAcc t (wordAt V k (by omega) hs.1) (wordAt W k (by omega) hs.2))
+  else t
+termination_by hi - k
+
+/-- The byte tables of `Vᵀ AV`, `AVᵀ AV` and `Vᵀ V₀` over the rows `[k, hi)`, in
+one pass (each row of the three blocks is read once). -/
+def innerAcc3 (V AV V0 : ByteArray) (hi : Nat) (hV : 8 * hi ≤ V.size) (hA : 8 * hi ≤ AV.size)
+    (h0 : 8 * hi ≤ V0.size) (hs : V.size < USize.size ∧ AV.size < USize.size ∧ V0.size < USize.size)
+    (k : Nat) (t1 t2 t3 : Tab) : Tab × Tab × Tab :=
+  if hk : k < hi then
+    let v := wordAt V k (by omega) hs.1
+    let w := wordAt AV k (by omega) hs.2.1
+    let z := wordAt V0 k (by omega) hs.2.2
+    innerAcc3 V AV V0 hi hV hA h0 hs (k + 1) (rowAcc t1 v w) (rowAcc t2 w w) (rowAcc t3 v z)
+  else (t1, t2, t3)
+termination_by hi - k
 
 /-- The 64 × 64 matrix of accumulated byte tables: row `i` is the `⊕` of
 `acc[256 b + v]` over the `v` with bit `i mod 8` set, `b = i / 8`. -/
-def tablesMat (acc : Words) : Mat :=
+def tablesMat (acc : Tab) : Mat :=
   Mat.ofFn fun i => Id.run do
     let b := i / 8
     let m := i % 8
     let mut r : UInt64 := 0
     for v in [1:256] do
-      if (v >>> m) % 2 == 1 then r := r ^^^ acc.get (256 * b + v)
+      if (v >>> m) % 2 == 1 then r := r ^^^ acc.getN (256 * b + v)
     return r
 
 /-- `Vᵀ W` (64 × 64). -/
-def inner (V W : Block) : Mat := tablesMat (innerAcc V W 0 V.size (Words.zeros 2048))
+def inner (V W : Block) : Mat :=
+  let n := min V.size W.size
+  if h : 8 * n ≤ V.data.b.size ∧ 8 * n ≤ W.data.b.size ∧ V.data.b.size < USize.size ∧
+      W.data.b.size < USize.size then
+    tablesMat (innerGo V.data.b W.data.b n h.1 h.2.1 ⟨h.2.2.1, h.2.2.2⟩ 0 Tab.zero)
+  else Mat.zero
 
 /-- Elementwise `⊕`. -/
 def Words.xor (a b : Words) : Words :=
@@ -282,9 +401,10 @@ def Words.xor (a b : Words) : Words :=
 
 /-- A sparse matrix by columns (relations), with its transpose by rows, both in
 compressed form: entries of column `c` are `colIdx[colPtr[c] .. colPtr[c+1])`.
-Very large matrices (`packed`, at least `2^26` entries) keep their indices in
-three bytes each instead (`colIdxB`, `rowIdxB`): an `Array UInt32` spends eight
-bytes per entry (at `2^24` entries the decoding still costs more than it saves). -/
+Matrices of at least `2^20` entries (`packed`) keep their indices in four bytes
+each instead (`colIdxB`, `rowIdxB`, read by `gather4U` with machine-word loads):
+an `Array UInt32` spends eight bytes per entry (200000 columns of weight 80:
+one product 2.8 -> 1.7 ms with 16 threads). -/
 structure Sparse where
   nrows : Nat
   ncols : Nat
@@ -300,7 +420,7 @@ structure Sparse where
 def push4 (b : ByteArray) (x : Nat) : ByteArray :=
   (((b.push x.toUInt8).push (x >>> 8).toUInt8).push (x >>> 16).toUInt8).push (x >>> 24).toUInt8
 
-def Sparse.mk' (nrows : Nat) (cols : Array (Array Nat)) (packAt : Nat := 67108864) : Sparse :=
+def Sparse.mk' (nrows : Nat) (cols : Array (Array Nat)) (packAt : Nat := 1048576) : Sparse :=
   Id.run do
   let nnz := cols.foldl (· + ·.size) 0
   let packed := nnz ≥ packAt
@@ -358,6 +478,26 @@ def gatherU (x : ByteArray) (n : USize) (hn : n.toNat * 8 ≤ x.size) (hs : n.to
 termination_by cnt.toNat
 decreasing_by rw [usize_pred_eq cnt hc]; omega
 
+/-- `gatherU` on indices of four bytes (little endian; the four byte loads merge):
+entries `[k, k + cnt)` of `idx`. -/
+def gather4U (x : ByteArray) (n : USize) (hn : n.toNat * 8 ≤ x.size) (hs : n.toNat * 8 < USize.size)
+    (idx : ByteArray) (k cnt : USize) (hk : (k.toNat + cnt.toNat) * 4 ≤ idx.size)
+    (hi : idx.size < USize.size) (acc : UInt64) : UInt64 :=
+  if hc : cnt = 0 then acc
+  else
+    have hcnt : cnt.toNat ≠ 0 := fun h0 => hc (USize.toNat_inj.mp (by simpa using h0))
+    have hk4 : (k * 4).toNat = k.toNat * 4 := mul4_toNat k (by omega)
+    let i := bget32U idx (k * 4) (by rw [hk4]; omega)
+    let j := i.toUSize
+    let acc := if h : j < n then
+        have hjn : j.toNat < n.toNat := USize.lt_iff_toNat_lt.mp h
+        acc ^^^ bget64U x (j * 8) (by rw [mul8_toNat j (by omega)]; omega)
+      else acc
+    gather4U x n hn hs idx (k + 1) (cnt - 1)
+      (by have := usize_succ_le k; rw [usize_pred_eq cnt hc]; omega) hi acc
+termination_by cnt.toNat
+decreasing_by rw [usize_pred_eq cnt hc]; omega
+
 /-- `gather` on indices of four bytes (little endian; the four byte loads merge). -/
 def gather4 (x : Vec) (idx : ByteArray) (lo hi : Nat) (acc : UInt64) : UInt64 :=
   if h : lo < hi ∧ 4 * lo + 3 < idx.size then
@@ -381,7 +521,11 @@ def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (packed : Boo
     for r in [lo:hi] do
       let a := ptr[r]!
       let b := ptr[r + 1]!
-      out := out.push (if packed then gather4 x.data idxB a b 0
+      out := out.push (if packed then
+          if h : a ≤ b ∧ b * 4 ≤ idxB.size ∧ idxB.size < USize.size then
+            gather4U xb nU hn (by omega) idxB a.toUSize (b - a).toUSize
+              (by have := nat_toUSize_le a; have := nat_toUSize_le (b - a); omega) h.2.2 0
+          else gather4 x.data idxB a b 0
         else if h : a ≤ b ∧ b ≤ idx.size then
           gatherU xb nU hn (by omega) idx a.toUSize (b - a).toUSize
             (by have := nat_toUSize_le a; have := nat_toUSize_le (b - a); omega) 0
@@ -547,20 +691,45 @@ structure LState where
   s1 : Array Nat
   mask1 : UInt64
 
-/-- Rows `[lo, hi)` of `(A V ∧ mask) ⊕ V D ⊕ V₁ E ⊕ V₂ F` (tables of `D, E, F`). -/
-def nextRange (v v1 v2 av : Block) (mask : UInt64) (tD tE tF : Words) (lo hi : Nat) : Vec := Id.run do
-  let mut out : Vec := Vec.empty (hi - lo)
-  for k in [lo:hi] do
-    out := out.push ((av.get k &&& mask) ^^^ applyTables tD (v.get k) ^^^
-      applyTables tE (v1.get k) ^^^ applyTables tF (v2.get k))
-  return out
+/-- Rows `[k, hi)` of `(A V ∧ mask) ⊕ V D ⊕ V₁ E ⊕ V₂ F` (tables of `D, E, F`),
+appended to `out`. -/
+def nextGo (v v1 v2 av : ByteArray) (mask : UInt64) (tD tE tF : Tab) (hi : Nat)
+    (h1 : 8 * hi ≤ v.size) (h2 : 8 * hi ≤ v1.size) (h3 : 8 * hi ≤ v2.size) (h4 : 8 * hi ≤ av.size)
+    (hs : v.size < USize.size ∧ v1.size < USize.size ∧ v2.size < USize.size ∧ av.size < USize.size)
+    (k : Nat) (out : Vec) : Vec :=
+  if hk : k < hi then
+    nextGo v v1 v2 av mask tD tE tF hi h1 h2 h3 h4 hs (k + 1)
+      (out.push ((wordAt av k (by omega) hs.2.2.2 &&& mask) ^^^
+        applyTables tD (wordAt v k (by omega) hs.1) ^^^
+        applyTables tE (wordAt v1 k (by omega) hs.2.1) ^^^
+        applyTables tF (wordAt v2 k (by omega) hs.2.2.1)))
+  else out
+termination_by hi - k
 
-/-- Rows `[lo, hi)` of `X ⊕ V W` (table of `W`). -/
-def xRange (x v : Block) (tW : Words) (lo hi : Nat) : Vec := Id.run do
-  let mut out : Vec := Vec.empty (hi - lo)
-  for k in [lo:hi] do
-    out := out.push (x.get k ^^^ applyTables tW (v.get k))
-  return out
+/-- Rows `[lo, hi)` of `(A V ∧ mask) ⊕ V D ⊕ V₁ E ⊕ V₂ F`. -/
+def nextRange (v v1 v2 av : Block) (mask : UInt64) (tD tE tF : Tab) (lo hi : Nat) : Vec :=
+  if h : 8 * hi ≤ v.data.b.size ∧ 8 * hi ≤ v1.data.b.size ∧ 8 * hi ≤ v2.data.b.size ∧
+      8 * hi ≤ av.data.b.size ∧ v.data.b.size < USize.size ∧ v1.data.b.size < USize.size ∧
+      v2.data.b.size < USize.size ∧ av.data.b.size < USize.size then
+    nextGo v.data.b v1.data.b v2.data.b av.data.b mask tD tE tF hi h.1 h.2.1 h.2.2.1 h.2.2.2.1
+      ⟨h.2.2.2.2.1, h.2.2.2.2.2.1, h.2.2.2.2.2.2.1, h.2.2.2.2.2.2.2⟩ lo (Vec.empty (hi - lo))
+  else Vec.empty 0
+
+/-- Rows `[k, hi)` of `X ⊕ V W` (table of `W`), appended to `out`. -/
+def xGo (x v : ByteArray) (tW : Tab) (hi : Nat) (h1 : 8 * hi ≤ x.size) (h2 : 8 * hi ≤ v.size)
+    (hs : x.size < USize.size ∧ v.size < USize.size) (k : Nat) (out : Vec) : Vec :=
+  if hk : k < hi then
+    xGo x v tW hi h1 h2 hs (k + 1)
+      (out.push (wordAt x k (by omega) hs.1 ^^^ applyTables tW (wordAt v k (by omega) hs.2)))
+  else out
+termination_by hi - k
+
+/-- Rows `[lo, hi)` of `X ⊕ V W`. -/
+def xRange (x v : Block) (tW : Tab) (lo hi : Nat) : Vec :=
+  if h : 8 * hi ≤ x.data.b.size ∧ 8 * hi ≤ v.data.b.size ∧ x.data.b.size < USize.size ∧
+      v.data.b.size < USize.size then
+    xGo x.data.b v.data.b tW hi h.1 h.2.1 ⟨h.2.2.1, h.2.2.2⟩ lo (Vec.empty (hi - lo))
+  else Vec.empty 0
 
 /-- The row ranges of `n` rows split over `tasks` chunks. -/
 def chunks (n tasks : Nat) : List (Nat × Nat) :=
@@ -575,11 +744,15 @@ def step (B : Sparse) (threads : Nat) (v0 : Block) (st : LState) : Except Bool L
   let av := mulA B st.v threads
   let n := st.v.size
   let tasks := if n < 4096 then 1 else threads
-  let z := Words.zeros 2048
   -- each task reduces its rows to 64 × 64 matrices (`tablesMat` is linear)
   let parts := (chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
-    (tablesMat (innerAcc st.v av lo hi z), tablesMat (innerAcc av av lo hi z),
-      tablesMat (innerAcc st.v v0 lo hi z))
+    let (vb, ab, zb) := (st.v.data.b, av.data.b, v0.data.b)
+    if h : 8 * hi ≤ vb.size ∧ 8 * hi ≤ ab.size ∧ 8 * hi ≤ zb.size ∧ vb.size < USize.size ∧
+        ab.size < USize.size ∧ zb.size < USize.size then
+      let (a1, a2, a3) := innerAcc3 vb ab zb hi h.1 h.2.1 h.2.2.1
+        ⟨h.2.2.2.1, h.2.2.2.2.1, h.2.2.2.2.2⟩ lo Tab.zero Tab.zero Tab.zero
+      (tablesMat a1, tablesMat a2, tablesMat a3)
+    else (Mat.zero, Mat.zero, Mat.zero)
   let (vtav, vta2v, vtv0) := parts.foldl (fun (x1, x2, x3) tk =>
     let (y1, y2, y3) := tk.get
     (x1.xor y1, x2.xor y2, x3.xor y3)) (Mat.zero, Mat.zero, Mat.zero)

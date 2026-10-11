@@ -399,6 +399,18 @@ def Relation.toSquares {n : Nat} {fb : Array Nat} (r : Relation n fb) :
       grind⟩
   else none
 
+/-- A congruence of squares from a direct check of `x² ≡ y² (mod n)`. -/
+def SquareCongruence.ofCheck (n x y : Nat) : Option (SquareCongruence n) :=
+  if h : x * x % n = y * y % n then
+    some ⟨x, y, by
+      have hx := (ModEq.natCast_mod (x * x) n).symm
+      have hy := ModEq.natCast_mod (y * y) n
+      rw [h] at hx
+      refine (ModEq.of_eq ?_).trans (hx.trans (hy.trans (ModEq.of_eq ?_)))
+      · push_cast; grind
+      · push_cast; grind⟩
+  else none
+
 /-- The gcd step: `gcd(x - y, n)` divides `n`; return it when it is proper. -/
 def SquareCongruence.factor {n : Nat} (c : SquareCongruence n) : Option (ProperFactor n) :=
   checkFactor n (Int.gcd ((c.x : Int) - (c.y : Int)) (n : Int))

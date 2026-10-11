@@ -29,8 +29,109 @@ def applyOverrides (p : Params) (kvs : List String) : Params :=
       | "psIncr" => { p with psIncr := x }
       | "psAdMax" => { p with psAdMax := x }
       | "psKeep" => { p with psKeep := x }
+      | "purge" => { p with purgeExcess := x }
+      | "density" => { p with mergeDensity := x }
+      | "lasVariant" => { p with lasVariant := x }
       | _ => p
     | _ => p) p
+
+/-- Relations as text: a header `n m Y₁ c₀ … c_d`, then one relation per line,
+`a b sign|p,e …|p,r,e …`. -/
+def dumpRels (path : String) (n : Nat) (sel : Selection) (rels : Array Rel) : IO Unit := do
+  let h ← IO.FS.Handle.mk path .write
+  h.putStrLn (" ".intercalate ([toString n, toString sel.m, toString sel.y1] ++
+    sel.coeffs.toList.map toString))
+  for r in rels do
+    let rat := " ".intercalate (r.rat.map fun (q, e) => s!"{q},{e}")
+    let alg := " ".intercalate (r.alg.map fun (q, x, e) => s!"{q},{x},{e}")
+    h.putStrLn s!"{r.a} {r.b} {if r.ratNeg then 1 else 0}|{rat}|{alg}"
+
+/-- The input, polynomial and relations written by `dumpRels`. -/
+def loadRels (path : String) : IO (Nat × Selection × Array Rel) := do
+  let lines ← IO.FS.lines path
+  let hdr := (lines[0]!.splitOn " ").filter (· ≠ "")
+  let sel : Selection := { coeffs := (hdr.drop 3).toArray.map String.toInt!, m := hdr[1]!.toNat!,
+                           y1 := hdr[2]!.toNat! }
+  let mut rels : Array Rel := Array.mkEmpty lines.size
+  for i in [1:lines.size] do
+    match lines[i]!.splitOn "|" with
+    | [head, rat, alg] =>
+      let hs := head.splitOn " "
+      let ratL := ((rat.splitOn " ").filter (· ≠ "")).map fun t => match t.splitOn "," with
+        | [q, e] => (q.toNat!, e.toNat!)
+        | _ => (0, 0)
+      let algL := ((alg.splitOn " ").filter (· ≠ "")).map fun t => match t.splitOn "," with
+        | [q, x, e] => (q.toNat!, x.toNat!, e.toNat!)
+        | _ => (0, 0, 0)
+      rels := rels.push { a := hs[0]!.toInt!, b := hs[1]!.toNat!, rat := ratL,
+                          ratNeg := hs[2]! == "1", alg := algL }
+    | _ => pure ()
+  return (hdr[0]!.toNat!, sel, rels)
+
+/-- Everything after sieving, timed: filtering, merge, Lanczos, square roots. -/
+def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads : Nat)
+    (rels : Array Rel) (rows : Rows) (t0 t3 : Nat) : IO Unit := do
+  let numCols := rows.next
+  let dense := 2 + ctx.fb.chars.size
+  let t4 ← IO.monoNanosNow
+  let kept0 ← IO.lazyPure fun _ => GF2.removeSingletons numCols rows.sparse
+  let t5a ← IO.monoNanosNow
+  let kept ← IO.lazyPure fun _ => if params.purgeExcess == 0 then kept0
+    else Merge.purge numCols dense rows.sparse kept0 params.purgeExcess
+  let t5c ← IO.monoNanosNow
+  let keptRows ← IO.lazyPure fun _ =>
+    let chunk := (kept.size + threads - 1) / threads
+    let rowTasks := (List.range threads).map fun t => Task.spawn fun _ =>
+      (Array.range (min kept.size ((t + 1) * chunk) - min kept.size (t * chunk))).map fun i =>
+        let k := kept[t * chunk + i]!
+        fullRow ctx.fb rels[k]! rows.sparse[k]!
+    rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
+  let t5 ← IO.monoNanosNow
+  IO.println s!"singletons {ms t4 t5a} ms ({kept0.size} rows), purge {ms t5a t5c} ms -> {kept.size} rows, full rows {ms t5c t5} ms"
+  let (mrows, hist, mcols) ← IO.lazyPure fun _ => Merge.merge numCols dense keptRows
+    params.mergeDensity 32
+  let t5b ← IO.monoNanosNow
+  -- Lanczos components, timed (the dependencies are those of `Lanczos.dependencies`)
+  let la0 ← IO.monoNanosNow
+  let kept2 ← IO.lazyPure fun _ => GF2.removeSingletons mcols mrows
+  let la1 ← IO.monoNanosNow
+  let Bm ← IO.lazyPure fun _ => Lanczos.Sparse.mk' mcols (kept2.map fun i => mrows[i]!)
+  let la2 ← IO.monoNanosNow
+  IO.println s!"lanczos setup: singletons {ms la0 la1}, sparse {ms la1 la2} ({kept2.size} rows)"
+  let mdeps ← IO.lazyPure fun _ => Lanczos.dependencies mcols mrows 64 threads
+  let deps := (Merge.unmerge kept.size hist mdeps).map fun dep => dep.map fun i => kept[i]!
+  let t6 ← IO.monoNanosNow
+  let wt := mrows.foldl (fun a r => a + r.size) 0
+  IO.println s!"filter {ms t3 t5} ms (kept {kept.size}), merge {ms t5 t5b} ms -> {mrows.size} x {mcols} (weight {wt / max 1 mrows.size}/row), Lanczos {ms t5b t6} ms ({deps.size} deps)"
+  let mut tried := 0
+  for dep in deps do
+    tried := tried + 1
+    let a ← IO.monoNanosNow
+    -- the parts of `congruence`, timed: the product `γ`, then the lifting
+    let drels := dep.toList.map fun i => rels[i]!
+    let S : List (Int × Int) := drels.map fun r => (r.a, (r.b : Int))
+    let γ ← IO.lazyPure fun _ => NFS.prodTreePar st.g 3
+      (st.fp :: st.fp :: S.map fun ab => [(st.cd : Int) * ab.1, -ab.2])
+    let a1 ← IO.monoNanosNow
+    let lifted ← IO.lazyPure fun _ =>
+      (NFS.sqrtFind st.g γ p (fun _ => true)).map NFS.maxBits
+    let a2 ← IO.monoNanosNow
+    IO.println s!"  gamma {ms a a1} ms ({NFS.maxBits γ} bits), first lift {ms a1 a2} ms (beta {lifted} bits)"
+    let a3 ← IO.monoNanosNow
+    let c ← IO.lazyPure fun _ => congruence st drels p
+    let r := c.bind (·.factor)
+    let b ← IO.monoNanosNow
+    IO.println s!"  congruence {ms a3 b} ms"
+    -- why a dependency fails: no congruence (odd rational exponents or no
+    -- square root in ℤ[ω]: missing characters) or a trivial gcd
+    let why := if r.isSome then "" else if c.isSome then " (trivial gcd)" else
+      match rationalRoot (dep.toList.map fun i => rels[i]!) with
+      | none => " (rational product not a square)"
+      | some _ => " (no square root in Z[w])"
+    IO.println s!"dep {tried} ({dep.size} rels): sqrt {ms a b} ms -> {r.map (·.val)}{why}"
+    if r.isSome then break
+  let t7 ← IO.monoNanosNow
+  IO.println s!"total {ms t0 t7} ms"
 
 def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     (snfs : Option (Selection × Nat) := none) (overrides : List String := []) : IO Unit := do
@@ -64,7 +165,7 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
       mfbA := params.mfbA, fudge := params.lasFudge,
       variant := (overrides.findSome? fun kv => match kv.splitOn "=" with
         | ["variant", v] => v.toNat?
-        | _ => none).getD 12,
+        | _ => none).getD params.lasVariant,
       jDiv := (overrides.findSome? fun kv => match kv.splitOn "=" with
         | ["jDiv", v] => v.toNat?
         | _ => none).getD 2 }
@@ -80,83 +181,107 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   let mut tSieve := 0
   let mut tCheck := 0
   let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
+  let dense := 2 + ctx.fb.chars.size
+  let mut tWait := 0
   while !ready && round < 3000 do
     round := round + 1
     let a ← IO.monoNanosNow
     let before := coll.rels.size
+    -- as `GNFS.splitWith`: far from ready, rows and checks in a task during the round
+    let due := coll.rels.size ≥ base && coll.rels.size * 10 ≥ lastCheck * 11
+    let mut bg : Option (Task (Rows × Option (Int × Bool × Nat))) := none
+    if prev.isNone then
+      let fresh := coll.rels.extract rows.sparse.size coll.rels.size
+      let r0 := rows
+      rows := default
+      bg := some (Task.spawn fun _ =>
+        let r := fresh.foldl Rows.add r0
+        (r, if due then some (rowsExcess r dense params.extra) else none))
     let (c, sc) ← IO.lazyPure fun _ => collectRoundLas las params threads count coll scratch
     coll := c
     scratch := sc
     let b ← IO.monoNanosNow
-    for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
     let mut target := 0
-    if coll.rels.size ≥ base && (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11) then
+    if let some t := bg then
+      let (r, chk) ← IO.lazyPure fun _ => t.get
+      rows := r
+      if let some c := chk then
+        lastCheck := before
+        let (ok, p', tg) := readiness params.extra before prev c
+        IO.eprintln s!"  check (background): rels {before} {repr c}"
+        ready := ok
+        prev := p'
+        target := tg
+    let b2 ← IO.monoNanosNow
+    if bg.isNone then
+      for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
+    if !ready && bg.isNone && coll.rels.size ≥ base &&
+        (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11) then
       lastCheck := coll.rels.size
-      let (excess, ok, kept) ← IO.lazyPure fun _ => rowsExcess rows (2 + ctx.fb.chars.size) params.extra
+      let chk ← IO.lazyPure fun _ => rowsExcess rows dense params.extra
+      IO.eprintln s!"  check: rels {coll.rels.size} {repr chk}"
+      let (ok, p', tg) := readiness params.extra coll.rels.size prev chk
       ready := ok
-      IO.eprintln s!"  check: rels {coll.rels.size} kept {kept} excess {excess}"
-      if kept == 0 then
-        prev := none
-        lastCheck := coll.rels.size * 14 / 11
-      else
-        if let some (r0, e0) := prev then
-          if excess > e0 && coll.rels.size > r0 then
-            let need := ((params.extra : Int) - excess) * ((coll.rels.size - r0 : Nat) : Int) /
-              (excess - e0)
-            target := coll.rels.size + (11 * need.toNat) / 10
-        prev := some (coll.rels.size, excess)
-    let c ← IO.monoNanosNow
+      prev := p'
+      target := tg
+    let c2 ← IO.monoNanosNow
     tSieve := tSieve + (b - a)
-    tCheck := tCheck + (c - b)
+    tWait := tWait + (b2 - b)
+    tCheck := tCheck + (c2 - b2)
     let gained := coll.rels.size - before
     IO.eprintln s!"round {round}: {count} special-q, q < {coll.nextQ} gained {gained} total {coll.rels.size} ({(b - a) / 1000000} ms)"
     if gained > 0 then
       count := max (6 * threads) (count * (coll.rels.size / 10 + 1) / gained)
       if target > coll.rels.size then
         count := max (6 * threads) (min count ((target - coll.rels.size) * count / gained + 1))
+      else if prev.isSome then
+        count := max (6 * threads) (min count (count * (coll.rels.size / 25 + 1) / gained))
+  for k in [rows.sparse.size:coll.rels.size] do rows := rows.add coll.rels[k]!
   let t3 ← IO.monoNanosNow
-  IO.println s!"rounds {round}, q up to {coll.nextQ}, relations {coll.rels.size}: sieve {tSieve / 1000000} ms, rows+checks {tCheck / 1000000} ms"
+  IO.println s!"rounds {round}, q up to {coll.nextQ}, relations {coll.rels.size}: sieve {tSieve / 1000000} ms, background wait {tWait / 1000000} ms, rows+checks {tCheck / 1000000} ms"
   let rels := coll.rels
-  let numCols := rows.next
-  let matRows ← IO.lazyPure fun _ =>
-    let chunk := (rels.size + threads - 1) / threads
-    let rowTasks := (List.range threads).map fun t => Task.spawn fun _ =>
-      (Array.range (min rels.size ((t + 1) * chunk) - min rels.size (t * chunk))).map fun i =>
-        let k := t * chunk + i
-        fullRow ctx.fb rels[k]! rows.sparse[k]!
-    rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
-  let t4 ← IO.monoNanosNow
-  let kept := GF2.removeSingletons numCols matRows
-  let t5 ← IO.monoNanosNow
-  let (mrows, hist, mcols) ← IO.lazyPure fun _ => Merge.merge numCols (2 + ctx.fb.chars.size)
-    (kept.map fun i => matRows[i]!) params.mergeDensity 32
-  let t5b ← IO.monoNanosNow
-  -- Lanczos components, timed (the dependencies are those of `Lanczos.dependencies`)
-  let la0 ← IO.monoNanosNow
-  let kept2 ← IO.lazyPure fun _ => GF2.removeSingletons mcols mrows
-  let la1 ← IO.monoNanosNow
-  let Bm ← IO.lazyPure fun _ => Lanczos.Sparse.mk' mcols (kept2.map fun i => mrows[i]!)
-  let la2 ← IO.monoNanosNow
-  IO.println s!"lanczos setup: singletons {ms la0 la1}, sparse {ms la1 la2} ({kept2.size} rows)"
-  let mdeps ← IO.lazyPure fun _ => Lanczos.dependencies mcols mrows 64 threads
-  let deps := (Merge.unmerge kept.size hist mdeps).map fun dep => dep.map fun i => kept[i]!
-  let t6 ← IO.monoNanosNow
-  let wt := mrows.foldl (fun a r => a + r.size) 0
-  IO.println s!"full rows {ms t3 t4} ms, singletons {ms t4 t5} ms (kept {kept.size}), merge {ms t5 t5b} ms -> {mrows.size} x {mcols} (weight {wt / max 1 mrows.size}/row), Lanczos {ms t5b t6} ms ({deps.size} deps)"
-  let mut tried := 0
-  for dep in deps do
-    tried := tried + 1
-    let a ← IO.monoNanosNow
-    let c ← IO.lazyPure fun _ => congruence st (dep.toList.map fun i => rels[i]!) p
-    let r := c.bind (·.factor)
-    let b ← IO.monoNanosNow
-    -- why a dependency fails: no congruence (odd rational exponents or no
-    -- square root in ℤ[ω]: missing characters) or a trivial gcd
-    let why := if r.isSome then "" else if c.isSome then " (trivial gcd)" else
-      match rationalRoot (dep.toList.map fun i => rels[i]!) with
-      | none => " (rational product not a square)"
-      | some _ => " (no square root in Z[w])"
-    IO.println s!"dep {tried} ({dep.size} rels): sqrt {ms a b} ms -> {r.map (·.val)}{why}"
-    if r.isSome then break
-  let t7 ← IO.monoNanosNow
-  IO.println s!"total {ms t0 t7} ms"
+  if let some path := overrides.findSome? (fun kv => match kv.splitOn "=" with
+      | ["dump", v] => some v
+      | _ => none) then
+    dumpRels path n sel rels
+    IO.println s!"relations written to {path}"
+  gnfsPost n st ctx params p threads rels rows t0 t3
+
+/-- `gnfsPost` on relations written by `dumpRels` (parameters by size, with overrides). -/
+def gnfsPostFile (path : String) (threads : Nat) (overrides : List String) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let (n, sel, rels) ← loadRels path
+  let params0 := applyOverrides (chooseParams (decimalDigits n)) overrides
+  let params := { params0 with lpMult := 2 ^ (max params0.lpbR params0.lpbA) /
+      (min params0.ratBound params0.algBound) + 1 }
+  let some st := mkSetup n sel | IO.println "no setup"
+  let ctx ← IO.lazyPure fun _ => mkCtx n sel params
+  let some p := inertPrime st.g 1000003 | IO.println "no inert prime"
+  let rows ← IO.lazyPure fun _ => rels.foldl Rows.add (Rows.empty ctx.fb)
+  let t3 ← IO.monoNanosNow
+  IO.println s!"loaded {rels.size} relations, rows in {ms t0 t3} ms"
+  gnfsPost n st ctx params p threads rels rows t0 t3
+
+open PrimeFactorLean.NFS.PolySelect in
+/-- `PolySelect.selectCollision` with its two stages timed (collision search,
+root optimization of the kept candidates). -/
+def polyStages (n threads : Nat) (overrides : List String) : IO Unit := do
+  let params := applyOverrides (chooseParams (decimalDigits n)) overrides
+  let d := params.degree
+  let t := max 1 threads
+  let count := (params.psAdMax + params.psIncr - 1) / params.psIncr
+  let per := (count + 4 * t - 1) / (4 * t)
+  let t0 ← IO.monoNanosNow
+  let cands ← IO.lazyPure fun _ =>
+    let tasks := (List.range ((count + per - 1) / per)).map fun i =>
+      Task.spawn fun _ => collisionSearch n d params.psP params.psNq params.psIncr
+        (1 + i * per * params.psIncr) (min (params.psAdMax + 1) (1 + (i + 1) * per * params.psIncr))
+        params.psKeep
+    let all : Array CCand := tasks.foldl (fun acc tk => acc ++ tk.get) #[]
+    (all.qsort fun a b => a.score < b.score).extract 0 params.psKeep
+  let t1 ← IO.monoNanosNow
+  let rot ← IO.lazyPure fun _ =>
+    ((cands.toList.map fun c => Task.spawn fun _ => rootOpt c (Arith.fc 1) 16 100000 32).map
+      Task.get).length
+  let t2 ← IO.monoNanosNow
+  IO.println s!"collision search {ms t0 t1} ms ({count} leading coefficients, {cands.size} kept), root optimization {ms t1 t2} ms ({rot})"
