@@ -101,6 +101,11 @@ def devMain (args : List String) : IO Unit := do
   | ["fkunit"] => fkUnit
   | "lasfile" :: path :: q0 :: cnt :: out :: kvs => lasFile path q0.toNat! cnt.toNat! out kvs
   | "lasstats" :: path :: q0 :: cnt :: kvs => lasStats path q0.toNat! cnt.toNat! kvs
+  | "lasphases" :: path :: q0 :: cnt :: kvs => lasPhases path q0.toNat! cnt.toNat! kvs
+  | ["boundscheck", path, q0, cnt] => boundsCheck path q0.toNat! cnt.toNat!
+  | ["gatedebug", path, q0, cnt] => gateDebug path q0.toNat! cnt.toNat!
+  | ["mergecheck", seed] => mergeCheck seed.toNat!
+  | ["lasmiss", poly, cado] => lasMiss poly cado
   | ["lanczosbench", n, w, t] => lanczosBench n.toNat! w.toNat! t.toNat!
   | ["lanczosbench", n, w, t, pk] => lanczosBench n.toNat! w.toNat! t.toNat! pk.toNat!
   | ["gathercmp", n, m] => gatherCompare n.toNat! m.toNat!
@@ -155,6 +160,7 @@ def devMain (args : List String) : IO Unit := do
     IO.println s!"factors {fs} total {(t1 - t0).toFloat / 1.0e6} ms"
   | ["siqsstats", ns, as] => siqsPolyStats ns.toNat! as.toNat!
   | ["siqsstats", ns, as, fb, m] => siqsPolyStats ns.toNat! as.toNat! fb.toNat! m.toNat!
+  | ["siqsstats", ns, as, fb, m, sb] => siqsPolyStats ns.toNat! as.toNat! fb.toNat! m.toNat! sb.toNat!
   | ["stridebench"] => do
     strideBench 32768 4000
     strideBench 65536 2000
@@ -199,11 +205,11 @@ def devMain (args : List String) : IO Unit := do
       (ECMM.split n { b1 := b1.toNat!, curves := curves.toNat!, threads := ts.toNat! }).map (·.val)
   | ["nfsdebug", ns, ts, d, fbB, a, lp, fudge, lines, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 100 200 12 60 300 2000 20000 100 0 64 60 0 40
+    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 100 200 12 true 60 300 2000 20000 100 0 64 60 0 40
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfslattice", ns, ts, d, fbB, a, lp, fudge, li, lj, qpt, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 100 200 12 60 300 2000 20000 100 0 64 60 0 40) with }
+    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 100 200 12 true 60 300 2000 20000 100 0 64 60 0 40) with }
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfsdebug", ns, ts] =>
     let n := ns.toNat!

@@ -88,7 +88,7 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
     rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
   let t5 ← IO.monoNanosNow
   IO.println s!"singletons {ms t4 t5a} ms ({kept0.size} rows), purge {ms t5a t5c} ms -> {kept.size} rows, full rows {ms t5c t5} ms"
-  let (mrows, hist, mcols) ← IO.lazyPure fun _ => Merge.merge numCols dense keptRows
+  let (mrows, log, mcols) ← IO.lazyPure fun _ => Merge.mergeLog numCols dense keptRows
     params.mergeDensity 32
   let t5b ← IO.monoNanosNow
   -- Lanczos components, timed (the dependencies are those of `Lanczos.dependencies`)
@@ -99,7 +99,7 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
   let la2 ← IO.monoNanosNow
   IO.println s!"lanczos setup: singletons {ms la0 la1}, sparse {ms la1 la2} ({kept2.size} rows)"
   let mdeps ← IO.lazyPure fun _ => Lanczos.dependencies mcols mrows 64 threads
-  let deps := (Merge.unmerge kept.size hist mdeps).map fun dep => dep.map fun i => kept[i]!
+  let deps := (Merge.unmergeLog log mdeps).map fun dep => dep.map fun i => kept[i]!
   let t6 ← IO.monoNanosNow
   let wt := mrows.foldl (fun a r => a + r.size) 0
   IO.println s!"filter {ms t3 t5} ms (kept {kept.size}), merge {ms t5 t5b} ms -> {mrows.size} x {mcols} (weight {wt / max 1 mrows.size}/row), Lanczos {ms t5b t6} ms ({deps.size} deps)"
@@ -168,12 +168,25 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
         | _ => none).getD params.lasVariant,
       jDiv := (overrides.findSome? fun kv => match kv.splitOn "=" with
         | ["jDiv", v] => v.toNat?
+        | _ => none).getD 2,
+      taskMul := (overrides.findSome? fun kv => match kv.splitOn "=" with
+        | ["taskMul", v] => v.toNat?
         | _ => none).getD 2 }
   let las := Las.mkLasCtx ctx lasParams
   let mut coll : Collection := {}
   let mut rows := Rows.empty ctx.fb
   let mut count := 8 * threads
   let mut scratch : List Las.Scratch := []
+  let mut pending : Option (List (Task (Array Rel × Las.Scratch)) × Nat) := none
+  let pipe := (overrides.findSome? fun kv => match kv.splitOn "=" with
+    | ["pipe", v] => v.toNat?
+    | _ => none).getD 1 == 1
+  let lpIdeals (b : Nat) : Float := Float.exp2 b.toFloat / (b.toFloat * Float.log 2)
+  let pipeFrac : Nat := (overrides.findSome? fun (kv : String) => match kv.splitOn "=" with
+    | ["pipefrac", v] => v.toNat?
+    | _ => none).getD 40
+  let pipeUntil := pipeFrac.toFloat / 100 * (lpIdeals params.lpbR + lpIdeals params.lpbA)
+  let pipeUntil := pipeUntil.toUInt64.toNat
   let mut prev : Option (Nat × Int) := none
   let mut lastCheck := 0
   let mut ready := false
@@ -197,7 +210,16 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
       bg := some (Task.spawn fun _ =>
         let r := fresh.foldl Rows.add r0
         (r, if due then some (rowsExcess r dense params.extra) else none))
-    let (c, sc) ← IO.lazyPure fun _ => collectRoundLas las params threads count coll scratch
+    -- as `GNFS.splitWith`: far from ready, the next round is queued first
+    let (tasks, hi) := match pending with
+      | some p => p
+      | none => spawnRoundLas las threads count (max coll.nextQ params.qmin) scratch
+    if pending.isNone then scratch := []
+    pending := if prev.isNone && pipe && coll.rels.size < pipeUntil then
+        some (spawnRoundLas las threads count hi scratch)
+      else none
+    if pending.isSome then scratch := []
+    let (c, sc) ← IO.lazyPure fun _ => finishRoundLas coll tasks hi
     coll := c
     scratch := sc
     let b ← IO.monoNanosNow
@@ -231,7 +253,8 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     let gained := coll.rels.size - before
     IO.eprintln s!"round {round}: {count} special-q, q < {coll.nextQ} gained {gained} total {coll.rels.size} ({(b - a) / 1000000} ms)"
     if gained > 0 then
-      count := max (6 * threads) (count * (coll.rels.size / 10 + 1) / gained)
+      let growth := if coll.rels.size ≥ pipeUntil then 25 else 10
+      count := max (6 * threads) (count * (coll.rels.size / growth + 1) / gained)
       if target > coll.rels.size then
         count := max (6 * threads) (min count ((target - coll.rels.size) * count / gained + 1))
       else if prev.isSome then

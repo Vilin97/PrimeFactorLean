@@ -67,6 +67,9 @@ below 30, which are not sieved). -/
   purgeExcess : Nat := 200
   /-- Variant of the Franke–Kleinjung siever (`Las.LasParams.variant`). -/
   lasVariant : Nat := 12
+  /-- Queue the next sieving round before collecting the current one while far
+  from ready (`GNFS.splitWith`). -/
+  lasPipeline : Bool := true
   /-- Kleinjung polynomial search: leading coefficients `psAdStep · [1, psAdCount]`,
   moduli from two primes of `[psQlo, psQhi)`, rotations up to `psRotV`. -/
   psAdStep : Nat := 60

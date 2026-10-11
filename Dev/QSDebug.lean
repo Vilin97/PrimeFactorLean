@@ -827,10 +827,11 @@ def strideBench (len reps : Nat) : IO Unit := do
 
 /-- Single-thread SIQS statistics: `as` A-values, their polynomial count, the
 relations (full and partial) and the time per polynomial. -/
-def siqsPolyStats (n as : Nat) (fb M : Nat := 0) : IO Unit := do
+def siqsPolyStats (n as : Nat) (fb M : Nat := 0) (smallBound : Nat := 0) : IO Unit := do
   let params := PrimeFactorLean.SIQS.chooseParams (PrimeFactorLean.QS.decimalDigits n)
   let params := if fb > 0 then { params with fbSize := fb } else params
   let params := if M > 0 then { params with M := M } else params
+  let params := if smallBound > 0 then { params with smallBound := smallBound } else params
   let .inl ctx := PrimeFactorLean.SIQS.mkCtx n params | IO.println "small factor"
   let some ap := PrimeFactorLean.SIQS.mkAPoly ctx 0 | IO.println "no A"
   let polys := as * 2 ^ (ap.qs.size - 1)

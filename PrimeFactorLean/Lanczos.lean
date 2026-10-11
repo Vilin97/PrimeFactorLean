@@ -150,6 +150,51 @@ theorem mul4_toNat (j : USize) (hj : j.toNat * 4 < USize.size) : (j * 4).toNat =
   ((b.uget (i + 2) (usize_add_lt' i 2 _ 2 (usize_lit_le 2) (by omega))).toUInt32 <<< 16) |||
   ((b.uget (i + 3) (usize_add_lt' i 3 _ 3 (usize_lit_le 3) (by omega))).toUInt32 <<< 24)
 
+theorem bsize_uset (s : ByteArray) (j : USize) (v : UInt8) (h : j.toNat < s.size) :
+    (s.uset j v h).size = s.size := by
+  cases s; simp [ByteArray.uset, ByteArray.size]
+
+/-- Bytes `i, …, i + 7` of `b` set to the little-endian word `x` (inline stores,
+no capacity checks: `ByteArray.push` is a runtime call per byte). -/
+@[inline] def setWord (b : ByteArray) (i : USize) (h : i.toNat + 8 ≤ b.size) (x : UInt64) :
+    ByteArray :=
+  let b1 := b.uset i x.toUInt8 (by omega)
+  let b2 := b1.uset (i + 1) (x >>> 8).toUInt8
+    (by rw [bsize_uset]; exact usize_add_lt i 1 _ (usize_lit_lt 1 (by decide)) h)
+  let b3 := b2.uset (i + 2) (x >>> 16).toUInt8
+    (by rw [bsize_uset, bsize_uset]; exact usize_add_lt i 2 _ (usize_lit_lt 2 (by decide)) h)
+  let b4 := b3.uset (i + 3) (x >>> 24).toUInt8
+    (by rw [bsize_uset, bsize_uset, bsize_uset]; exact usize_add_lt i 3 _ (usize_lit_lt 3 (by decide)) h)
+  let b5 := b4.uset (i + 4) (x >>> 32).toUInt8
+    (by rw [bsize_uset, bsize_uset, bsize_uset, bsize_uset]
+        exact usize_add_lt i 4 _ (usize_lit_lt 4 (by decide)) h)
+  let b6 := b5.uset (i + 5) (x >>> 40).toUInt8
+    (by rw [bsize_uset, bsize_uset, bsize_uset, bsize_uset, bsize_uset]
+        exact usize_add_lt i 5 _ (usize_lit_lt 5 (by decide)) h)
+  let b7 := b6.uset (i + 6) (x >>> 48).toUInt8
+    (by rw [bsize_uset, bsize_uset, bsize_uset, bsize_uset, bsize_uset, bsize_uset]
+        exact usize_add_lt i 6 _ (usize_lit_lt 6 (by decide)) h)
+  b7.uset (i + 7) (x >>> 56).toUInt8
+    (by rw [bsize_uset, bsize_uset, bsize_uset, bsize_uset, bsize_uset, bsize_uset, bsize_uset]
+        exact usize_add_lt i 7 _ (usize_lit_lt 7 (by decide)) h)
+
+set_option compiler.extract_closed false in
+/-- 4096 zero bytes. -/
+def zeroBlock : ByteArray := ⟨Array.replicate 4096 0⟩
+
+/-- `n` zero bytes (copied block-wise). -/
+def zerosB (n : Nat) : ByteArray := Id.run do
+  let z := zeroBlock
+  let mut b := ByteArray.emptyWithCapacity n
+  for _ in [0:n / 4096] do b := b ++ z
+  return b ++ z.extract 0 (n % 4096)
+
+/-- `b` with word `k` set (bytes `8 k … 8 k + 7`; unchanged out of range). -/
+@[inline] def putWord (b : ByteArray) (k : Nat) (x : UInt64) : ByteArray :=
+  if h : 8 * k + 8 ≤ b.size ∧ b.size < USize.size then
+    setWord b (8 * k).toUSize (by have := nat_toUSize_le (8 * k); omega) x
+  else b
+
 /-- A vector of 64-bit words as little-endian bytes. -/
 structure Vec where
   b : ByteArray
@@ -510,7 +555,7 @@ termination_by hi - lo
 /-- Rows `[lo, hi)` of a compressed product (`idxB` if `packed`). -/
 def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (packed : Bool)
     (idxB : ByteArray) (lo hi : Nat) : Vec := Id.run do
-  let mut out : Vec := Vec.empty (hi - lo)
+  let mut out : ByteArray := zerosB (8 * (hi - lo))
   let xb := x.data.b
   let nU := (xb.size / 8).toUSize
   if hs : xb.size < USize.size then
@@ -521,7 +566,7 @@ def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (packed : Boo
     for r in [lo:hi] do
       let a := ptr[r]!
       let b := ptr[r + 1]!
-      out := out.push (if packed then
+      out := putWord out (r - lo) (if packed then
           if h : a ≤ b ∧ b * 4 ≤ idxB.size ∧ idxB.size < USize.size then
             gather4U xb nU hn (by omega) idxB a.toUSize (b - a).toUSize
               (by have := nat_toUSize_le a; have := nat_toUSize_le (b - a); omega) h.2.2 0
@@ -532,9 +577,9 @@ def gatherRange (x : Block) (ptr : Array Nat) (idx : Array UInt32) (packed : Boo
         else gather x.data idx a b 0)
   else
     for r in [lo:hi] do
-      out := out.push (if packed then gather4 x.data idxB ptr[r]! ptr[r + 1]! 0
+      out := putWord out (r - lo) (if packed then gather4 x.data idxB ptr[r]! ptr[r + 1]! 0
         else gather x.data idx ptr[r]! ptr[r + 1]! 0)
-  return out
+  return ⟨out⟩
 
 /-- The first `r ∈ [lo, hi]` with `ptr[r] ≥ target` (binary search; `ptr` nondecreasing). -/
 def firstAtLeast (ptr : Array Nat) (target lo hi : Nat) : Nat :=
@@ -696,10 +741,10 @@ appended to `out`. -/
 def nextGo (v v1 v2 av : ByteArray) (mask : UInt64) (tD tE tF : Tab) (hi : Nat)
     (h1 : 8 * hi ≤ v.size) (h2 : 8 * hi ≤ v1.size) (h3 : 8 * hi ≤ v2.size) (h4 : 8 * hi ≤ av.size)
     (hs : v.size < USize.size ∧ v1.size < USize.size ∧ v2.size < USize.size ∧ av.size < USize.size)
-    (k : Nat) (out : Vec) : Vec :=
+    (lo k : Nat) (out : ByteArray) : ByteArray :=
   if hk : k < hi then
-    nextGo v v1 v2 av mask tD tE tF hi h1 h2 h3 h4 hs (k + 1)
-      (out.push ((wordAt av k (by omega) hs.2.2.2 &&& mask) ^^^
+    nextGo v v1 v2 av mask tD tE tF hi h1 h2 h3 h4 hs lo (k + 1)
+      (putWord out (k - lo) ((wordAt av k (by omega) hs.2.2.2 &&& mask) ^^^
         applyTables tD (wordAt v k (by omega) hs.1) ^^^
         applyTables tE (wordAt v1 k (by omega) hs.2.1) ^^^
         applyTables tF (wordAt v2 k (by omega) hs.2.2.1)))
@@ -711,16 +756,16 @@ def nextRange (v v1 v2 av : Block) (mask : UInt64) (tD tE tF : Tab) (lo hi : Nat
   if h : 8 * hi ≤ v.data.b.size ∧ 8 * hi ≤ v1.data.b.size ∧ 8 * hi ≤ v2.data.b.size ∧
       8 * hi ≤ av.data.b.size ∧ v.data.b.size < USize.size ∧ v1.data.b.size < USize.size ∧
       v2.data.b.size < USize.size ∧ av.data.b.size < USize.size then
-    nextGo v.data.b v1.data.b v2.data.b av.data.b mask tD tE tF hi h.1 h.2.1 h.2.2.1 h.2.2.2.1
-      ⟨h.2.2.2.2.1, h.2.2.2.2.2.1, h.2.2.2.2.2.2.1, h.2.2.2.2.2.2.2⟩ lo (Vec.empty (hi - lo))
+    ⟨nextGo v.data.b v1.data.b v2.data.b av.data.b mask tD tE tF hi h.1 h.2.1 h.2.2.1 h.2.2.2.1
+      ⟨h.2.2.2.2.1, h.2.2.2.2.2.1, h.2.2.2.2.2.2.1, h.2.2.2.2.2.2.2⟩ lo lo (zerosB (8 * (hi - lo)))⟩
   else Vec.empty 0
 
 /-- Rows `[k, hi)` of `X ⊕ V W` (table of `W`), appended to `out`. -/
 def xGo (x v : ByteArray) (tW : Tab) (hi : Nat) (h1 : 8 * hi ≤ x.size) (h2 : 8 * hi ≤ v.size)
-    (hs : x.size < USize.size ∧ v.size < USize.size) (k : Nat) (out : Vec) : Vec :=
+    (hs : x.size < USize.size ∧ v.size < USize.size) (lo k : Nat) (out : ByteArray) : ByteArray :=
   if hk : k < hi then
-    xGo x v tW hi h1 h2 hs (k + 1)
-      (out.push (wordAt x k (by omega) hs.1 ^^^ applyTables tW (wordAt v k (by omega) hs.2)))
+    xGo x v tW hi h1 h2 hs lo (k + 1)
+      (putWord out (k - lo) (wordAt x k (by omega) hs.1 ^^^ applyTables tW (wordAt v k (by omega) hs.2)))
   else out
 termination_by hi - k
 
@@ -728,7 +773,7 @@ termination_by hi - k
 def xRange (x v : Block) (tW : Tab) (lo hi : Nat) : Vec :=
   if h : 8 * hi ≤ x.data.b.size ∧ 8 * hi ≤ v.data.b.size ∧ x.data.b.size < USize.size ∧
       v.data.b.size < USize.size then
-    xGo x.data.b v.data.b tW hi h.1 h.2.1 ⟨h.2.2.1, h.2.2.2⟩ lo (Vec.empty (hi - lo))
+    ⟨xGo x.data.b v.data.b tW hi h.1 h.2.1 ⟨h.2.2.1, h.2.2.2⟩ lo lo (zerosB (8 * (hi - lo)))⟩
   else Vec.empty 0
 
 /-- The row ranges of `n` rows split over `tasks` chunks. -/

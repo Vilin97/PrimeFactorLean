@@ -451,25 +451,26 @@ def collectRound (ctx : Ctx) (params : Params) (threads : Nat) (st : Collection)
         rels := rels.push rel
   return { st with rels := rels, seen := seen }
 
-/-- One parallel round of special-`q` lattice sieving over the next `count`
-special-`q` ideals from `st.nextQ`: they are dealt round-robin to twice as many
-tasks as threads (so that every task gets a similar mix), and each task keeps
-its sieve buffers from one round to the next (`scratch`, consumed and
-returned). -/
-def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (st : Collection)
-    (scratch : List Las.Scratch) : Collection × List Las.Scratch := Id.run do
-  let lo := max st.nextQ params.qmin
+/-- The tasks of one round of special-`q` lattice sieving over the next `count`
+special-`q` ideals from `lo`, and the end of their range: the ideals are dealt
+round-robin to `taskMul` times as many tasks as threads (so that every task
+gets a similar mix), each task on its own copy of the context and with a sieve
+buffer set from `scratch` (consumed; new ones as needed). -/
+def spawnRoundLas (las : Las.LasCtx) (threads count lo : Nat) (scratch : List Las.Scratch) :
+    List (Task (Array Rel × Las.Scratch)) × Nat := Id.run do
   let mut qs : Array (Nat × Nat) := #[]
   let mut hi := lo
   while qs.size < count do
     qs := qs ++ specialQsIn las.base.sel hi (hi + 512)
     hi := hi + 512
-  -- twice as many tasks as threads: a round waits for its slowest task, and
-  -- the pool rebalances smaller tasks
-  let T := max 1 (2 * threads)
+  -- more tasks than threads (`taskMul`): a round waits for its slowest task,
+  -- and the pool rebalances smaller tasks
+  let T := max 1 (las.params.taskMul * threads)
   let scs := scratch ++ (List.range (T - min T scratch.length)).map fun _ => Las.Scratch.new las
   let tasks := (scs.zip (List.range T)).map fun (sc0, t) =>
     Task.spawn fun _ => Id.run do
+      -- a private copy: shared objects count references atomically
+      let las := las.copy
       if las.params.variant == 14 then
         let mine := (Array.range ((qs.size + T - 1 - t) / T)).map fun k => qs[t + k * T]!
         return Las.processQs14 las las.params.gapSlack mine sc0
@@ -485,6 +486,12 @@ def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (
         sc := sc'
         out := out ++ rels
       return (out, sc)
+  return (tasks, hi)
+
+/-- Wait for a round's tasks and add their new relations (`hi`: the end of the
+round's range); returns the buffer sets for later rounds. -/
+def finishRoundLas (st : Collection) (tasks : List (Task (Array Rel × Las.Scratch))) (hi : Nat) :
+    Collection × List Las.Scratch := Id.run do
   let results := tasks.map Task.get
   let mut rels := st.rels
   let mut seen := st.seen
@@ -494,6 +501,13 @@ def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (
         seen := seen.insert (rel.a, rel.b)
         rels := rels.push rel
   return ({ rels := rels, seen := seen, nextB := st.nextB, nextQ := hi }, results.map (·.2))
+
+/-- One parallel round of special-`q` lattice sieving over the next `count`
+special-`q` ideals from `st.nextQ` (`spawnRoundLas`, then `finishRoundLas`). -/
+def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (st : Collection)
+    (scratch : List Las.Scratch) : Collection × List Las.Scratch :=
+  let (tasks, hi) := spawnRoundLas las threads count (max st.nextQ params.qmin) scratch
+  finishRoundLas st tasks hi
 
 /-- Whether the matrix has enough excess after singleton removal (on the sparse
 rows; the dense columns are accounted for by `dense`). -/
@@ -565,6 +579,14 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   -- relations collected so far once the yield is known
   let mut count := 8 * threads
   let mut scratch : List Las.Scratch := []
+  let mut pending : Option (List (Task (Array Rel × Las.Scratch)) × Nat) := none
+  let pipeline := params.lasPipeline
+  -- The readiness check lags a round behind and a queued round adds another:
+  -- queue rounds only while the relations are below 40% of the ideals under
+  -- the large-prime bounds (the matrix needed 43% to 74% of them from 60 to
+  -- 100 digits).
+  let lpIdeals (b : Nat) : Float := Float.exp2 b.toFloat / (b.toFloat * Float.log 2)
+  let pipeUntil := (0.4 * (lpIdeals params.lpbR + lpIdeals params.lpbA)).toUInt64.toNat
   let mut prev : Option (Nat × Int) := none
   let mut rows := Rows.empty ctx.fb
   let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
@@ -588,7 +610,18 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
         let r := fresh.foldl Rows.add r0
         (r, if due then some (rowsExcess r dense params.extra) else none))
     if params.lasLogI > 0 then
-      let (c, sc) := collectRoundLas las params threads count coll scratch
+      let (tasks, hi) := match pending with
+        | some p => p
+        | none => spawnRoundLas las threads count (max coll.nextQ params.qmin) scratch
+      if pending.isNone then scratch := []
+      -- Far from ready (nothing survives singleton removal yet), the next round
+      -- is queued before this one is collected: its tasks start as this round's
+      -- last ones finish, instead of the threads idling at the end of a round.
+      pending := if prev.isNone && pipeline && coll.rels.size < pipeUntil then
+          some (spawnRoundLas las threads count hi scratch)
+        else none
+      if pending.isSome then scratch := []
+      let (c, sc) := finishRoundLas coll tasks hi
       coll := c
       scratch := sc
     else coll := collectRound ctx params threads coll
@@ -615,7 +648,11 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
       target := tg
     let gained := coll.rels.size - before
     if params.lasLogI > 0 && gained > 0 then
-      count := max (6 * threads) (count * (coll.rels.size / 10 + 1) / gained)
+      -- rounds of a tenth of growth, a twenty-fifth from `pipeUntil` on (the
+      -- readiness check lags a round behind, and singleton removal goes from
+      -- keeping nothing to nearly ready within a tenth)
+      let growth := if coll.rels.size ≥ pipeUntil then 25 else 10
+      count := max (6 * threads) (count * (coll.rels.size / growth + 1) / gained)
       if target > coll.rels.size then
         count := max (6 * threads) (min count ((target - coll.rels.size) * count / gained + 1))
       else if prev.isSome then
@@ -641,9 +678,9 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
       fullRow ctx.fb rels[k]! rows.sparse[k]!
   let keptRows := rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
   -- merge light columns into a smaller, denser matrix
-  let (mrows, hist, mcols) := Merge.merge numCols dense keptRows params.mergeDensity 32
+  let (mrows, log, mcols) := Merge.mergeLog numCols dense keptRows params.mergeDensity 32
   let mdeps := Lanczos.dependencies mcols mrows 64 threads
-  let deps := Merge.unmerge kept.size hist mdeps
+  let deps := Merge.unmergeLog log mdeps
   let deps := if deps.isEmpty then GF2.dependencies numCols keptRows 64 else deps
   let deps := deps.map fun dep => dep.map fun i => kept[i]!
   -- each dependency splits `n` with probability about 1/2: square roots in

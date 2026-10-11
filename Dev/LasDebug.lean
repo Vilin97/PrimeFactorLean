@@ -382,8 +382,11 @@ def lasParFile (path : String) (q0 per : Nat) (ts : List Nat) (kvs : List String
   for t in ts do
     let t0 ← IO.monoNanosNow
     let total ← IO.lazyPure fun _ => ((List.range t).map fun i => Task.spawn fun _ => Id.run do
+      let las := if get "copy" 1 == 1 then las.copy else las
       let mut sc := Las.Scratch.new las
       let mut c := 0
+      if v == 14 then
+        return (Las.processQs14 las slack (all.extract (i * per) (i * per + per)) sc).1.size
       for k in [0:per] do
         let (q, ρ) := all[i * per + k]!
         let (rels, sc') := if v == 8 then Las.processQ8 las slack q ρ sc else
@@ -426,3 +429,559 @@ def taskOverhead (t reps : Nat) : IO Unit := do
     acc := acc ^^^ x
   let t1 ← IO.monoNanosNow
   IO.println s!"{t} trivial tasks: {(t1 - t0) / reps / 1000} us per batch ({acc})"
+
+/-- The exact cofactors `(u, z)` of a survivor after dividing out every found
+factor-base prime (as `factorSurvivor2`; `none` for trivial survivors). -/
+def exactCofactors (ctx : Las.LasCtx) (q : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat)
+    (listR listA : List Nat) (pos : Nat) : Option (Nat × Nat) := Id.run do
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let i : Int := (c : Int) - (I / 2 : Nat)
+  let a0 := i * ua + (j : Int) * va
+  let b0 := i * ub + (j : Int) * vb
+  let (a, b) := if b0 < 0 then (-a0, -b0) else (a0, b0)
+  if b == 0 || Nat.gcd a.natAbs b.natAbs != 1 then return none
+  let bn := b.natAbs
+  let sel := ctx.base.sel
+  let mut u := (sel.ratNorm a b).natAbs
+  let side := ctx.rat
+  for k in Las.smallHits side Rr c.toUInt64 j.toUInt64 I.toUInt64 0 side.largeStart [] do
+    u := (Las.stripNat u side.primes[k]!).1
+  for k in listR do
+    u := (Las.stripNat u side.primes[k]!).1
+  let (z0, _) := Las.stripNat (homEval sel.coeffs a b).natAbs q
+  let mut z := z0
+  let sideA := ctx.alg
+  for k in Las.smallHits sideA Ra c.toUInt64 j.toUInt64 I.toUInt64 0 sideA.largeStart [] do
+    let p := sideA.primes[k]!
+    let r := sideA.roots[k]!
+    let ok := Ra[k]! < p || (if r == p then bn % p == 0 else (a - b * (r : Int)) % (p : Int) == 0)
+    if ok then z := (Las.stripNat z p).1
+  for k in listA do
+    z := (Las.stripNat z sideA.primes[k]!).1
+  return some (u, z)
+
+/-- Where a survivor ends in `factorSurvivor2`: `0` trivial or `gcd(a, b) ≠ 1`,
+`1` rational cofactor rejected by the cheap checks, `2` algebraic, `3` algebraic
+split failed, `4` rational split failed, `5` relation; with the number of splits
+attempted. -/
+def fs2Class (ctx : Las.LasCtx) (q : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat)
+    (listR listA : List Nat) (pos : Nat) : Nat × Nat := Id.run do
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let i : Int := (c : Int) - (I / 2 : Nat)
+  let a0 := i * ua + (j : Int) * va
+  let b0 := i * ub + (j : Int) * vb
+  let (a, b) := if b0 < 0 then (-a0, -b0) else (a0, b0)
+  if b == 0 then return (0, 0)
+  if Nat.gcd a.natAbs b.natAbs != 1 then return (0, 0)
+  let bn := b.natAbs
+  let sel := ctx.base.sel
+  let nr : Int := sel.ratNorm a b
+  if nr == 0 then return (0, 0)
+  let mut u := nr.natAbs
+  let side := ctx.rat
+  for k in Las.smallHits side Rr c.toUInt64 j.toUInt64 I.toUInt64 0 side.largeStart [] do
+    u := (Las.stripNat u side.primes[k]!).1
+  for k in listR do
+    u := (Las.stripNat u side.primes[k]!).1
+  let cr := Las.cofactorClass u ctx.params.lpbR ctx.params.mfbR ctx.limR
+  if cr == 0 then return (1, 0)
+  let na := homEval sel.coeffs a b
+  if na == 0 then return (0, 0)
+  let (z0, eq) := Las.stripNat na.natAbs q
+  if eq == 0 then return (0, 0)
+  let mut z := z0
+  let sideA := ctx.alg
+  for k in Las.smallHits sideA Ra c.toUInt64 j.toUInt64 I.toUInt64 0 sideA.largeStart [] do
+    let p := sideA.primes[k]!
+    let r := sideA.roots[k]!
+    let ok := Ra[k]! < p || (if r == p then bn % p == 0 else (a - b * (r : Int)) % (p : Int) == 0)
+    if ok then z := (Las.stripNat z p).1
+  for k in listA do
+    z := (Las.stripNat z sideA.primes[k]!).1
+  let ca := Las.cofactorClass z ctx.params.lpbA ctx.params.mfbA ctx.limA
+  if ca == 0 then return (2, 0)
+  let splits := (if ca == 2 then 1 else 0)
+  let some _ := Las.largePrimesOf ca z ctx.params.lpbA | return (3, splits)
+  let splits := splits + (if cr == 2 then 1 else 0)
+  let some _ := Las.largePrimesOf cr u ctx.params.lpbR | return (4, splits)
+  return (5, splits)
+
+/-- `processQs14` phase by phase on one thread: times and survivor counts. -/
+def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let get (key : String) (d : Nat) : Nat := (kvs.findSome? fun kv => match kv.splitOn "=" with
+    | [k, v] => if k == key then v.toNat? else none
+    | _ => none).getD d
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := get "logI" params.lasLogI, lpbR := get "lpbR" params.lpbR, lpbA := get "lpbA" params.lpbA,
+      mfbR := get "mfbR" params.mfbR, mfbA := get "mfbA" params.mfbA,
+      fudge := get "fudge" params.lasFudge, jDiv := get "jDiv" 2, sieveFrom := get "from" 30 }
+  let slack := get "slack" 3
+  let fs := get "fs" 2
+  let fs3 := fs == 3
+  let las := Las.mkLasCtx ctx lasParams
+  let qs := specialQs sel q0 count
+  let mut sc := Las.Scratch.new las
+  let mut tm : Array Nat := Array.replicate 12 0
+  let mut cnt : Array Nat := Array.replicate 12 0
+  let mut tmX := 0
+  let mut passR := 0
+  let mut gates : Array Nat := Array.replicate 8 0
+  let mut passB := 0
+  let mut tmP : Array Nat := Array.replicate 4 0
+  let mut i := 0
+  let len := las.I * las.J
+  while i < qs.size do
+    let grp := qs.extract i (i + 4)
+    let t0 ← IO.monoNanosNow
+    let bases ← IO.lazyPure fun _ => grp.map fun (q, ρ) =>
+      let (u, v) := reduceLattice q ρ las.skew
+      (u.1, u.2, v.1, v.2)
+    let Rrs ← IO.lazyPure fun _ => Las.latticeRoots4 las.rat bases
+    let Ras ← IO.lazyPure fun _ => Las.latticeRoots4 las.alg bases
+    let t1 ← IO.monoNanosNow
+    tm := tm.modify 0 (· + (t1 - t0))
+    for jx in [0:grp.size] do
+      let (q, ρ) := grp[jx]!
+      let (ua, ub, va, vb) := bases[jx]!
+      let Rr := Rrs[jx]!
+      let Ra := Ras[jx]!
+      let ⟨b1, b2, bits⟩ := sc
+      let a0 ← IO.monoNanosNow
+      let Pr ← IO.lazyPure fun _ => Las.powerRoots las.rat ua ub va vb
+      let Pa ← IO.lazyPure fun _ => Las.powerRoots las.alg ua ub va vb
+      let exR ← IO.lazyPure fun _ => Las.rowExtras las las.rat Rr
+      let exA ← IO.lazyPure fun _ => Las.rowExtras las las.alg Ra
+      let a1 ← IO.monoNanosNow
+      let (fR, biasR) ← IO.lazyPure fun _ => Las.fillSegments las b1 false q ua ub va vb las.params.mfbR exR
+      let (fA, biasA) ← IO.lazyPure fun _ => Las.fillSegments las b2 true q ua ub va vb las.params.mfbA exA
+      let a2 ← IO.monoNanosNow
+      let lR ← IO.lazyPure fun _ => Las.lineSieveSide las las.rat Rr fR
+      let lA ← IO.lazyPure fun _ => Las.lineSieveSide las las.alg Ra fA
+      let a3 ← IO.monoNanosNow
+      let pR ← IO.lazyPure fun _ => Las.sievePowers las las.rat Pr lR
+      let pA ← IO.lazyPure fun _ => Las.sievePowers las las.alg Pa lA
+      let a4 ← IO.monoNanosNow
+      let (bufR, RrB) ← IO.lazyPure fun _ => Las.sieveLargeCached las las.rat Rr pR
+      let (bufA, RaB) ← IO.lazyPure fun _ => Las.sieveLargeCached las las.alg Ra pA
+      let a5 ← IO.monoNanosNow
+      let s0 ← IO.lazyPure fun _ => Las.survivors bufR bufA len
+      let s1 ← IO.lazyPure fun _ => Las.dropSmallGcd las s0
+      let a6 ← IO.monoNanosNow
+      let surv ← IO.lazyPure fun _ => Las.prefilterGap4 las q ua ub va vb bufR bufA biasR biasA
+        (Las.tinyPrimes las las.rat RrB) (Las.tinyPrimes las las.alg RaB) slack s1
+      let a7 ← IO.monoNanosNow
+      cnt := cnt.modify 0 (· + s0.size)
+      cnt := cnt.modify 1 (· + s1.size)
+      cnt := cnt.modify 2 (· + surv.size)
+      tm := tm.modify 1 (· + (a1 - a0))
+      tm := tm.modify 2 (· + (a2 - a1))
+      tm := tm.modify 3 (· + (a3 - a2))
+      tm := tm.modify 4 (· + (a4 - a3))
+      tm := tm.modify 5 (· + (a5 - a4))
+      tm := tm.modify 6 (· + (a6 - a5))
+      tm := tm.modify 7 (· + (a7 - a6))
+      if surv.isEmpty then
+        sc := ⟨bufR, bufA, bits⟩
+        continue
+      let (lab, rowStart) ← IO.lazyPure fun _ => Las.labelSurvivors las (Las.zeroRows las bufA) surv
+      let bits ← IO.lazyPure fun _ => Las.markBits bits surv true
+      let a8 ← IO.monoNanosNow
+      let listsR ← IO.lazyPure fun _ => Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.rat RrB bits #[])
+      let listsA ← IO.lazyPure fun _ => Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.alg RaB bits #[])
+      let bits ← IO.lazyPure fun _ => Las.markBits bits surv false
+      let a9 ← IO.monoNanosNow
+      let mut rels := 0
+      let bd ← IO.lazyPure fun _ => Las.mkBounds las q ua ub va vb RrB RaB
+      for k in [0:surv.size] do
+        let r := if fs3 then Las.factorSurvivor3 las bd q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
+          else if fs == 4 then Las.factorSurvivor4 las bd q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
+          else Las.factorSurvivor2 las q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
+        if r.isSome then rels := rels + 1
+      let a10 ← IO.monoNanosNow
+      -- the bounds alone (both sides, every survivor) and the exact path alone
+      let nb ← IO.lazyPure fun _ => Id.run do
+        let mut n := 0
+        for k in [0:surv.size] do
+          let eR := Las.cofactorBound las bd true listsR[k]! surv[k]!
+          let eA := Las.cofactorBound las bd false listsA[k]! surv[k]!
+          if !Las.hopeless eR bd.hiR bd.loR bd.gapR then
+            n := n + 1000000
+            if !Las.hopeless eA bd.hiA bd.loA bd.gapA then n := n + 1
+        return n
+      passR := passR + nb / 1000000
+      passB := passB + nb % 1000000
+      let a11 ← IO.monoNanosNow
+      let nx ← IO.lazyPure fun _ => Id.run do
+        let mut n := 0
+        for k in [0:surv.size] do
+          if (exactCofactors las q ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!).isSome then n := n + 1
+        return n
+      let a12 ← IO.monoNanosNow
+      for k in [0:surv.size] do
+        let g := Las.survivorGate las bd listsR[k]! listsA[k]! surv[k]!
+        gates := gates.modify g (· + 1)
+      let I := las.I
+      let s1 ← IO.lazyPure fun _ => Id.run do
+        let mut acc : Float := 0
+        for k in [0:surv.size] do
+          let pos := surv[k]!
+          acc := acc + Las.smallLogsP bd.tabR las.rat.pinvLim las.rat.lg2 las.rat.sieveStart
+            ((pos % I).toUInt64 - (I / 2).toUInt64) (pos / I).toUInt64 I.toUInt64 0 0
+        return acc
+      let a13 ← IO.monoNanosNow
+      let s2 ← IO.lazyPure fun _ => Id.run do
+        let mut acc : Float := 0
+        for k in [0:surv.size] do
+          let pos := surv[k]!
+          acc := acc + Las.tinyRatU bd.tq (pos % I).toUInt64 (pos / I).toUInt64 (I / 2).toUInt64 0 0
+        return acc
+      let a14 ← IO.monoNanosNow
+      let s3 ← IO.lazyPure fun _ => Id.run do
+        let mut acc : Float := 0
+        for k in [0:surv.size] do
+          let pos := surv[k]!
+          acc := acc + Las.tinyAlgU bd.tq (pos % I).toUInt64 (pos / I).toUInt64 (I / 2).toUInt64 0 0
+        return acc
+      let a15 ← IO.monoNanosNow
+      let s4 ← IO.lazyPure fun _ => Id.run do
+        let mut acc := 0
+        for k in [0:surv.size] do
+          let pos := surv[k]!
+          acc := acc + (Las.smallHits las.rat RrB (pos % I).toUInt64 (pos / I).toUInt64 I.toUInt64 0 las.rat.largeStart []).length
+        return acc
+      let a16 ← IO.monoNanosNow
+      if s1 + s2 + s3 < 0 then IO.println "never"
+      cnt := cnt.modify 11 (· + s4)
+      tmP := tmP.modify 0 (· + (a13 - a12))
+      tmP := tmP.modify 1 (· + (a14 - a13))
+      tmP := tmP.modify 2 (· + (a15 - a14))
+      tmP := tmP.modify 3 (· + (a16 - a15))
+      cnt := cnt.modify 11 (· + nx)
+      tm := tm.modify 11 (· + (a11 - a10))
+      tm := tm.modify 0 (· + 0)
+      tmX := tmX + (a12 - a11)
+      for k in [0:surv.size] do
+        let (cl, sp) := fs2Class las q ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
+        cnt := cnt.modify (4 + cl) (· + 1)
+        cnt := cnt.modify 10 (· + sp)
+      cnt := cnt.modify 3 (· + rels)
+      tm := tm.modify 8 (· + (a8 - a7))
+      tm := tm.modify 9 (· + (a9 - a8))
+      tm := tm.modify 10 (· + (a10 - a9))
+      sc := ⟨bufR, lab, bits⟩
+    i := i + 4
+  let nq := max 1 qs.size
+  let us (k : Nat) : String := s!"{tm[k]! / 1000 / nq}"
+  IO.println s!"{qs.size} special-q from {q0}: us/q roots {us 0}, powroots+extras {us 1}, fill {us 2}, line {us 3}, powers {us 4}, large {us 5}, survivors {us 6}, prefilter {us 7}, label {us 8}, resieve {us 9}, factor {us 10}"
+  IO.println s!"per q: survivors {cnt[0]! / nq}, after gcd {cnt[1]! / nq}, after prefilter {cnt[2]! / nq}, relations {cnt[3]! * 100 / nq / 100}.{cnt[3]! * 100 / nq % 100}"
+  IO.println s!"factorSurvivor2 outcomes (total): trivial {cnt[4]!}, rat class {cnt[5]!}, alg class {cnt[6]!}, alg split fail {cnt[7]!}, rat split fail {cnt[8]!}, ok {cnt[9]!}; splits {cnt[10]!}"
+  IO.println s!"us/q: both bounds on every survivor {us 11}, exact cofactors (no splits) on every survivor {tmX / 1000 / nq} ({cnt[11]!})"
+  IO.println s!"per q: rational bound passed {passR / nq}, both {passB / nq}"
+  IO.println s!"gate per q: rat bound {gates[0]! / nq}, rat class {gates[1]! / nq}, alg bound {gates[2]! / nq}, alg class {gates[3]! / nq}, passed (rat?/alg? undecided) {gates[4]! / nq} {gates[5]! / nq} {gates[6]! / nq} {gates[7]! / nq}"
+  IO.println s!"us/q on every survivor: smallLogs rat {tmP[0]! / 1000 / nq}, tinyRat {tmP[1]! / 1000 / nq}, tinyAlg {tmP[2]! / 1000 / nq}, smallHits rat {tmP[3]! / 1000 / nq}"
+
+/-- The floating-point cofactor bounds against the exact cofactors over the
+survivors of `count` special-q: histogram of `bound - log₂ cofactor` and the
+survivors the bounds would wrongly reject. -/
+def boundsCheck (path : String) (q0 count : Nat) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
+      mfbA := params.mfbA, fudge := params.lasFudge }
+  let las := Las.mkLasCtx ctx lasParams
+  let qs := specialQs sel q0 count
+  let mut sc := Las.Scratch.new las
+  let len := las.I * las.J
+  -- differences in tenths of a bit, offset 100
+  let mut histR : Array Nat := Array.replicate 201 0
+  let mut histA : Array Nat := Array.replicate 201 0
+  let mut wrongR := 0
+  let mut wrongA := 0
+  let mut total := 0
+  let mut shown := 0
+  for (q, ρ) in qs do
+    let (u, v) := reduceLattice q ρ las.skew
+    let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
+    let Rr := Las.latticeRoots las.rat ua ub va vb
+    let Ra := Las.latticeRoots las.alg ua ub va vb
+    let ⟨b1, b2, bits⟩ := sc
+    let Pr := Las.powerRoots las.rat ua ub va vb
+    let Pa := Las.powerRoots las.alg ua ub va vb
+    let (fR, biasR) := Las.fillSegments las b1 false q ua ub va vb las.params.mfbR (Las.rowExtras las las.rat Rr)
+    let (fA, biasA) := Las.fillSegments las b2 true q ua ub va vb las.params.mfbA (Las.rowExtras las las.alg Ra)
+    let (bufR, RrB) := Las.sieveLargeCached las las.rat Rr (Las.sievePowers las las.rat Pr (Las.lineSieveSide las las.rat Rr fR))
+    let (bufA, RaB) := Las.sieveLargeCached las las.alg Ra (Las.sievePowers las las.alg Pa (Las.lineSieveSide las las.alg Ra fA))
+    let surv := Las.prefilterGap4 las q ua ub va vb bufR bufA biasR biasA (Las.tinyPrimes las las.rat RrB)
+      (Las.tinyPrimes las las.alg RaB) 3 (Las.dropSmallGcd las (Las.survivors bufR bufA len))
+    let (lab, rowStart) := Las.labelSurvivors las (Las.zeroRows las bufA) surv
+    let bits := Las.markBits bits surv true
+    let listsR := Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.rat RrB bits #[])
+    let listsA := Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.alg RaB bits #[])
+    let bits := Las.markBits bits surv false
+    sc := ⟨bufR, lab, bits⟩
+    let bd := Las.mkBounds las q ua ub va vb RrB RaB
+    for k in [0:surv.size] do
+      let some (cu, cz) := exactCofactors las q ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]! | continue
+      total := total + 1
+      let eR := Las.cofactorBound las bd true listsR[k]! surv[k]!
+      let eA := Las.cofactorBound las bd false listsA[k]! surv[k]!
+      let lu := Float.log2 (cu.toFloat)
+      let lz := Float.log2 (cz.toFloat)
+      let dR := ((eR - lu) * 10 + 100).round
+      let dA := ((eA - lz) * 10 + 100).round
+      histR := histR.modify (min 200 (max 0 dR.toUInt64.toNat)) (· + 1)
+      histA := histA.modify (min 200 (max 0 dA.toUInt64.toNat)) (· + 1)
+      let okR := Las.cofactorClass cu las.params.lpbR las.params.mfbR las.limR != 0
+      let okA := Las.cofactorClass cz las.params.lpbA las.params.mfbA las.limA != 0
+      let hR := Las.hopeless eR bd.hiR bd.loR bd.gapR
+      let hA := Las.hopeless eA bd.hiA bd.loA bd.gapA
+      if okR && hR then
+        wrongR := wrongR + 1
+        if shown < 12 then
+          shown := shown + 1
+          IO.println s!"rat wrong: pos {surv[k]!} bound {eR} exact {lu} u {cu} list {listsR[k]!}"
+      if okR && okA && hA then
+        wrongA := wrongA + 1
+        if shown < 24 then
+          shown := shown + 1
+          IO.println s!"alg wrong: pos {surv[k]!} bound {eA} exact {lz} z {cz} list {listsA[k]!}"
+  IO.println s!"{total} survivors; wrongly rejected: rat {wrongR}, alg {wrongA}"
+  let fmt (h : Array Nat) : String := Id.run do
+    let mut out := ""
+    for t in [0:201] do
+      if h[t]! > 0 then out := out ++ s!" {(t : Int) - 100}:{h[t]!}"
+    return out
+  IO.println s!"rat (bound - exact, tenths of a bit):{fmt histR}"
+  IO.println s!"alg:{fmt histA}"
+
+/-- The algebraic word cofactor of `survivorGate` against the exact cofactor, for
+the first survivors where the word is undecided. -/
+def gateDebug (path : String) (q0 count : Nat) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
+      mfbA := params.mfbA, fudge := params.lasFudge }
+  let las := Las.mkLasCtx ctx lasParams
+  let qs := specialQs sel q0 count
+  let mut sc := Las.Scratch.new las
+  let len := las.I * las.J
+  let mut shown := 0
+  for (q, ρ) in qs do
+    let (u, v) := reduceLattice q ρ las.skew
+    let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
+    let Rr := Las.latticeRoots las.rat ua ub va vb
+    let Ra := Las.latticeRoots las.alg ua ub va vb
+    let ⟨b1, b2, bits⟩ := sc
+    let Pr := Las.powerRoots las.rat ua ub va vb
+    let Pa := Las.powerRoots las.alg ua ub va vb
+    let (fR, biasR) := Las.fillSegments las b1 false q ua ub va vb las.params.mfbR (Las.rowExtras las las.rat Rr)
+    let (fA, biasA) := Las.fillSegments las b2 true q ua ub va vb las.params.mfbA (Las.rowExtras las las.alg Ra)
+    let (bufR, RrB) := Las.sieveLargeCached las las.rat Rr (Las.sievePowers las las.rat Pr (Las.lineSieveSide las las.rat Rr fR))
+    let (bufA, RaB) := Las.sieveLargeCached las las.alg Ra (Las.sievePowers las las.alg Pa (Las.lineSieveSide las las.alg Ra fA))
+    let surv := Las.prefilterGap4 las q ua ub va vb bufR bufA biasR biasA (Las.tinyPrimes las las.rat RrB)
+      (Las.tinyPrimes las las.alg RaB) 3 (Las.dropSmallGcd las (Las.survivors bufR bufA len))
+    let (lab, rowStart) := Las.labelSurvivors las (Las.zeroRows las bufA) surv
+    let bits := Las.markBits bits surv true
+    let listsR := Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.rat RrB bits #[])
+    let listsA := Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.alg RaB bits #[])
+    let bits := Las.markBits bits surv false
+    sc := ⟨bufR, lab, bits⟩
+    let bd := Las.mkBounds las q ua ub va vb RrB RaB
+    for k in [0:surv.size] do
+      let g := Las.survivorGate las bd listsR[k]! listsA[k]! surv[k]!
+      if g == 4 || g == 6 then
+        if shown ≥ 12 then continue
+        shown := shown + 1
+        let pos := surv[k]!
+        let I := las.I
+        let j := pos / I
+        let c := pos % I
+        let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
+        let x0 := cU - IU / 2
+        let a64 := x0 * bd.ua64 + jU * bd.va64
+        let b64 := x0 * bd.ub64 + jU * bd.vb64
+        let d := bd.cs.size - 1
+        let f64 := Las.hornerU bd.cs64 a64 b64 d (bd.cs64[d]!) 1
+        let tA := Las.tinyAlgP bd.tq cU jU (IU / 2) 0 0 1 0
+        let sA := Las.smallScan bd.tabA las.alg.pinvLim las.alg.lg2 las.alg.sieveStart x0 jU IU 0 0 1
+        let i : Int := (c : Int) - (I / 2 : Nat)
+        let a := i * ua + (j : Int) * va
+        let b := i * ub + (j : Int) * vb
+        let fx := homEval sel.coeffs a b
+        let ex := exactCofactors las q ua ub va vb RrB RaB listsR[k]! listsA[k]! pos
+        let pA := listsA[k]!.foldl (fun acc k => acc * las.alg.primes[k]!.toUInt64) 1
+        let fabs := (if fx < 0 then -f64 else f64)
+        let odd := bd.qU * tA.prod * sA.prod * pA
+        let uw := (fabs >>> tA.v2) * Las.inv64 odd
+        let uw := if tA.v2 == 0 then uw else uw &&& ((1 <<< (64 - tA.v2)) - 1)
+        let iF := Arith.nf c - Arith.nf (I / 2)
+        let jF := Arith.nf j
+        let fF := Las.homEvalFA bd.cs (iF * bd.uaf + jF * bd.vaf) (iF * bd.ubf + jF * bd.vbf) d (bd.cs.get! d) 1
+        let lA := listsA[k]!.foldl (fun acc k => acc + las.alg.lg2.get! k) 0
+        let est := Float.log2 (fF.abs / bd.qF + 1) - tA.lg - sA.lg - lA
+        IO.println s!"pos {pos}: q {q} list {listsA[k]!.map (las.alg.primes[·]!)}; tiny v2 {tA.v2} prod {tA.prod}; small prod {sA.prod}; word u {uw} (log {Float.log2 uw.toFloat}) est {est} fF {fF}; exact z {ex.map (·.2)} quotient {fx.natAbs / (q * tA.prod.toNat * sA.prod.toNat * pA.toNat * 2 ^ tA.v2.toNat)} rem {fx.natAbs % (q * tA.prod.toNat * sA.prod.toNat * pA.toNat * 2 ^ tA.v2.toNat)}"
+
+/-- `Merge.mergeLog` + `unmergeLog` against `Merge.merge` + `unmerge` on random
+sparse matrices: the same merged rows and the same original-row sets for random
+sets of merged rows. -/
+def mergeCheck (seed0 : Nat) : IO Unit := do
+  let mut seed := seed0
+  let mut bad := 0
+  for trial in [0:20] do
+    let nrows := 2000 + trial * 300
+    let ncols := nrows - 40
+    let mut rows : Array (Array Nat) := #[]
+    for _ in [0:nrows] do
+      let mut r : Array Nat := #[]
+      for _ in [0:12] do
+        seed := (seed * 6364136223846793005 + 1442695040888963407) % 18446744073709551616
+        -- skewed: low columns are heavy
+        let x := (seed >>> 33) % 1000000
+        r := r.push (x * x / 1000000 * ncols / 1000000)
+      rows := rows.push r
+    let (m1, hist, c1) := Merge.merge ncols 3 rows 40 16
+    let (m2, log, c2) := Merge.mergeLog ncols 3 rows 40 16
+    if m1 != m2 || c1 != c2 then
+      IO.println s!"trial {trial}: merged rows differ"
+      bad := bad + 1
+      continue
+    let mut deps : Array (Array Nat) := #[]
+    for _ in [0:64] do
+      let mut d : Array Nat := #[]
+      for i in [0:m1.size] do
+        seed := (seed * 6364136223846793005 + 1442695040888963407) % 18446744073709551616
+        if (seed >>> 40) % 3 == 0 then d := d.push i
+      deps := deps.push d
+    let u1 := Merge.unmerge rows.size hist deps
+    let u2 := (Merge.unmergeLog log deps).map fun d => d.qsort (· < ·)
+    if u1 != u2 then
+      IO.println s!"trial {trial}: dependencies differ ({u1.size} vs {u2.size})"
+      bad := bad + 1
+  IO.println s!"mergeCheck: {bad} bad of 20"
+
+/-- Relations of a CADO-NFS `las` output file, by special-`q`: `(q, ρ, J, [(a, b)])`. -/
+def readCadoRels (path : String) : IO (Array (Nat × Nat × Nat × Array (Int × Nat))) := do
+  let lines ← IO.FS.lines path
+  let mut out : Array (Nat × Nat × Nat × Array (Int × Nat)) := #[]
+  for l in lines do
+    if l.startsWith "# Sieving side-1 q=" then
+      let fields := (l.drop 2).splitOn "; "
+      let get (k : String) : Nat := (fields.findSome? fun f =>
+        let f := f.trim
+        let f := if f.startsWith "Sieving side-1 " then f.drop 15 else f
+        match f.splitOn "=" with
+        | [a, b] => if a == k then (b.trimRight.dropRightWhile (· == ';')).toNat? else none
+        | _ => none).getD 0
+      out := out.push (get "q", get "rho", get "J", #[])
+    else if !l.startsWith "#" && l.length > 0 && out.size > 0 then
+      match (l.splitOn ":").head? with
+      | some ab =>
+        match ab.splitOn "," with
+        | [a, b] =>
+          let last := out.size - 1
+          out := out.modify last fun (q, r, J, rs) => (q, r, J, rs.push (a.toInt!, b.toNat!))
+        | _ => pure ()
+      | none => pure ()
+  return out
+
+/-- Where our siever loses the relations CADO-NFS finds on the same special-q:
+outside our region, below a sieve threshold, dropped by the small-gcd filter or
+the prefilter, rejected by the gate, or not found by the exact factoring. -/
+def lasMiss (polyPath cadoPath : String) : IO Unit := do
+  let (n, sel) ← readCadoPoly polyPath
+  let params := chooseParams (GNFS.decimalDigits n)
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
+      mfbA := params.mfbA, fudge := params.lasFudge }
+  let las := Las.mkLasCtx ctx lasParams
+  let blocks ← readCadoRels cadoPath
+  let mut sc := Las.Scratch.new las
+  let len := las.I * las.J
+  let I := las.I
+  -- outside, below rat byte, below alg byte, gcd filter, prefilter, gate, exact, found
+  let mut cnt : Array Nat := Array.replicate 8 0
+  let mut ours := 0
+  let mut cadoJ := 0
+  let mut gateCodes : Array Nat := Array.replicate 8 0
+  for (q, ρ, J, rels) in blocks do
+    let (u, v) := reduceLattice q ρ las.skew
+    let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
+    let Rr := Las.latticeRoots las.rat ua ub va vb
+    let Ra := Las.latticeRoots las.alg ua ub va vb
+    let ⟨b1, b2, bits⟩ := sc
+    let Pr := Las.powerRoots las.rat ua ub va vb
+    let Pa := Las.powerRoots las.alg ua ub va vb
+    let (fR, biasR) := Las.fillSegments las b1 false q ua ub va vb las.params.mfbR (Las.rowExtras las las.rat Rr)
+    let (fA, biasA) := Las.fillSegments las b2 true q ua ub va vb las.params.mfbA (Las.rowExtras las las.alg Ra)
+    let (bufR, RrB) := Las.sieveLargeCached las las.rat Rr (Las.sievePowers las las.rat Pr (Las.lineSieveSide las las.rat Rr fR))
+    let (bufA, RaB) := Las.sieveLargeCached las las.alg Ra (Las.sievePowers las las.alg Pa (Las.lineSieveSide las las.alg Ra fA))
+    let s0 := Las.survivors bufR bufA len
+    let s1 := Las.dropSmallGcd las s0
+    let surv := Las.prefilterGap4 las q ua ub va vb bufR bufA biasR biasA (Las.tinyPrimes las las.rat RrB)
+      (Las.tinyPrimes las las.alg RaB) 3 s1
+    let (lab, rowStart) := Las.labelSurvivors las (Las.zeroRows las bufA) surv
+    let bits := Las.markBits bits surv true
+    let listsR := Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.rat RrB bits #[])
+    let listsA := Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.alg RaB bits #[])
+    let bits := Las.markBits bits surv false
+    let bd := Las.mkBounds las q ua ub va vb RrB RaB
+    let mut found : Std.HashSet (Int × Nat) := {}
+    for k in [0:surv.size] do
+      if let some rel := Las.factorSurvivor4 las bd q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]! then
+        found := found.insert (rel.a, rel.b)
+    ours := ours + found.size
+    cadoJ := cadoJ + J
+    let det := ua * vb - ub * va
+    for (a, b) in rels do
+      if found.contains (a, b) then
+        cnt := cnt.modify 7 (· + 1)
+        continue
+      -- (a, b) = i u + j v: i = (a vb - b va) / det, j = (ua b - ub a) / det (or the negated point)
+      let solve (a b : Int) : Option (Int × Int) :=
+        let ni := a * vb - (b : Int) * va
+        let nj := ua * (b : Int) - ub * a
+        if ni % det == 0 && nj % det == 0 then some (ni / det, nj / det) else none
+      let ij := match solve a b with
+        | some (i, j) => if j < 0 then some (-i, -j) else some (i, j)
+        | none => none
+      match ij with
+      | none => cnt := cnt.modify 0 (· + 1)
+      | some (i, j) =>
+        if i < -(I / 2 : Nat) || i ≥ (I / 2 : Nat) || j ≤ 0 || j ≥ (las.J : Int) then
+          cnt := cnt.modify 0 (· + 1)
+        else
+          let pos := j.toNat * I + (i + (I / 2 : Nat)).toNat
+          if bufR.get! pos < 128 then cnt := cnt.modify 1 (· + 1)
+          else if bufA.get! pos < 128 then cnt := cnt.modify 2 (· + 1)
+          else if !s1.contains pos then cnt := cnt.modify 3 (· + 1)
+          else
+            match surv.findIdx? (· == pos) with
+            | none => cnt := cnt.modify 4 (· + 1)
+            | some k =>
+              let g := Las.survivorGate las bd listsR[k]! listsA[k]! pos
+              gateCodes := gateCodes.modify g (· + 1)
+              if g < 4 then cnt := cnt.modify 5 (· + 1) else cnt := cnt.modify 6 (· + 1)
+    sc := ⟨bufR, lab, bits⟩
+  let total := blocks.foldl (fun acc (_, _, _, rs) => acc + rs.size) 0
+  IO.println s!"{blocks.size} special-q: CADO {total} relations (average J {cadoJ / max 1 blocks.size}), ours {ours}"
+  IO.println s!"CADO's relations: found by us {cnt[7]!}; missed: outside our region {cnt[0]!}, rational byte below threshold {cnt[1]!}, algebraic byte {cnt[2]!}, gcd filter {cnt[3]!}, prefilter {cnt[4]!}, gate {cnt[5]!} (codes {gateCodes.extract 0 4}), exact factoring {cnt[6]!}"
