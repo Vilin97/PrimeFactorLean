@@ -233,6 +233,12 @@ def rationalRootMod (n : Nat) (rels : List Rel) : Option Nat := Id.run do
     y := y * powMod p (e / 2) n % n
   return some y
 
+/-- `f ()` once the tasks `ts` exist (an argument the compiler must evaluate
+first, returned for their results): a pure binding is otherwise created where
+it is first used. -/
+@[noinline] def afterTasks {α β : Type} (ts : List (Task α)) (f : Unit → β) : β × List (Task α) :=
+  (f (), ts)
+
 /-- `NFS.prodTreePar` once the task `t` exists (an argument the compiler must
 evaluate first, returned for its result: see `congruence`). -/
 @[noinline] def prodTreeParAfter {α : Type} (t : Task α) (g : List Int) (depth : Nat)
@@ -781,8 +787,10 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
       denseWord ctx.fb rels[kept[t * chunk + i]!]!
   let keptRows := kept.map fun k => rows.sparse[k]!
   -- merge light columns of the sparse matrix (the dense columns are imposed on
-  -- its kernel afterwards: `denseCombine`)
-  let (mrows, log, mcols) := Merge.mergeLog2 numCols 0 keptRows params.mergeDensity 32
+  -- its kernel afterwards: `denseCombine`), the word tasks running meanwhile
+  -- (`afterTasks`: the compiler would otherwise create them after the merge)
+  let ((mrows, log, mcols), wordTasks) := afterTasks wordTasks fun _ =>
+    Merge.mergeLog2 numCols 0 keptRows params.mergeDensity 32
   let mdeps := Lanczos.dependencies mcols mrows 64 threads
   let words := wordTasks.foldl (fun acc tk => acc ++ tk.get) #[]
   let deps := denseCombine words (Merge.unmergeLog log mdeps) kept.size
