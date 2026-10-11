@@ -772,14 +772,16 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
     GF2.dependencies numCols (kept.map fun k => fullRow ctx.fb rels[k]! rows.sparse[k]!) 64
   let deps := deps.map fun dep => dep.map fun i => kept[i]!
   -- each dependency splits `n` with probability about 1/2: square roots in
-  -- parallel batches of four
+  -- parallel batches of two (a square root uses about eight threads; at 100
+  -- digits a batch of two took 2.5 s, of four 3.5 s, one alone 2.1 s: 3.3 s
+  -- expected against 3.8 s for four and 4.2 s one by one)
   let mut i := 0
   while i < deps.size do
-    let batch := (deps.extract i (i + 4)).toList.map fun dep => Task.spawn fun _ =>
+    let batch := (deps.extract i (i + 2)).toList.map fun dep => Task.spawn fun _ =>
       (congruence st (dep.toList.map fun j => rels[j]!) p).bind (·.factor)
     for tk in batch do
       if let some d := tk.get then return some d
-    i := i + 4
+    i := i + 2
   return none
 
 /-- The number field sieve with a selected polynomial pair: Kleinjung-style
