@@ -33,6 +33,14 @@ def applyOverrides (p : Params) (kvs : List String) : Params :=
       | "density" => { p with mergeDensity := x }
       | "lasVariant" => { p with lasVariant := x }
       | _ => p
+    -- symbolic variants (SNFS tuning): swap the sides' bounds, double the
+    -- rational factor base, one more large-prime bit on both sides
+    | ["SWAP"] => { p with lpbR := p.lpbA, lpbA := p.lpbR, mfbR := p.mfbA, mfbA := p.mfbR,
+                           ratBound := p.algBound, algBound := p.ratBound }
+    | ["LIMR2"] => { p with ratBound := 2 * p.ratBound }
+    | ["LPB1"] => { p with lpbR := p.lpbR + 1, lpbA := p.lpbA + 1,
+                           mfbR := if p.mfbR + 2 ≥ 2 * p.lpbR then p.mfbR + 2 else p.mfbR + 1,
+                           mfbA := if p.mfbA + 2 ≥ 2 * p.lpbA then p.mfbA + 2 else p.mfbA + 1 }
     | _ => p) p
 
 /-- Relations as text: a header `n m Y₁ c₀ … c_d`, then one relation per line,
