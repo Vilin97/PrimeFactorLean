@@ -1439,13 +1439,13 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   let len := las.I * las.J
   let mut i := 0
   while i < qs.size do
-    let grp := qs.extract i (i + 4)
+    let grp := qs.extract i (i + get "batch" 8)
     let t0 ← IO.monoNanosNow
     let bases ← IO.lazyPure fun _ => grp.map fun (q, ρ) =>
       let (u, v) := reduceLattice q ρ las.skew
       (u.1, u.2, v.1, v.2)
-    let Rrs ← IO.lazyPure fun _ => Las.latticeRoots4 las.rat bases
-    let Ras ← IO.lazyPure fun _ => Las.latticeRoots4 las.alg bases
+    let Rrs ← IO.lazyPure fun _ => if get "batch" 8 == 4 then Las.latticeRoots4 las.rat bases else Las.latticeRoots8 las.rat bases
+    let Ras ← IO.lazyPure fun _ => if get "batch" 8 == 4 then Las.latticeRoots4 las.alg bases else Las.latticeRoots8 las.alg bases
     let t1 ← IO.monoNanosNow
     tm := tm.modify 0 (· + (t1 - t0))
     if get "basis" 0 == 1 then
@@ -1568,7 +1568,7 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       for k in [0:ts.size - 1] do
         tm := tm.modify (k + 1) (· + (ts[k + 1]! - ts[k]!))
       sc := ⟨bufR, lab, bits⟩
-    i := i + 4
+    i := i + get "batch" 8
   let nq := max 1 qs.size
   let total := tm.foldl (· + ·) 0
   IO.println s!"{qs.size} special-q from {q0}: {total / nq / 1000} us per q, {cnt[5]!} rels"
