@@ -207,13 +207,15 @@ structure LnSk where
 /-- `log` of the `L²` norm at the optimal skewness, and that skewness. With
 `x = s²`, `s^d ‖F‖²(s) = P(x)` and the optimum is at the positive root of
 `q(x) = Σ_j (2j - d) p_j x^j` (CADO-NFS `L2_skewness`): found by safeguarded
-Newton when the coefficients of `q` change sign once (a unique positive root),
-else by golden-section search on `log s`. From float coefficients; a skewness
-`hint > 0` (a neighbour's) starts the bracketing near the answer. -/
+Newton when the coefficients of `q` change sign once (a unique positive root)
+or a skewness `hint > 0` (a neighbour's) is given (the local minimum next to
+it), else by golden-section search on `log s`. From float coefficients. -/
 def logNormS (cf : FloatArray) (hint : Float) : LnSk := Id.run do
   let d := cf.size - 1
   let p := normPolyF cf
-  if qChanges p d 0 (fc 0) 0 (d + 1) == 1 then
+  -- with a hint, the minimum next to it (the bracket always closes on a crossing
+  -- of `q` from below, a local minimum of the norm)
+  if hint > fc 0 || qChanges p d 0 (fc 0) 0 (d + 1) == 1 then
     -- bracket from the hint `s₀` (`x = s₀²`) by factors 2, else from 1 by factors 16
     let x0 := if hint > fc 0 then hint * hint else fc 1
     let r := if hint > fc 0 then fc 2 else fc 16

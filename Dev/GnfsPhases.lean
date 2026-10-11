@@ -84,7 +84,8 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
     (rels : Array Rel) (rows : Rows) (t0 t3 : Nat) (inMatrix : Bool := false)
     (parts : Option (Nat → Array (Array Nat) → IO Unit) := none)
     (preMerge : Option (Nat → Array (Array Nat) → IO Unit) := none)
-    (preFilter : Option (Nat → Array (Array Nat) → IO Unit) := none) : IO Unit := do
+    (preFilter : Option (Nat → Array (Array Nat) → IO Unit) := none) (tryDeps : Nat := 0) :
+    IO Unit := do
   let numCols := rows.next
   if let some f := preFilter then f numCols rows.sparse
   let dense := 2 + ctx.fb.chars.size
@@ -154,7 +155,8 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
       | none => " (rational product not a square)"
       | some _ => " (no square root in Z[w])"
     IO.println s!"dep {tried} ({dep.size} rels): sqrt {ms a b} ms -> {r.map (·.val)}{why}"
-    if r.isSome then break
+    if r.isSome && tryDeps == 0 then break
+    if tryDeps > 0 && tried ≥ tryDeps then break
   let t7 ← IO.monoNanosNow
   IO.println s!"total {ms t0 t7} ms"
 
@@ -329,7 +331,9 @@ def gnfsPostFile (path : String) (threads : Nat) (overrides : List String)
   let t3 ← IO.monoNanosNow
   IO.println s!"loaded {rels.size} relations, rows in {ms t0 t3} ms"
   gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix") parts preMerge
-    preFilter
+    preFilter ((overrides.findSome? fun kv => match kv.splitOn "=" with
+      | ["trydeps", v] => v.toNat?
+      | _ => none).getD 0)
 
 open PrimeFactorLean.NFS.PolySelect in
 /-- `PolySelect.selectCollision` with its two stages timed (collision search,
