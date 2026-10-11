@@ -824,8 +824,12 @@ def step (B : Sparse) (threads : Nat) (v0 : Block) (st : LState) : Except Bool L
     let (vb, ab, zb) := (st.v.data.b, av.data.b, v0.data.b)
     if h : 8 * hi ≤ vb.size ∧ 8 * hi ≤ ab.size ∧ 8 * hi ≤ zb.size ∧ vb.size < USize.size ∧
         ab.size < USize.size ∧ zb.size < USize.size then
-      let (a1, a2, a3) := innerAcc3 vb ab zb hi h.1 h.2.1 h.2.2.1
-        ⟨h.2.2.2.1, h.2.2.2.2.1, h.2.2.2.2.2⟩ lo Tab.zero Tab.zero Tab.zero
+      -- three passes of `innerGo` rather than one of `innerAcc3`: its 24 inlined
+      -- table updates (with their copy paths) made a loop body far beyond the
+      -- instruction cache (1.96 -> 0.64 ms per iteration at 100 digits)
+      let a1 := innerGo vb ab hi h.1 h.2.1 ⟨h.2.2.2.1, h.2.2.2.2.1⟩ lo Tab.zero
+      let a2 := innerGo ab ab hi h.2.1 h.2.1 ⟨h.2.2.2.2.1, h.2.2.2.2.1⟩ lo Tab.zero
+      let a3 := innerGo vb zb hi h.1 h.2.2.1 ⟨h.2.2.2.1, h.2.2.2.2.2⟩ lo Tab.zero
       (tablesMat a1, tablesMat a2, tablesMat a3)
     else (Mat.zero, Mat.zero, Mat.zero)
   let (vtav, vta2v, vtv0) := parts.foldl (fun (x1, x2, x3) tk =>

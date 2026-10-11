@@ -343,6 +343,21 @@ def lanczosParts (numCols : Nat) (rows : Array (Array Nat)) (threads reps : Nat)
       else 0).foldl (fun a tk => a ^^^ tk.get) 0
     acc := acc ^^^ parts
   let t3 ← IO.monoNanosNow
+  -- the same three products as three passes of `innerGo`
+  for _ in [0:reps] do
+    let parts ← IO.lazyPure fun _ => ((chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
+      let (vb, ab, zb) := (v.data.b, av.data.b, v0.data.b)
+      if h : 8 * hi ≤ vb.size ∧ 8 * hi ≤ ab.size ∧ 8 * hi ≤ zb.size ∧ vb.size < USize.size ∧
+          ab.size < USize.size ∧ zb.size < USize.size then
+        let a1 := innerGo vb ab hi h.1 h.2.1 ⟨h.2.2.2.1, h.2.2.2.2.1⟩ lo Tab.zero
+        let a2 := innerGo ab ab hi h.2.1 h.2.1 ⟨h.2.2.2.2.1, h.2.2.2.2.1⟩ lo Tab.zero
+        let a3 := innerGo vb zb hi h.1 h.2.2.1 ⟨h.2.2.2.1, h.2.2.2.2.2⟩ lo Tab.zero
+        (tablesMat a1).get 1 ^^^ (tablesMat a2).get 2 ^^^ (tablesMat a3).get 3
+      else 0).foldl (fun a tk => a ^^^ tk.get) 0
+    acc := acc ^^^ parts
+  let t3b ← IO.monoNanosNow
+  IO.println s!"inner products as three passes: {(t3b - t3) / 1000 / reps} us per call"
+  let t3 ← IO.monoNanosNow
   let tD := (tables (Mat.ofFn fun i => (i * 7919 + 13).toUInt64 * 0x9E3779B97F4A7C15)).toB
   for _ in [0:reps] do
     let r ← IO.lazyPure fun _ => ((chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
