@@ -697,6 +697,7 @@ up to a constant, sieved over the prime powers `p^k ≤ 1024` and the primes bel
 projective roots (which do not depend on `v`) are left out. -/
 def alphaSieve (cs : Array Int) (l m u : Int) (vlo : Int) (len : Nat) : FloatArray := Id.run do
   let mut arr : FloatArray := ⟨Array.replicate len (fc 0)⟩
+  let mut const : Float := fc 0
   for p in primesUpTo 200 do
     let pf := nf p
     let lp := Float.log pf
@@ -729,8 +730,9 @@ def alphaSieve (cs : Array Int) (l m u : Int) (vlo : Int) (len : Nat) : FloatArr
           t := t + q
       if q * p > 1024 then break
       q := q * p
-    -- the constant part
-    for t in [0:len] do arr := arr.set! t (arr.get! t + constW)
+    const := const + constW
+  -- the constant part (the same for every `v`)
+  for t in [0:len] do arr := arr.set! t (arr.get! t + const)
   return arr
 
 /-- The lognorm at a fixed skewness `s`. -/
@@ -741,8 +743,10 @@ def lognormAt (cs : Array Int) (s : Float) : Float :=
 /-- The range `[kmin, kmax]` of rotations `k x^i (ℓ x - m)` keeping the lognorm
 at skewness `s` at most `maxLog` (CADO-NFS `expected_growth`: doubling, then
 bisection). -/
-def rotRange (cs : Array Int) (l m : Int) (i : Nat) (maxLog s : Float) : Int × Int := Id.run do
-  let ok (k : Int) : Bool := lognormAt (rotJ cs l m k i) s ≤ maxLog
+def rotRange (cs : Array Int) (l m : Int) (i : Nat) (maxLog s : Float) (reopt : Bool := false) :
+    Int × Int := Id.run do
+  let ok (k : Int) : Bool :=
+    (if reopt then (logNorm (rotJ cs l m k i)).1 else lognormAt (rotJ cs l m k i) s) ≤ maxLog
   let mut kmin : Int := -1
   for _ in [0:80] do
     if !ok kmin then break
@@ -919,7 +923,13 @@ def collisionSearch (n d P nq incr adLo adHi keep : Nat) : Array CCand := Id.run
             -- CADO discards a_d a_{d-2} > 0 (size optimization works badly)
             if cs[d]! * cs[d - 2]! > 0 then continue
             let (cs', m', ln) := sizeOpt cs l m
-            if m' ≤ 0 || cs'[d]! ≤ 0 then continue
+            -- the same pair up to signs: `m > 0` by `x ↦ -x`, `c_d > 0` by `f ↦ -f`
+            -- (discarding them lost about half of the candidates)
+            let (cs', m') := if m' < 0 then
+                ((cs'.mapIdx fun i c => if i % 2 == 1 then -c else c), -m')
+              else (cs', m')
+            let cs' := if cs'[d]! < 0 then cs'.map (- ·) else cs'
+            if m' == 0 || cs'[d]! == 0 then continue
             -- CADO also discards a_{d-1} a_{d-3} > 0 after size optimization
             if d ≥ 3 && cs'[d - 1]! * cs'[d - 3]! > 0 then continue
             let c : CCand := { cs := cs', l, m := m', score := ln + expectedRotationGain cs' l m' }
@@ -936,7 +946,8 @@ def collisionSearch (n d P nq incr adLo adHi keep : Nat) : Array CCand := Id.run
 `margin` (at most `maxU` values of `u`, `maxV` of `v`, centered). The `top`
 best sieved `α` of each `u` are scored by lognorm + sieved `α`, and the 16 best
 of these are re-scored with the exact `α` (`alphaExact`). -/
-def rootOpt (c : CCand) (margin : Float) (maxU maxV top : Nat) : CCand := Id.run do
+def rootOpt (c : CCand) (margin : Float) (maxU maxV top : Nat) (reopt : Bool := false) : CCand :=
+  Id.run do
   let (n, s) := logNorm c.cs
   -- quadratic rotations `w x² g` too for degree five and more (at most 9 of them)
   let (wlo, whi) : Int × Int := if c.cs.size ≥ 6 then
@@ -947,13 +958,13 @@ def rootOpt (c : CCand) (margin : Float) (maxU maxV top : Nat) : CCand := Id.run
   for wi in [0:(whi - wlo + 1).toNat] do
     let w : Int := wlo + wi
     let cw := rotJ c.cs c.l c.m w 2
-    let (ulo0, uhi0) := rotRange cw c.l c.m 1 (n + margin) s
+    let (ulo0, uhi0) := rotRange cw c.l c.m 1 (n + margin) s reopt
     let ulo := max ulo0 (-((maxU / 2 : Nat) : Int))
     let uhi := min uhi0 ((maxU / 2 : Nat) : Int)
     for ui in [0:(uhi - ulo + 1).toNat] do
       let u : Int := ulo + ui
       let base := rotJ cw c.l c.m u 1
-      let (vlo0, vhi0) := rotRange base c.l c.m 0 (n + margin) s
+      let (vlo0, vhi0) := rotRange base c.l c.m 0 (n + margin) s reopt
       let vlo := max vlo0 (-((maxV / 2 : Nat) : Int))
       let vhi := min vhi0 ((maxV / 2 : Nat) : Int)
       if vhi < vlo then continue

@@ -303,8 +303,89 @@ def polyStages (n threads : Nat) (overrides : List String) : IO Unit := do
     let all : Array CCand := tasks.foldl (fun acc tk => acc ++ tk.get) #[]
     (all.qsort fun a b => a.score < b.score).extract 0 params.psKeep
   let t1 ← IO.monoNanosNow
+  -- the size-optimized candidates, CADO-NFS format (for its polyselect_ropt)
+  if let some path := overrides.findSome? (fun (kv : String) => match kv.splitOn "=" with
+      | ["rawout", v] => some v
+      | _ => none) then
+    let mut txt := ""
+    for c in cands do
+      let (ln, sk) := logNorm c.cs
+      txt := txt ++ s!"n: {n}\nY0: {-c.m}\nY1: {c.l}\n" ++
+        String.join ((List.range c.cs.size).map fun i => s!"c{i}: {c.cs[i]!}\n") ++
+        s!"skew: {sk}\n# lognorm {ln}, alpha {alphaExact c.cs 2000}\n\n"
+    IO.FS.writeFile path txt
+  let get (key : String) (dflt : Nat) : Nat := (overrides.findSome? fun (kv : String) =>
+    match kv.splitOn "=" with
+    | [k, v] => if k == key then v.toNat? else none
+    | _ => none).getD dflt
+  let margin := (get "margin10" 10).toFloat / 10
+  let (U, V, top) := (get "ropU" 16, get "ropV" 100000, get "ropTop" 32)
   let rot ← IO.lazyPure fun _ =>
-    ((cands.toList.map fun c => Task.spawn fun _ => rootOpt c (Arith.fc 1) 16 100000 32).map
-      Task.get).length
+    (cands.toList.map fun c => Task.spawn fun _ => rootOpt c margin U V top (get "reopt" 0 == 1)).map Task.get
   let t2 ← IO.monoNanosNow
-  IO.println s!"collision search {ms t0 t1} ms ({count} leading coefficients, {cands.size} kept), root optimization {ms t1 t2} ms ({rot})"
+  IO.println s!"collision search {ms t0 t1} ms ({count} leading coefficients, {cands.size} kept), root optimization {ms t1 t2} ms ({rot.length}; margin {margin}, U {U}, V {V}, top {top})"
+  let tbl := dickmanTable
+  let area := Float.exp2 (2 * params.lasLogI - 1).toFloat * params.qmin.toFloat
+  let mut best : Option (Float × CCand) := none
+  for c in rot do
+    if c.m ≤ 0 || c.cs[d]! ≤ 0 then continue
+    let sk := (logNorm c.cs).2
+    let e := murphyE tbl c.cs c.l c.m sk (Float.exp2 params.lpbA.toFloat) (Float.exp2 params.lpbR.toFloat) area
+    match best with
+    | none => best := some (e, c)
+    | some (e0, _) => if e > e0 then best := some (e, c)
+  if let some (e, c) := best then
+    let (ln, sk) := logNorm c.cs
+    IO.println s!"best: E {e}, lognorm {ln}, alpha {alphaExact c.cs 2000}, skew {sk}"
+    if let some path := overrides.findSome? (fun (kv : String) => match kv.splitOn "=" with
+        | ["out", v] => some v
+        | _ => none) then
+      let lines := [s!"n: {n}", s!"Y0: {-c.m}", s!"Y1: {c.l}"] ++
+        (List.range c.cs.size).map (fun i => s!"c{i}: {c.cs[i]!}") ++ [s!"skew: {sk}"]
+      IO.FS.writeFile path (String.intercalate "\n" lines ++ "\n")
+
+open PrimeFactorLean.NFS.PolySelect in
+/-- Our `sizeOpt` on the raw polynomials of a CADO-NFS `polyselect` output file,
+against CADO-NFS's size-optimized lognorms (the line after each raw block). -/
+def soptCompare (path : String) : IO Unit := do
+  let lines ← IO.FS.lines path
+  let mut i := 0
+  let mut raw : Array Int := #[]
+  let mut y0 : Int := 0
+  let mut y1 : Int := 0
+  let mut inRaw := false
+  let mut count := 0
+  let mut sumOurs : Float := 0
+  let mut sumCado : Float := 0
+  let mut better := 0
+  let mut sum0 : Float := 0
+  for l in lines do
+    if l.startsWith "# Raw polynomial" then
+      inRaw := true
+      raw := #[]
+    else if inRaw && l.startsWith "# Y0: " then y0 := (l.drop 6).toInt!
+    else if inRaw && l.startsWith "# Y1: " then y1 := (l.drop 6).toInt!
+    else if inRaw && l.startsWith "# c" then
+      let parts := (l.drop 3).splitOn ": "
+      if parts.length == 2 then raw := raw.push parts[1]!.toInt!
+    else if inRaw && l.startsWith "# raw exp_E" then inRaw := false
+    else if l.startsWith "# exp_E" && raw.size == 6 then
+      -- CADO: "# exp_E e, lognorm L, ..."
+      let cadoLn := ((l.splitOn "lognorm ")[1]!.splitOn ",")[0]!.trim
+      if count ≥ 400 then break
+      let (_, _, ln0) := sizeOpt raw y1 (-y0)
+      let ln := ln0
+      sum0 := sum0 + ln0
+      count := count + 1
+      let cl := cadoLn.toNat?.map (·.toFloat) |>.getD 0
+      -- parse the float by hand: integer and fractional parts
+      let ip := ((cadoLn.splitOn ".")[0]!).toNat!
+      let fp := ((cadoLn.splitOn ".")[1]!)
+      let cl := ip.toFloat + (fp.toNat!.toFloat / (10 : Float) ^ fp.length.toFloat) + 0 * cl
+      sumOurs := sumOurs + ln
+      sumCado := sumCado + cl
+      if ln < cl - 0.01 then better := better + 1
+      if count ≤ 8 then IO.println s!"ours {ln} cado {cl}"
+      raw := #[]
+    i := i + 1
+  IO.println s!"{count} polynomials: mean lognorm ours {sumOurs / count.toFloat} (local descent only {sum0 / count.toFloat}), CADO-NFS {sumCado / count.toFloat}; ours better on {better}"

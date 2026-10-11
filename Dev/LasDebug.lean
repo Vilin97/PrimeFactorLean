@@ -523,11 +523,13 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   let lasParams : Las.LasParams :=
     { logI := get "logI" params.lasLogI, lpbR := get "lpbR" params.lpbR, lpbA := get "lpbA" params.lpbA,
       mfbR := get "mfbR" params.mfbR, mfbA := get "mfbA" params.mfbA,
-      fudge := get "fudge" params.lasFudge, jDiv := get "jDiv" 2, sieveFrom := get "from" 30 }
+      fudge := get "fudge" params.lasFudge, jDiv := get "jDiv" 2, sieveFrom := get "from" 30,
+      fudgeA := get "fudgeA" 0 }
   let slack := get "slack" 3
   let fs := get "fs" 2
   let fs3 := fs == 3
   let las := Las.mkLasCtx ctx lasParams
+  let las := { las with skew := get "skew" las.skew }
   let qs := specialQs sel q0 count
   let mut sc := Las.Scratch.new las
   let mut tm : Array Nat := Array.replicate 12 0
@@ -890,13 +892,17 @@ def readCadoRels (path : String) : IO (Array (Nat × Nat × Nat × Array (Int ×
         | [a, b] => if a == k then (b.trimRight.dropRightWhile (· == ';')).toNat? else none
         | _ => none).getD 0
       out := out.push (get "q", get "rho", get "J", #[])
-    else if !l.startsWith "#" && l.length > 0 && out.size > 0 then
+    else if !l.startsWith "#" && l.length > 0 then
+      -- (las prints the next special-q's header before the last relations of
+      -- the previous one: a relation belongs to the ideal (q, ρ) dividing it)
       match (l.splitOn ":").head? with
       | some ab =>
         match ab.splitOn "," with
         | [a, b] =>
-          let last := out.size - 1
-          out := out.modify last fun (q, r, J, rs) => (q, r, J, rs.push (a.toInt!, b.toNat!))
+          let (a, b) := (a.toInt!, b.toNat!)
+          match out.findIdx? (fun (q, r, _, _) => (a - (b : Int) * (r : Int)) % (q : Int) == 0) with
+          | some k => out := out.modify k fun (q, r, J, rs) => (q, r, J, rs.push (a, b))
+          | none => pure ()
         | _ => pure ()
       | none => pure ()
   return out
@@ -923,6 +929,8 @@ def lasMiss (polyPath cadoPath : String) : IO Unit := do
   let mut ours := 0
   let mut cadoJ := 0
   let mut gateCodes : Array Nat := Array.replicate 8 0
+  let mut algHist : Array Nat := Array.replicate 16 0
+  let mut tinyHist : Array Nat := Array.replicate 16 0
   for (q, ρ, J, rels) in blocks do
     let (u, v) := reduceLattice q ρ las.skew
     let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
@@ -969,10 +977,33 @@ def lasMiss (polyPath cadoPath : String) : IO Unit := do
       | some (i, j) =>
         if i < -(I / 2 : Nat) || i ≥ (I / 2 : Nat) || j ≤ 0 || j ≥ (las.J : Int) then
           cnt := cnt.modify 0 (· + 1)
+          if cnt[0]! ≤ 6 then IO.println s!"outside: q {q} ρ {ρ} (a, b) = ({a}, {b}) -> (i, j) = ({i}, {j}); basis {ua} {ub} {va} {vb}"
         else
           let pos := j.toNat * I + (i + (I / 2 : Nat)).toNat
           if bufR.get! pos < 128 then cnt := cnt.modify 1 (· + 1)
-          else if bufA.get! pos < 128 then cnt := cnt.modify 2 (· + 1)
+          else if bufA.get! pos < 128 then
+            cnt := cnt.modify 2 (· + 1)
+            -- the segment's threshold against this point's norm, and its tiny primes
+            let segs := I / 64
+            let c := pos % I
+            let seg := j.toNat * segs + c / 64
+            let cs := Las.coeffsF las
+            let d := cs.size - 1
+            let iF := Arith.nf c - Arith.nf (I / 2)
+            let jF := Arith.nf j.toNat
+            let nb := Las.normBits true cs d (Arith.intF ua) (Arith.intF ub) (Arith.intF va) (Arith.intF vb)
+              (Arith.nf sel.m) (Arith.nf sel.y1) (Arith.nf q) iF jF
+            let thr := 128 - (biasA.get! seg).toNat   -- sieved bits needed
+            let sieved := (bufA.get! pos).toNat - (biasA.get! seg).toNat
+            let tq := Las.mkTinyQ las ua ub va vb
+            let tiny := Las.tinyAlgU tq c.toUInt64 j.toNat.toUInt64 (I / 2).toUInt64 0 0
+            -- needed = norm bits - mfbA - fudge; the threshold's excess over it
+            let need := nb - Arith.nf (las.params.mfbA + las.params.fudge)
+            let excessT := Arith.nf thr - need
+            let bucket := (if excessT < 0 then 0 else min 15 excessT.toUInt64.toNat)
+            algHist := algHist.modify bucket (· + 1)
+            let tb := min 15 tiny.toUInt64.toNat
+            tinyHist := tinyHist.modify tb (· + 1)
           else if !s1.contains pos then cnt := cnt.modify 3 (· + 1)
           else
             match surv.findIdx? (· == pos) with
@@ -985,3 +1016,5 @@ def lasMiss (polyPath cadoPath : String) : IO Unit := do
   let total := blocks.foldl (fun acc (_, _, _, rs) => acc + rs.size) 0
   IO.println s!"{blocks.size} special-q: CADO {total} relations (average J {cadoJ / max 1 blocks.size}), ours {ours}"
   IO.println s!"CADO's relations: found by us {cnt[7]!}; missed: outside our region {cnt[0]!}, rational byte below threshold {cnt[1]!}, algebraic byte {cnt[2]!}, gcd filter {cnt[3]!}, prefilter {cnt[4]!}, gate {cnt[5]!} (codes {gateCodes.extract 0 4}), exact factoring {cnt[6]!}"
+  IO.println s!"algebraic misses: segment threshold above the point's own (bits, 0..15+): {algHist}"
+  IO.println s!"algebraic misses: tiny-prime bits (0..15+): {tinyHist}"

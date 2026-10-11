@@ -506,6 +506,10 @@ the survivors (`tinyAt`), and `fudge` covers them in the thresholds. -/
   sieveFrom : Nat := 30
   /-- Threshold slack in bits. -/
   fudge : Nat := 4
+  /-- Additional threshold slack of the algebraic side: the unsieved primes
+  below `sieveFrom` divide algebraic norms far more than rational ones when the
+  polynomial has many small roots (good `α`). -/
+  fudgeA : Nat := 0
   /-- Slack of the survivor prefilter in bits. -/
   preSlack : Nat := 6
   /-- `J = I / jDiv` rows per special-`q`. -/
@@ -956,7 +960,8 @@ def rowThresholds (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (mfb : Nat) (alg 
       let nrm := if alg then (homEvalF cs a b).abs / qf else (y1 * a - b * m).abs
       if nrm > best then best := nrm
     let bits := (Float.log2 best).floor.toUInt64.toNat + 1
-    out := out.push (if bits > mfb + ctx.params.fudge then bits - mfb - ctx.params.fudge else 0)
+    let fudge := ctx.params.fudge + (if alg then ctx.params.fudgeA else 0)
+    out := out.push (if bits > mfb + fudge then bits - mfb - fudge else 0)
   return out
 
 /-- Positions `[j, e)` where both regions reached `128` (the algebraic byte,
@@ -1588,7 +1593,7 @@ def fillSegments (ctx : LasCtx) (buf : ByteArray) (alg : Bool) (q : Nat) (ua ub 
   let mF := nf ctx.base.sel.m
   let y1F := nf ctx.base.sel.y1
   let qF := nf q
-  let mfbF := nf (mfb + ctx.params.fudge)
+  let mfbF := nf (mfb + ctx.params.fudge + (if alg then ctx.params.fudgeA else 0))
   let segs := ctx.I / 64
   let mut b := buf
   let mut bias := ByteArray.emptyWithCapacity (ctx.J * segs)

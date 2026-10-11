@@ -174,6 +174,7 @@ def devMain (args : List String) : IO Unit := do
   | "gnfsover" :: ns :: ts :: kvs => gnfsPhases ns.toNat! ts.toNat! 0 0 none kvs
   | "gnfspost" :: path :: ts :: kvs => gnfsPostFile path ts.toNat! kvs
   | "polystages" :: ns :: ts :: kvs => polyStages ns.toNat! ts.toNat! kvs
+  | ["soptcompare", path] => soptCompare path
   | "snfsover" :: ns :: ts :: b :: k :: sgn :: d :: kvs =>
     let sel := GNFS.snfsSelection b.toNat! k.toNat! d.toNat! (sgn == "+")
     gnfsPhases ns.toNat! ts.toNat! 0 0 (some (sel, GNFS.decimalDigits (b.toNat! ^ k.toNat!))) kvs
