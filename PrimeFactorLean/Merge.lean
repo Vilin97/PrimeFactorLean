@@ -252,6 +252,194 @@ def mergeLog (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : N
       orig := orig.push i
   return (outRows, ⟨orig, ops, rows.size⟩, next)
 
+/-- `|a Δ b|` for increasing arrays (one merge walk, tail recursive). -/
+def symmDiffSize (a b : Array Nat) (i j acc : Nat) : Nat :=
+  if h : i < a.size ∧ j < b.size then
+    let x := a[i]
+    let y := b[j]
+    if x < y then symmDiffSize a b (i + 1) j (acc + 1)
+    else if y < x then symmDiffSize a b i (j + 1) (acc + 1)
+    else symmDiffSize a b (i + 1) (j + 1) acc
+  else acc + (a.size - i) + (b.size - j)
+termination_by (a.size - i) + (b.size - j)
+
+/-- A minimum spanning tree (Prim) of the complete graph on `k` vertices with
+edge weights `wt[i k + j]`, rooted at `0`: the parents (`k` for the root) and
+the vertices in breadth-first order. -/
+def primTree (k : Nat) (wt : Array Nat) : Array Nat × Array Nat := Id.run do
+  let inf := 1000000000
+  let mut inTree : Array Bool := (Array.replicate k false).set! 0 true
+  let mut best : Array Nat := (Array.range k).map fun j => if j == 0 then inf else wt[j]!
+  let mut parent : Array Nat := (Array.replicate k 0).set! 0 k
+  let mut order : Array Nat := #[0]
+  for _ in [1:k] do
+    let mut v := k
+    for j in [0:k] do
+      if !inTree[j]! && (v == k || best[j]! < best[v]!) then v := j
+    if v == k then break
+    inTree := inTree.set! v true
+    order := order.push v
+    for j in [0:k] do
+      if !inTree[j]! then
+        let w := wt[v * k + j]!
+        if w < best[j]! then
+          best := best.set! j w
+          parent := parent.set! j v
+  return (parent, order)
+
+/-- `mergeLog` in the manner of CADO-NFS's `merge`. The dense columns (below
+`dense < 63`) do not take part: each row keeps them as a bitmask, XORed along
+every row addition, so the rows being merged are shorter and `density` counts
+the other columns only. Columns are merged in passes with a growing weight cap
+`cwmax` (2 up to `maxW`) and a growing bound on the estimated fill-in
+`(k - 2) w` of a column of weight `k` whose lightest row has weight `w`: cheap
+merges of any weight before expensive ones, instead of every column of weight
+`k` before any of weight `k + 1`. -/
+def mergeLog2 (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : Nat)
+    (mstMax : Nat := 6) : Array (Array Nat) × Log × Nat := Id.run do
+  let mut rows : Array (Array Nat) := Array.mkEmpty rows0.size
+  let mut dmask : Array Nat := Array.mkEmpty rows0.size
+  for r0 in rows0 do
+    let r := normalize r0
+    let mut mk := 0
+    let mut sp : Array Nat := Array.mkEmpty r.size
+    for c in r do
+      if c < dense then mk := mk ^^^ (1 <<< c) else sp := sp.push c
+    rows := rows.push sp
+    dmask := dmask.push mk
+  let mut colRows : Array (Array Nat) := Array.replicate numCols #[]
+  let mut colWeight : Array Nat := Array.replicate numCols 0
+  let mut weight := 0
+  for i in [0:rows.size] do
+    for c in rows[i]! do
+      colRows := colRows.modify c (·.push i)
+      colWeight := colWeight.set! c (colWeight[c]! + 1)
+    weight := weight + rows[i]!.size
+  let mut ops : Array Nat := #[]
+  let mut alive : Array Bool := Array.replicate rows.size true
+  let mut liveRows := rows.size
+  let mut cwmax := 2
+  let mut cbound := 0
+  let mut idle := 0
+  let mut done := false
+  -- cached fills of rejected columns, and modification stamps of the rows
+  let mut clock := 1
+  let mut rowStamp : Array Nat := Array.replicate rows.size 0
+  let mut colStamp : Array Nat := Array.replicate numCols 0
+  let mut colFill : Array Int := Array.replicate numCols 0
+  let mut colCw : Array Nat := Array.replicate numCols 0
+  while !done && idle < 3 do
+    let mut merges := 0
+    for c in [dense:numCols] do
+      if done then break
+      let cw := colWeight[c]!
+      if cw == 0 || cw > cwmax then continue
+      -- the live rows containing `c`
+      let mut rs : Array Nat := #[]
+      for r in colRows[c]! do
+        if alive[r]! && containsSorted rows[r]! c && !rs.contains r then rs := rs.push r
+      if rs.isEmpty then
+        colRows := colRows.set! c #[]
+        continue
+      -- a minimum spanning tree of the rows (edge weight: the size of their
+      -- sum): its edges are the new rows, the root is deleted
+      let k := rs.size
+      -- a fill computed earlier is still exact while neither the column's
+      -- weight nor any of its rows changed: skip it without recomputation
+      if k ≥ 3 && colStamp[c]! > 0 && colCw[c]! == k && colFill[c]! > (cbound : Int) &&
+          rs.all (fun r => rowStamp[r]! ≤ colStamp[c]!) then
+        colRows := colRows.set! c rs
+        continue
+      let mst := k ≥ 3 && k ≤ mstMax
+      -- beyond `mstMax` rows: a star around the lightest row, fill estimated
+      -- as `(k - 2) w` (pairwise sums cost `k (k - 1) / 2` merge walks)
+      if k > mstMax then
+        let mut pv := 0
+        for v in [1:k] do
+          if rows[rs[v]!]!.size < rows[rs[pv]!]!.size then pv := v
+        if ((k - 2) * rows[rs[pv]!]!.size : Nat) > cbound then
+          colRows := colRows.set! c rs
+          continue
+        -- reorder so that the pivot comes first (the star's root)
+        let tmp := rs[0]!
+        rs := (rs.set! 0 rs[pv]!).set! pv tmp
+      let mut wt : Array Nat := Array.replicate (k * k) 0
+      if mst then
+        for i in [0:k] do
+          for j in [i + 1:k] do
+            let w := symmDiffSize rows[rs[i]!]! rows[rs[j]!]! 0 0 0
+            wt := (wt.set! (i * k + j) w).set! (j * k + i) w
+      let (parent, order) := if mst then primTree k wt
+        else ((Array.range k).map fun v => if v == 0 then k else 0, Array.range k)
+      if mst then
+        let mut fill : Int := 0
+        for v in [1:k] do fill := fill + wt[v * k + parent[v]!]!
+        for v in [0:k] do fill := fill - rows[rs[v]!]!.size
+        if fill > (cbound : Int) then
+          colRows := colRows.set! c rs
+          clock := clock + 1
+          colStamp := colStamp.set! c clock
+          colFill := colFill.set! c fill
+          colCw := colCw.set! c k
+          continue
+      colRows := colRows.set! c #[]
+      merges := merges + 1
+      -- children before parents: each row gets its parent's original row
+      for t in [0:k - 1] do
+        let v := order[k - 1 - t]!
+        let u := parent[v]!
+        let r := rs[v]!
+        let pr := rs[u]!
+        let prow := rows[pr]!
+        let old := rows[r]!
+        let new := symmDiff old prow
+        let mut i := 0
+        for x in prow do
+          while i < old.size && old[i]! < x do i := i + 1
+          if i < old.size && old[i]! == x then
+            colWeight := colWeight.set! x (colWeight[x]! - 1)
+          else
+            colWeight := colWeight.set! x (colWeight[x]! + 1)
+            colRows := colRows.modify x (·.push r)
+        weight := weight + new.size - old.size
+        rows := rows.set! r new
+        dmask := dmask.set! r (dmask[r]! ^^^ dmask[pr]!)
+        ops := ops.push (r * 16777216 + pr)
+        clock := clock + 1
+        rowStamp := rowStamp.set! r clock
+      -- delete the root
+      let root := rs[order[0]!]!
+      for x in rows[root]! do colWeight := colWeight.set! x (colWeight[x]! - 1)
+      weight := weight - rows[root]!.size
+      rows := rows.set! root #[]
+      alive := alive.set! root false
+      liveRows := liveRows - 1
+      if weight ≥ density * liveRows then done := true
+    -- raise the bound every pass, the weight cap when a pass merges little
+    cbound := cbound + 8
+    if merges * 100 < liveRows then
+      if cwmax < maxW then cwmax := cwmax + 1
+      else if merges == 0 then idle := idle + 1
+  -- renumber the active columns: the dense ones first, as they were
+  let mut index : Array Nat := Array.replicate numCols numCols
+  let mut next := dense
+  let mut outRows : Array (Array Nat) := #[]
+  let mut orig : Array Nat := #[]
+  for i in [0:rows.size] do
+    if alive[i]! then
+      let mk := dmask[i]!
+      let mut r : Array Nat := Array.mkEmpty (rows[i]!.size + dense)
+      for c in [0:dense] do
+        if (mk >>> c) &&& 1 == 1 then r := r.push c
+      for c in rows[i]! do
+        if index[c]! == numCols then
+          index := index.set! c next
+          next := next + 1
+        r := r.push index[c]!
+      outRows := outRows.push r
+      orig := orig.push i
+  return (outRows, ⟨orig, ops, rows.size⟩, next)
+
 /-- The root of `x` in a union-find forest (`parent`; union by size keeps the
 trees shallow, so no path compression is needed). -/
 def findRoot (parent : Array Nat) (x : Nat) : Nat → Nat

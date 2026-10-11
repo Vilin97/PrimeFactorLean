@@ -60,8 +60,9 @@ structure Params where
   /-- Threshold slack of the lattice siever, in bits (it also covers the primes
 below 30, which are not sieved). -/
   lasFudge : Nat := 8
-  /-- Target average row weight of the merged matrix. -/
-  mergeDensity : Nat := 100
+  /-- Target average row weight of the merged matrix, not counting the dense
+  (sign and character) columns. -/
+  mergeDensity : Nat := 75
   /-- Excess (rows less columns) kept by clique removal before merging (`0`: no
   clique removal). -/
   purgeExcess : Nat := 200

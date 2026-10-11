@@ -678,7 +678,7 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
       fullRow ctx.fb rels[k]! rows.sparse[k]!
   let keptRows := rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
   -- merge light columns into a smaller, denser matrix
-  let (mrows, log, mcols) := Merge.mergeLog numCols dense keptRows params.mergeDensity 32
+  let (mrows, log, mcols) := Merge.mergeLog2 numCols dense keptRows params.mergeDensity 32
   let mdeps := Lanczos.dependencies mcols mrows 64 threads
   let deps := Merge.unmergeLog log mdeps
   let deps := if deps.isEmpty then GF2.dependencies numCols keptRows 64 else deps

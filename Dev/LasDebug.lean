@@ -877,6 +877,31 @@ def mergeCheck (seed0 : Nat) : IO Unit := do
       IO.println s!"trial {trial}: dependencies differ ({u1.size} vs {u2.size})"
       bad := bad + 1
   IO.println s!"mergeCheck: {bad} bad of 20"
+  -- mergeLog2: every dependency of the merged rows, mapped back, sums to zero
+  let mut bad2 := 0
+  let mut checked := 0
+  for trial in [0:20] do
+    let nrows := 1500 + trial * 200
+    let ncols := nrows - 60
+    let dense := 10
+    let mut rows : Array (Array Nat) := #[]
+    for _ in [0:nrows] do
+      let mut r : Array Nat := #[]
+      for _ in [0:14] do
+        seed := (seed * 6364136223846793005 + 1442695040888963407) % 18446744073709551616
+        let x := (seed >>> 33) % 1000000
+        r := r.push (x * x / 1000000 * ncols / 1000000)
+      rows := rows.push r
+    let (m2, log, c2) := Merge.mergeLog2 ncols dense rows 30 16
+    let deps := GF2.dependencies c2 m2 32
+    for d in Merge.unmergeLog log deps do
+      checked := checked + 1
+      -- parity of every column over the original rows of the dependency
+      let mut par : Array Bool := Array.replicate ncols false
+      for i in d do
+        for c in rows[i]! do par := par.set! c (!par[c]!)
+      if par.any id then bad2 := bad2 + 1
+  IO.println s!"mergeLog2: {bad2} bad of {checked} dependencies"
 
 /-- Relations of a CADO-NFS `las` output file, by special-`q`: `(q, ρ, J, [(a, b)])`. -/
 def readCadoRels (path : String) : IO (Array (Nat × Nat × Nat × Array (Int × Nat))) := do

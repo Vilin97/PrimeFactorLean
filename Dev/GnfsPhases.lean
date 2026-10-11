@@ -88,8 +88,10 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
     rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
   let t5 ← IO.monoNanosNow
   IO.println s!"singletons {ms t4 t5a} ms ({kept0.size} rows), purge {ms t5a t5c} ms -> {kept.size} rows, full rows {ms t5c t5} ms"
-  let (mrows, log, mcols) ← IO.lazyPure fun _ => Merge.mergeLog numCols dense keptRows
-    params.mergeDensity 32
+  -- (dev: a density of 1000 + d selects the older `mergeLog` with density d)
+  let (mrows, log, mcols) ← IO.lazyPure fun _ => if params.mergeDensity ≥ 1000 then
+      Merge.mergeLog numCols dense keptRows (params.mergeDensity - 1000) 32
+    else Merge.mergeLog2 numCols dense keptRows params.mergeDensity 32
   let t5b ← IO.monoNanosNow
   -- Lanczos components, timed (the dependencies are those of `Lanczos.dependencies`)
   let la0 ← IO.monoNanosNow
