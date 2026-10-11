@@ -213,11 +213,11 @@ def devMain (args : List String) : IO Unit := do
       (ECMM.split n { b1 := b1.toNat!, curves := curves.toNat!, threads := ts.toNat! }).map (·.val)
   | ["nfsdebug", ns, ts, d, fbB, a, lp, fudge, lines, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 75 200 12 true 60 300 2000 20000 100 0 64 60 0 40
+    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 0 75 200 12 true 60 300 2000 20000 100 0 64 60 0 40
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfslattice", ns, ts, d, fbB, a, lp, fudge, li, lj, qpt, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 75 200 12 true 60 300 2000 20000 100 0 64 60 0 40) with }
+    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 0 75 200 12 true 60 300 2000 20000 100 0 64 60 0 40) with }
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfsdebug", ns, ts] =>
     let n := ns.toNat!

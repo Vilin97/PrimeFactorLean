@@ -602,21 +602,27 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       let (lab, rowStart) ← IO.lazyPure fun _ => Las.labelSurvivors las (Las.zeroRows las bufA) surv
       let bits ← IO.lazyPure fun _ => Las.markBits bits surv true
       let a8 ← IO.monoNanosNow
-      let listsR ← IO.lazyPure fun _ => Las.groupLabelled las surv lab rowStart
-        (if pair then Las.resievePaired las las.rat RrB bits #[] else Las.resieveCached las las.rat RrB bits #[])
-      let listsA ← IO.lazyPure fun _ => Las.groupLabelled las surv lab rowStart
-        (if pair then Las.resievePaired las las.alg RaB bits #[] else Las.resieveCached las las.alg RaB bits #[])
+      let recsR ← IO.lazyPure fun _ =>
+        if pair then Las.resievePaired las las.rat RrB bits #[] else Las.resieveCached las las.rat RrB bits #[]
+      let recsA ← IO.lazyPure fun _ =>
+        if pair then Las.resievePaired las las.alg RaB bits #[] else Las.resieveCached las las.alg RaB bits #[]
+      let (offR, ksR) ← IO.lazyPure fun _ => Las.groupFlat las surv lab rowStart recsR
+      let (offA, ksA) ← IO.lazyPure fun _ => Las.groupFlat las surv lab rowStart recsA
       let bits ← IO.lazyPure fun _ => Las.markBits bits surv false
       let a9 ← IO.monoNanosNow
+      -- the per-survivor lists of the diagnostics below (not timed)
+      let listsR := Las.groupLabelled las surv lab rowStart recsR
+      let listsA := Las.groupLabelled las surv lab rowStart recsA
       let mut rels := 0
       let bd ← IO.lazyPure fun _ => Las.mkBounds las q ua ub va vb RrB RaB
       if fs == 5 then
         let tg0 ← IO.monoNanosNow
-        let pass ← IO.lazyPure fun _ => Las.gateAll las bd surv listsR listsA
+        let pass ← IO.lazyPure fun _ => Las.gateAll las bd surv offR ksR offA ksA
         let tg1 ← IO.monoNanosNow
         tmG := tmG + (tg1 - tg0)
         for k in pass do
-          if (Las.factorSurvivor2 las q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!).isSome then
+          if (Las.factorSurvivor2 las q ρ ua ub va vb RrB RaB (Las.idealsOf offR ksR k)
+              (Las.idealsOf offA ksA k) surv[k]!).isSome then
             rels := rels + 1
       else
         for k in [0:surv.size] do
@@ -649,7 +655,7 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
         let g := Las.survivorGate las bd listsR[k]! listsA[k]! surv[k]!
         gates := gates.modify g (· + 1)
         if g ≥ 4 then passOld := passOld.push k
-      if passOld != Las.gateAll las bd surv listsR listsA then gateMismatch := gateMismatch + 1
+      if passOld != Las.gateAll las bd surv offR ksR offA ksA then gateMismatch := gateMismatch + 1
       let I := las.I
       let s1 ← IO.lazyPure fun _ => Id.run do
         let mut acc : Float := 0

@@ -2783,9 +2783,56 @@ def smallScanAll (tab pl : Array Nat) (lg2 : FloatArray) (off : Nat) (survs : Ar
         (v >>> 32).toUInt32 lg 0 lgs prs
   return (lgs, prs)
 
+/-- The resieve records `pos <<< 24 ||| k` of the survivors without per-survivor
+lists: each record's survivor (located as in `groupLabelled`) into `idx`, and the
+counts into `cnt[s + 1]` (tail recursive: no loop state to allocate). -/
+def countRecs (I : Nat) (survs : Array Nat) (lab : ByteArray) (rowStart recs : Array Nat) (i : Nat)
+    (idx cnt : Array Nat) : Array Nat × Array Nat :=
+  if h : i < recs.size then
+    let pos := recs[i] >>> 24
+    let v := (lab.get! pos).toNat
+    let c := if v < 255 then rowStart[pos / I]! + v - 1 else SIQS.findCand survs pos
+    countRecs I survs lab rowStart recs (i + 1) (idx.push c)
+      (if c < survs.size then cnt.modify (c + 1) (· + 1) else cnt)
+  else (idx, cnt)
+termination_by recs.size - i
+
+/-- Place each record's ideal at its survivor's cursor. -/
+def placeRecs (survs recs idx : Array Nat) (i : Nat) (ks cur : Array Nat) : Array Nat :=
+  if h : i < recs.size then
+    let c := idx[i]!
+    if c < survs.size then
+      let slot := cur[c]!
+      placeRecs survs recs idx (i + 1) (ks.set! slot (recs[i] &&& 0xFFFFFF)) (cur.set! c (slot + 1))
+    else placeRecs survs recs idx (i + 1) ks cur
+  else ks
+termination_by recs.size - i
+
+/-- The ideals of the resieve records grouped by survivor as `(off, ks)`: those of
+survivor `s` are `ks[off[s]], …, ks[off[s + 1] - 1]` (`groupLabelled` without its
+lists, one allocation per survivor and record fewer). -/
+def groupFlat (ctx : LasCtx) (survs : Array Nat) (lab : ByteArray) (rowStart recs : Array Nat) :
+    Array Nat × Array Nat := Id.run do
+  let n := survs.size
+  let (idx, cnt) := countRecs ctx.I survs lab rowStart recs 0 (Array.mkEmpty recs.size)
+    (Array.replicate (n + 1) 0)
+  let mut off := cnt
+  for s in [0:n] do off := off.set! (s + 1) (off[s + 1]! + off[s]!)
+  return (off, placeRecs survs recs idx 0 (Array.replicate off[n]! 0) off)
+
+/-- `Σ log₂ p` over the ideals `ks[lo], …, ks[hi - 1]`. -/
+def rangeLog (lg2 : FloatArray) (ks : Array Nat) (lo hi : Nat) (acc : Float) : Float :=
+  if lo < hi then rangeLog lg2 ks (lo + 1) hi (acc + lg2.get! ks[lo]!) else acc
+termination_by hi - lo
+
+/-- `∏ p mod 2^64` over the ideals `ks[lo], …, ks[hi - 1]`. -/
+def rangeProd (primes : Array Nat) (ks : Array Nat) (lo hi : Nat) (acc : UInt64) : UInt64 :=
+  if lo < hi then rangeProd primes ks (lo + 1) hi (acc * primes[ks[lo]!]!.toUInt64) else acc
+termination_by hi - lo
+
 /-- The rational half of `survivorGate` with the small ideals' part given
 (`sLg`, `sPr` from `smallScanAll`): whether the survivor passes. -/
-def ratPass (ctx : LasCtx) (bd : Bounds) (listR : List Nat) (pos : Nat) (sLg : Float)
+def ratPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
     (sPr : UInt64) : Bool :=
   let I := ctx.I
   let j := pos / I
@@ -2801,17 +2848,17 @@ def ratPass (ctx : LasCtx) (bd : Bounds) (listR : List Nat) (pos : Nat) (sLg : F
   let side := ctx.rat
   let nF := bd.y1F * aF - bd.mF * bF
   let tR := tinyRatP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
-  let lR := listR.foldl (fun acc k => acc + side.lg2.get! k) (fc 0)
+  let lR := rangeLog side.lg2 ks lo hi (fc 0)
   let estR := Float.log2 (nF.abs + fc 1) - tR.lg - sLg - lR
   if hopeless estR bd.hiR bd.loR bd.gapR then false
   else
     let n64 := bd.y1U * a64 - bd.mU * b64
-    let pR := listR.foldl (fun acc k => acc * side.primes[k]!.toUInt64) 1
+    let pR := rangeProd side.primes ks lo hi 1
     sideClass estR (if nF < fc 0 then -n64 else n64) (tR.prod * sPr * pR) tR.v2
       bd.lpbR bd.mfbR bd.lim2R != 0
 
 /-- The algebraic half of `survivorGate` (as `ratPass`). -/
-def algPass (ctx : LasCtx) (bd : Bounds) (listA : List Nat) (pos : Nat) (sLg : Float)
+def algPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
     (sPr : UInt64) : Bool :=
   let I := ctx.I
   let j := pos / I
@@ -2828,19 +2875,20 @@ def algPass (ctx : LasCtx) (bd : Bounds) (listA : List Nat) (pos : Nat) (sLg : F
   let sideA := ctx.alg
   let fF := homEvalFA bd.cs aF bF d (bd.cs.get! d) (fc 1)
   let tA := tinyAlgP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
-  let lA := listA.foldl (fun acc k => acc + sideA.lg2.get! k) (fc 0)
+  let lA := rangeLog sideA.lg2 ks lo hi (fc 0)
   let estA := Float.log2 (fF.abs / bd.qF + fc 1) - tA.lg - sLg - lA
   if hopeless estA bd.hiA bd.loA bd.gapA then false
   else
     let f64 := hornerU bd.cs64 a64 b64 d (bd.cs64[d]!) 1
-    let pA := listA.foldl (fun acc k => acc * sideA.primes[k]!.toUInt64) 1
+    let pA := rangeProd sideA.primes ks lo hi 1
     sideClass estA (if fF < fc 0 then -f64 else f64) (bd.qU * tA.prod * sPr * pA) tA.v2
       bd.lpbA bd.mfbA bd.lim2A != 0
 
 /-- The indices of the survivors that pass `survivorGate` (the same decisions),
 each side's small ideals scanned over all its survivors at once: the rational
-side over every survivor, the algebraic side over those that passed it. -/
-def gateAll (ctx : LasCtx) (bd : Bounds) (survs : Array Nat) (listsR listsA : Array (List Nat)) :
+side over every survivor, the algebraic side over those that passed it. The
+resieved ideals come grouped by `groupFlat`. -/
+def gateAll (ctx : LasCtx) (bd : Bounds) (survs : Array Nat) (offR ksR offA ksA : Array Nat) :
     Array Nat := Id.run do
   let IU := ctx.I.toUInt64
   let logI := ctx.params.logI.toUInt64
@@ -2848,15 +2896,21 @@ def gateAll (ctx : LasCtx) (bd : Bounds) (survs : Array Nat) (listsR listsA : Ar
   let (lgR, prR) := smallScanAll bd.tabR side.pinvLim side.lg2 side.sieveStart survs IU logI
   let mut idx : Array Nat := #[]
   for s in [0:survs.size] do
-    if ratPass ctx bd listsR[s]! survs[s]! (lgR.get! s) prR[s]! then idx := idx.push s
+    if ratPass ctx bd ksR offR[s]! offR[s + 1]! survs[s]! (lgR.get! s) prR[s]! then
+      idx := idx.push s
   let sideA := ctx.alg
   let (lgA, prA) := smallScanAll bd.tabA sideA.pinvLim sideA.lg2 sideA.sieveStart
     (idx.map (survs[·]!)) IU logI
   let mut out : Array Nat := #[]
   for t in [0:idx.size] do
     let s := idx[t]!
-    if algPass ctx bd listsA[s]! survs[s]! (lgA.get! t) prA[t]! then out := out.push s
+    if algPass ctx bd ksA offA[s]! offA[s + 1]! survs[s]! (lgA.get! t) prA[t]! then
+      out := out.push s
   return out
+
+/-- The resieved ideals of survivor `s` as a list (for `factorSurvivor2`). -/
+@[inline] def idealsOf (off ks : Array Nat) (s : Nat) : List Nat :=
+  (ks.extract off[s]! off[s + 1]!).toList
 
 /-! ## The production sievers (survivors through `gateAll`) -/
 
@@ -2877,13 +2931,14 @@ def processQ12 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch
   if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
   let bits := markBits bits surv true
-  let listsR := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
-  let listsA := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
+  let (offR, ksR) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
+  let (offA, ksA) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
   let bits := markBits bits surv false
   let bd := mkBounds ctx q ua ub va vb Rr Ra
   let mut rels : Array Rel := #[]
-  for k in gateAll ctx bd surv listsR listsA do
-    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+  for k in gateAll ctx bd surv offR ksR offA ksA do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra (idealsOf offR ksR k)
+        (idealsOf offA ksA k) surv[k]! then
       rels := rels.push rel
   return (rels, ⟨bufR, lab, bits⟩)
 
@@ -2914,13 +2969,14 @@ def processQ13 (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (sc : Scratch) : Array 
   if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
   let bits := markBits bits surv true
-  let listsR := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
-  let listsA := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
+  let (offR, ksR) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
+  let (offA, ksA) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
   let bits := markBits bits surv false
   let bd := mkBounds ctx q ua ub va vb Rr Ra
   let mut rels : Array Rel := #[]
-  for k in gateAll ctx bd surv listsR listsA do
-    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+  for k in gateAll ctx bd surv offR ksR offA ksA do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra (idealsOf offR ksR k)
+        (idealsOf offA ksA k) surv[k]! then
       rels := rels.push rel
   return (rels, ⟨bufR, lab, bits⟩)
 
@@ -2944,13 +3000,14 @@ def processQ13R (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (ua ub va vb : Int) (R
   if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
   let bits := markBits bits surv true
-  let listsR := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
-  let listsA := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
+  let (offR, ksR) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
+  let (offA, ksA) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
   let bits := markBits bits surv false
   let bd := mkBounds ctx q ua ub va vb Rr Ra
   let mut rels : Array Rel := #[]
-  for k in gateAll ctx bd surv listsR listsA do
-    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+  for k in gateAll ctx bd surv offR ksR offA ksA do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra (idealsOf offR ksR k)
+        (idealsOf offA ksA k) surv[k]! then
       rels := rels.push rel
   return (rels, ⟨bufR, lab, bits⟩)
 

@@ -60,6 +60,8 @@ structure Params where
   /-- Threshold slack of the lattice siever, in bits (it also covers the primes
 below 30, which are not sieved). -/
   lasFudge : Nat := 8
+  /-- Additional slack on the algebraic side (`Las.LasParams.fudgeA`). -/
+  lasFudgeA : Nat := 0
   /-- Target average row weight of the merged matrix, not counting the dense
   (sign and character) columns. -/
   mergeDensity : Nat := 75
@@ -113,6 +115,9 @@ def paramTable : List (Nat × Params) :=
    -- first special-q) and CADO-NFS's collision polynomial selection parameters
    -- (`P`, special-q count, leading coefficients; twice its root-optimized pool,
    -- except at 100 digits, where the selection itself takes seconds).
+   -- (Four more bits of algebraic slack at 100 digits, `lasFudgeA := 4`: 8% more
+   -- relations per special-q for 6-8% more time, the same sieving time to the end,
+   -- but a matrix of 234K rows instead of 203K: 291.6 s against 291.0 s in all.)
    -- From 85 digits, with two large primes on both sides, the siever variant 14
    -- (thresholds per 64-column segment, the tiny primes counted exactly at the
    -- survivors, lattice roots of four special-q at once): at 100 digits it finds
