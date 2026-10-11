@@ -32,6 +32,7 @@ def applyOverrides (p : Params) (kvs : List String) : Params :=
       | "psAdMax" => { p with psAdMax := x }
       | "psKeep" => { p with psKeep := x }
       | "purge" => { p with purgeExcess := x }
+      | "extra" => { p with extra := x }
       | "density" => { p with mergeDensity := x }
       | "lasVariant" => { p with lasVariant := x }
       | _ => p

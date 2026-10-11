@@ -343,7 +343,7 @@ def lanczosParts (numCols : Nat) (rows : Array (Array Nat)) (threads reps : Nat)
       else 0).foldl (fun a tk => a ^^^ tk.get) 0
     acc := acc ^^^ parts
   let t3 ← IO.monoNanosNow
-  let tD := tables (Mat.ofFn fun i => (i * 7919 + 13).toUInt64 * 0x9E3779B97F4A7C15)
+  let tD := (tables (Mat.ofFn fun i => (i * 7919 + 13).toUInt64 * 0x9E3779B97F4A7C15)).toB
   for _ in [0:reps] do
     let r ← IO.lazyPure fun _ => ((chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
       (nextRange v v v av 0xFFFF0000FFFF0000 tD tD tD lo hi, xRange v v tD lo hi)).foldl

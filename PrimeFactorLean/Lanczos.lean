@@ -373,6 +373,36 @@ def tables (M : Mat) : Tab := Id.run do
   t.get (tabIdx w 4) (tabIdx_lt w 4 (by decide)) ^^^ t.get (tabIdx w 5) (tabIdx_lt w 5 (by decide)) ^^^
   t.get (tabIdx w 6) (tabIdx_lt w 6 (by decide)) ^^^ t.get (tabIdx w 7) (tabIdx_lt w 7 (by decide))
 
+/-- `16384 < USize.size`. -/
+theorem usize_16384 : 16384 < USize.size := by
+  show 16384 < 2 ^ System.Platform.numBits
+  rcases System.Platform.numBits_eq with h | h <;> rw [h] <;> decide
+
+/-- A read-only table of 2048 words as little-endian bytes: one combined 64-bit
+load per entry, against two halves for `Tab`. -/
+structure BTab where
+  b : ByteArray
+  hb : b.size = 16384
+
+/-- Entry `i`. -/
+@[inline] def BTab.get (t : BTab) (i : USize) (h : i.toNat < 2048) : UInt64 :=
+  have hs : i.toNat * 8 < USize.size := Nat.lt_of_lt_of_le (by omega) (Nat.le_of_lt usize_16384)
+  bget64U t.b (i * 8) (by rw [mul8_toNat i hs, t.hb]; omega)
+
+/-- `t` as a `BTab`. -/
+def Tab.toB (t : Tab) : BTab := Id.run do
+  let mut b : ByteArray := zerosB 16384
+  for i in [0:2048] do
+    b := putWord b i (t.getN i)
+  if h : b.size = 16384 then return ⟨b, h⟩ else return ⟨⟨Array.replicate 16384 0⟩, by simp [ByteArray.size]⟩
+
+/-- `w M` from the byte tables of `M`. -/
+@[inline] def applyBTab (t : BTab) (w : UInt64) : UInt64 :=
+  t.get (tabIdx w 0) (tabIdx_lt w 0 (by decide)) ^^^ t.get (tabIdx w 1) (tabIdx_lt w 1 (by decide)) ^^^
+  t.get (tabIdx w 2) (tabIdx_lt w 2 (by decide)) ^^^ t.get (tabIdx w 3) (tabIdx_lt w 3 (by decide)) ^^^
+  t.get (tabIdx w 4) (tabIdx_lt w 4 (by decide)) ^^^ t.get (tabIdx w 5) (tabIdx_lt w 5 (by decide)) ^^^
+  t.get (tabIdx w 6) (tabIdx_lt w 6 (by decide)) ^^^ t.get (tabIdx w 7) (tabIdx_lt w 7 (by decide))
+
 /-- `acc ⊕ V M` (an `n × 64` block times a 64 × 64 matrix). -/
 def mulAcc (V : Block) (M : Mat) (acc : Block) : Block := Id.run do
   let t := tables M
@@ -738,21 +768,21 @@ structure LState where
 
 /-- Rows `[k, hi)` of `(A V ∧ mask) ⊕ V D ⊕ V₁ E ⊕ V₂ F` (tables of `D, E, F`),
 appended to `out`. -/
-def nextGo (v v1 v2 av : ByteArray) (mask : UInt64) (tD tE tF : Tab) (hi : Nat)
+def nextGo (v v1 v2 av : ByteArray) (mask : UInt64) (tD tE tF : BTab) (hi : Nat)
     (h1 : 8 * hi ≤ v.size) (h2 : 8 * hi ≤ v1.size) (h3 : 8 * hi ≤ v2.size) (h4 : 8 * hi ≤ av.size)
     (hs : v.size < USize.size ∧ v1.size < USize.size ∧ v2.size < USize.size ∧ av.size < USize.size)
     (lo k : Nat) (out : ByteArray) : ByteArray :=
   if hk : k < hi then
     nextGo v v1 v2 av mask tD tE tF hi h1 h2 h3 h4 hs lo (k + 1)
       (putWord out (k - lo) ((wordAt av k (by omega) hs.2.2.2 &&& mask) ^^^
-        applyTables tD (wordAt v k (by omega) hs.1) ^^^
-        applyTables tE (wordAt v1 k (by omega) hs.2.1) ^^^
-        applyTables tF (wordAt v2 k (by omega) hs.2.2.1)))
+        applyBTab tD (wordAt v k (by omega) hs.1) ^^^
+        applyBTab tE (wordAt v1 k (by omega) hs.2.1) ^^^
+        applyBTab tF (wordAt v2 k (by omega) hs.2.2.1)))
   else out
 termination_by hi - k
 
 /-- Rows `[lo, hi)` of `(A V ∧ mask) ⊕ V D ⊕ V₁ E ⊕ V₂ F`. -/
-def nextRange (v v1 v2 av : Block) (mask : UInt64) (tD tE tF : Tab) (lo hi : Nat) : Vec :=
+def nextRange (v v1 v2 av : Block) (mask : UInt64) (tD tE tF : BTab) (lo hi : Nat) : Vec :=
   if h : 8 * hi ≤ v.data.b.size ∧ 8 * hi ≤ v1.data.b.size ∧ 8 * hi ≤ v2.data.b.size ∧
       8 * hi ≤ av.data.b.size ∧ v.data.b.size < USize.size ∧ v1.data.b.size < USize.size ∧
       v2.data.b.size < USize.size ∧ av.data.b.size < USize.size then
@@ -761,16 +791,16 @@ def nextRange (v v1 v2 av : Block) (mask : UInt64) (tD tE tF : Tab) (lo hi : Nat
   else Vec.empty 0
 
 /-- Rows `[k, hi)` of `X ⊕ V W` (table of `W`), appended to `out`. -/
-def xGo (x v : ByteArray) (tW : Tab) (hi : Nat) (h1 : 8 * hi ≤ x.size) (h2 : 8 * hi ≤ v.size)
+def xGo (x v : ByteArray) (tW : BTab) (hi : Nat) (h1 : 8 * hi ≤ x.size) (h2 : 8 * hi ≤ v.size)
     (hs : x.size < USize.size ∧ v.size < USize.size) (lo k : Nat) (out : ByteArray) : ByteArray :=
   if hk : k < hi then
     xGo x v tW hi h1 h2 hs lo (k + 1)
-      (putWord out (k - lo) (wordAt x k (by omega) hs.1 ^^^ applyTables tW (wordAt v k (by omega) hs.2)))
+      (putWord out (k - lo) (wordAt x k (by omega) hs.1 ^^^ applyBTab tW (wordAt v k (by omega) hs.2)))
   else out
 termination_by hi - k
 
 /-- Rows `[lo, hi)` of `X ⊕ V W`. -/
-def xRange (x v : Block) (tW : Tab) (lo hi : Nat) : Vec :=
+def xRange (x v : Block) (tW : BTab) (lo hi : Nat) : Vec :=
   if h : 8 * hi ≤ x.data.b.size ∧ 8 * hi ≤ v.data.b.size ∧ x.data.b.size < USize.size ∧
       v.data.b.size < USize.size then
     ⟨xGo x.data.b v.data.b tW hi h.1 h.2.1 ⟨h.2.2.1, h.2.2.2⟩ lo lo (zerosB (8 * (hi - lo)))⟩
@@ -813,8 +843,8 @@ def step (B : Sparse) (threads : Nat) (v0 : Block) (st : LState) : Except Bool L
     let f := ((st.winv2.mul ((st.vtav1.mul st.winv1).xor Mat.identity)).mul
       (((st.vta2v1.andMask st.mask1).xor st.vtav1).andMask mask0))
     -- x += V Winv Vᵀ V₀; next V = A V S Sᵀ + V d + V₁ e + V₂ f
-    let tW := tables (winv.mul vtv0)
-    let (tD, tE, tF) := (tables d, tables e, tables f)
+    let tW := (tables (winv.mul vtv0)).toB
+    let (tD, tE, tF) := ((tables d).toB, (tables e).toB, (tables f).toB)
     let upd := (chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
       (nextRange st.v st.v1 st.v2 av mask0 tD tE tF lo hi, xRange st.x st.v tW lo hi)
     let (nd, xd) := upd.foldl (fun (a, b) tk =>
