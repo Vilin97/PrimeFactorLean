@@ -365,6 +365,168 @@ def rawPolys (n lo hi : Nat) : IO Unit := do
   IO.println s!"{rs.size} raw polynomials"
   for (ad, l, m, _) in rs do IO.println s!"{ad} {l} {m}"
 
+open Merge in
+/-- `Merge.mergeLog2`'s passes, counted (a development aid): per pass the weight
+cap, the fill bound, the candidate columns, those skipped by the fill cache, by
+the star estimate and by the computed fill, the merges, the live rows and the
+average weight. -/
+def mergeStats (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : Nat)
+    (mstMax : Nat := 6) (maxPasses : Nat := 1000) : Array (Array Nat) := Id.run do
+  let mut stats : Array (Array Nat) := #[]
+  let mut rows : Array (Array Nat) := Array.mkEmpty rows0.size
+  let mut dmask : Array Nat := Array.mkEmpty rows0.size
+  for r0 in rows0 do
+    let r := normalize r0
+    let mut mk := 0
+    let mut sp : Array Nat := Array.mkEmpty r.size
+    for c in r do
+      if c < dense then mk := mk ^^^ (1 <<< c) else sp := sp.push c
+    rows := rows.push sp
+    dmask := dmask.push mk
+  let mut colRows : Array (Array Nat) := Array.replicate numCols #[]
+  let mut colWeight : Array Nat := Array.replicate numCols 0
+  let mut weight := 0
+  for i in [0:rows.size] do
+    for c in rows[i]! do
+      colRows := colRows.modify c (·.push i)
+      colWeight := colWeight.set! c (colWeight[c]! + 1)
+    weight := weight + rows[i]!.size
+  let mut ops : Array Nat := #[]
+  let mut alive : Array Bool := Array.replicate rows.size true
+  let mut liveRows := rows.size
+  let mut cwmax := 2
+  let mut cbound := 0
+  let mut idle := 0
+  let mut done := false
+  -- cached fills of rejected columns, and modification stamps of the rows
+  let mut clock := 1
+  let mut rowStamp : Array Nat := Array.replicate rows.size 0
+  let mut colStamp : Array Nat := Array.replicate numCols 0
+  let mut colFill : Array Int := Array.replicate numCols 0
+  let mut colCw : Array Nat := Array.replicate numCols 0
+  while !done && idle < 3 && stats.size < maxPasses do
+    let mut merges := 0
+    let mut cands := 0
+    let mut cached := 0
+    let mut fills := 0
+    let mut stars := 0
+    for c in [dense:numCols] do
+      if done then break
+      let cw := colWeight[c]!
+      if cw == 0 || cw > cwmax then continue
+      cands := cands + 1
+      -- the live rows containing `c`
+      let mut rs : Array Nat := #[]
+      for r in colRows[c]! do
+        if alive[r]! && containsSorted rows[r]! c && !rs.contains r then rs := rs.push r
+      if rs.isEmpty then
+        colRows := colRows.set! c #[]
+        continue
+      -- a minimum spanning tree of the rows (edge weight: the size of their
+      -- sum): its edges are the new rows, the root is deleted
+      let k := rs.size
+      -- a fill computed earlier is still exact while neither the column's
+      -- weight nor any of its rows changed: skip it without recomputation
+      if k ≥ 3 && colStamp[c]! > 0 && colCw[c]! == k && colFill[c]! > (cbound : Int) &&
+          rs.all (fun r => rowStamp[r]! ≤ colStamp[c]!) then
+        colRows := colRows.set! c rs
+        cached := cached + 1
+        continue
+      let mst := k ≥ 3 && k ≤ mstMax
+      -- beyond `mstMax` rows: a star around the lightest row, fill estimated
+      -- as `(k - 2) w` (pairwise sums cost `k (k - 1) / 2` merge walks)
+      if k > mstMax then
+        let mut pv := 0
+        for v in [1:k] do
+          if rows[rs[v]!]!.size < rows[rs[pv]!]!.size then pv := v
+        if ((k - 2) * rows[rs[pv]!]!.size : Nat) > cbound then
+          colRows := colRows.set! c rs
+          stars := stars + 1
+          continue
+        -- reorder so that the pivot comes first (the star's root)
+        let tmp := rs[0]!
+        rs := (rs.set! 0 rs[pv]!).set! pv tmp
+      let mut wt : Array Nat := Array.replicate (k * k) 0
+      if mst then
+        for i in [0:k] do
+          for j in [i + 1:k] do
+            let w := symmDiffSize rows[rs[i]!]! rows[rs[j]!]! 0 0 0
+            wt := (wt.set! (i * k + j) w).set! (j * k + i) w
+      let (parent, order) := if mst then primTree k wt
+        else ((Array.range k).map fun v => if v == 0 then k else 0, Array.range k)
+      if mst then
+        let mut fill : Int := 0
+        for v in [1:k] do fill := fill + wt[v * k + parent[v]!]!
+        for v in [0:k] do fill := fill - rows[rs[v]!]!.size
+        if fill > (cbound : Int) then
+          fills := fills + 1
+          colRows := colRows.set! c rs
+          clock := clock + 1
+          colStamp := colStamp.set! c clock
+          colFill := colFill.set! c fill
+          colCw := colCw.set! c k
+          continue
+      colRows := colRows.set! c #[]
+      merges := merges + 1
+      -- children before parents: each row gets its parent's original row
+      for t in [0:k - 1] do
+        let v := order[k - 1 - t]!
+        let u := parent[v]!
+        let r := rs[v]!
+        let pr := rs[u]!
+        let prow := rows[pr]!
+        let old := rows[r]!
+        let new := symmDiff old prow
+        let mut i := 0
+        for x in prow do
+          while i < old.size && old[i]! < x do i := i + 1
+          if i < old.size && old[i]! == x then
+            colWeight := colWeight.set! x (colWeight[x]! - 1)
+          else
+            colWeight := colWeight.set! x (colWeight[x]! + 1)
+            colRows := colRows.modify x (·.push r)
+        weight := weight + new.size - old.size
+        rows := rows.set! r new
+        dmask := dmask.set! r (dmask[r]! ^^^ dmask[pr]!)
+        ops := ops.push (r * 16777216 + pr)
+        clock := clock + 1
+        rowStamp := rowStamp.set! r clock
+      -- delete the root
+      let root := rs[order[0]!]!
+      for x in rows[root]! do colWeight := colWeight.set! x (colWeight[x]! - 1)
+      weight := weight - rows[root]!.size
+      rows := rows.set! root #[]
+      alive := alive.set! root false
+      liveRows := liveRows - 1
+      if weight ≥ density * liveRows then done := true
+    stats := stats.push #[cwmax, cbound.toNat, cands, cached, stars, fills, merges, liveRows, weight / max 1 liveRows]
+    -- raise the bound every pass, the weight cap when a pass merges little
+    cbound := cbound + 8
+    if merges * 100 < liveRows then
+      if cwmax < maxW then cwmax := cwmax + 1
+      else if merges == 0 then idle := idle + 1
+  return stats
+
+/-- `GF2.removeSingletons`, timed (a development aid). -/
+def singletonParts (numCols : Nat) (rows : Array (Array Nat)) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let kept ← IO.lazyPure fun _ => GF2.removeSingletons numCols rows
+  let t1 ← IO.monoNanosNow
+  IO.println s!"removeSingletons {(t1 - t0) / 1000000} ms ({kept.size} rows)"
+
+/-- `mergeStats` printed, with its time. -/
+def mergeStatsIO (nc : Nat) (rows : Array (Array Nat)) : IO Unit := do
+  for mp in [0, 1, 3, 7, 11] do
+    let a ← IO.monoNanosNow
+    let st ← IO.lazyPure fun _ => mergeStats nc 0 rows 75 32 6 mp
+    let b ← IO.monoNanosNow
+    IO.println s!"  {mp} passes: {(b - a) / 1000000} ms ({st.size})"
+  let t0 ← IO.monoNanosNow
+  let st ← IO.lazyPure fun _ => mergeStats nc 0 rows 75 32
+  let t1 ← IO.monoNanosNow
+  IO.println s!"mergeStats {(t1 - t0) / 1000000} ms, {st.size} passes (cwmax cbound cands cached stars fills merges live avgw):"
+  for x in st do IO.println s!"  {x}"
+
 open NFS.PolySelect in
 /-- Our `logNorm` (and the golden-section search it replaces) against CADO-NFS's
 lognorm and skewness on the size-optimized polynomials of a `polyselect` output. -/

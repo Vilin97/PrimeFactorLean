@@ -81,8 +81,11 @@ def loadRels (path : String) : IO (Nat × Selection × Array Rel) := do
 /-- Everything after sieving, timed: filtering, merge, Lanczos, square roots. -/
 def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads : Nat)
     (rels : Array Rel) (rows : Rows) (t0 t3 : Nat) (inMatrix : Bool := false)
-    (parts : Option (Nat → Array (Array Nat) → IO Unit) := none) : IO Unit := do
+    (parts : Option (Nat → Array (Array Nat) → IO Unit) := none)
+    (preMerge : Option (Nat → Array (Array Nat) → IO Unit) := none)
+    (preFilter : Option (Nat → Array (Array Nat) → IO Unit) := none) : IO Unit := do
   let numCols := rows.next
+  if let some f := preFilter then f numCols rows.sparse
   let dense := 2 + ctx.fb.chars.size
   let t4 ← IO.monoNanosNow
   let kept0 ← IO.lazyPure fun _ => GF2.removeSingletons numCols rows.sparse
@@ -103,6 +106,7 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
   let t5 ← IO.monoNanosNow
   IO.println s!"singletons {ms t4 t5a} ms ({kept0.size} rows), purge {ms t5a t5c} ms -> {kept.size} rows, dense words and rows {ms t5c t5} ms"
   let dense := if inMatrix then dense else 0
+  if let some f := preMerge then f numCols keptRows
   -- (dev: a density of 1000 + d selects the older `mergeLog` with density d)
   let (mrows, log, mcols) ← IO.lazyPure fun _ => if params.mergeDensity ≥ 1000 then
       Merge.mergeLog numCols dense keptRows (params.mergeDensity - 1000) 32
@@ -293,9 +297,16 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
 
 /-- `gnfsPost` on relations written by `dumpRels` (parameters by size, with overrides). -/
 def gnfsPostFile (path : String) (threads : Nat) (overrides : List String)
-    (parts : Option (Nat → Array (Array Nat) → IO Unit) := none) : IO Unit := do
+    (parts : Option (Nat → Array (Array Nat) → IO Unit) := none)
+    (preMerge : Option (Nat → Array (Array Nat) → IO Unit) := none)
+    (preFilter : Option (Nat → Array (Array Nat) → IO Unit) := none) : IO Unit := do
   let t0 ← IO.monoNanosNow
   let (n, sel, rels) ← loadRels path
+  let rels := match overrides.findSome? (fun kv => match kv.splitOn "=" with
+      | ["take", v] => v.toNat?
+      | _ => none) with
+    | some k => rels.extract 0 k
+    | none => rels
   let params0 := applyOverrides (chooseParams (decimalDigits n)) overrides
   let params := { params0 with lpMult := 2 ^ (max params0.lpbR params0.lpbA) /
       (min params0.ratBound params0.algBound) + 1 }
@@ -305,7 +316,8 @@ def gnfsPostFile (path : String) (threads : Nat) (overrides : List String)
   let rows ← IO.lazyPure fun _ => rels.foldl Rows.add (Rows.empty ctx.fb)
   let t3 ← IO.monoNanosNow
   IO.println s!"loaded {rels.size} relations, rows in {ms t0 t3} ms"
-  gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix") parts
+  gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix") parts preMerge
+    preFilter
 
 open PrimeFactorLean.NFS.PolySelect in
 /-- `PolySelect.selectCollision` with its two stages timed (collision search,

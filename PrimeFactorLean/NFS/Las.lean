@@ -3017,15 +3017,27 @@ def hornerMont (cs : Array UInt64) (a b M mi : UInt64) : Nat → UInt64 → UInt
   let d := t.cs.size - 1
   montMul (hornerMont t.cs a b M mi d t.cs[d]! t.one) 1 M mi
 
-/-- `v_p(x)` capped at `k` (`0` counts `k`). -/
-@[inline] def valCap (x p : UInt64) : Nat → Nat
-  | 0 => 0
-  | k + 1 => if x % p == 0 then valCap (x / p) p k + 1 else 0
+/-- `v_3(x)` capped at `5`, `v_5` at `3`, `v_7`, `v_11`, `v_13` at `2` (`0` counts the
+cap): divisions by literals (multiplications after compilation). -/
+@[inline] def val3 (x : UInt64) : Nat :=
+  if x % 3 != 0 then 0 else if x % 9 != 0 then 1 else if x % 27 != 0 then 2
+  else if x % 81 != 0 then 3 else if x % 243 != 0 then 4 else 5
+@[inline] def val5 (x : UInt64) : Nat :=
+  if x % 5 != 0 then 0 else if x % 25 != 0 then 1 else if x % 125 != 0 then 2 else 3
+@[inline] def val7 (x : UInt64) : Nat := if x % 7 != 0 then 0 else if x % 49 != 0 then 1 else 2
+@[inline] def val11 (x : UInt64) : Nat := if x % 11 != 0 then 0 else if x % 121 != 0 then 1 else 2
+@[inline] def val13 (x : UInt64) : Nat := if x % 13 != 0 then 0 else if x % 169 != 0 then 1 else 2
 
-/-- The trailing zero bits of `x` (`64` for `0`). -/
-def ctz64 (x : UInt64) : Nat → Nat
-  | 0 => 0
-  | k + 1 => if x &&& 1 == 0 then ctz64 (x >>> 1) k + 1 else 0
+/-- The de Bruijn table of `ctz64`. -/
+def deBruijn64 : Array Nat :=
+  #[0, 1, 2, 53, 3, 7, 54, 27, 4, 38, 41, 8, 34, 55, 48, 28, 62, 5, 39, 46, 44, 42, 22, 9, 24,
+    35, 59, 56, 49, 18, 29, 11, 63, 52, 6, 26, 37, 40, 33, 47, 61, 45, 43, 21, 23, 58, 17, 10,
+    51, 25, 36, 32, 60, 20, 57, 16, 50, 31, 19, 15, 30, 14, 13, 12]
+
+/-- The trailing zero bits of `x` (`63` for `0`): the lowest set bit times a de
+Bruijn constant indexes `deBruijn64`. -/
+@[inline] def ctz64 (x : UInt64) : Nat :=
+  if x == 0 then 63 else deBruijn64[(((x &&& -x) * 0x022fdd63cc95386d) >>> 58).toNat]!
 
 /-- Per special-`q` data for the exact tiny-prime bits of algebraic norms. -/
 structure TinyF where
@@ -3060,10 +3072,11 @@ def tinyBits (t : TinyF) (c j : UInt64) : Float :=
   let x1 := tinyModEval t.m1 c j
   let x2 := tinyModEval t.m2 c j
   let l := t.lgs
-  nf (ctz64 f64 63) + nf (valCap x1 3 5) * l.get! 1 + nf (valCap x1 5 3) * l.get! 2 +
-    nf (valCap x1 7 2) * l.get! 3 + nf (valCap x1 11 2) * l.get! 4 + nf (valCap x2 13 2) * l.get! 5 +
-    nf (valCap x2 17 1) * l.get! 6 + nf (valCap x2 19 1) * l.get! 7 + nf (valCap x2 23 1) * l.get! 8 +
-    nf (valCap x2 29 1) * l.get! 9
+  let one (b : Bool) : Float := if b then fc 1 else fc 0
+  nf (ctz64 f64) + nf (val3 x1) * l.get! 1 + nf (val5 x1) * l.get! 2 +
+    nf (val7 x1) * l.get! 3 + nf (val11 x1) * l.get! 4 + nf (val13 x2) * l.get! 5 +
+    one (x2 % 17 == 0) * l.get! 6 + one (x2 % 19 == 0) * l.get! 7 + one (x2 % 23 == 0) * l.get! 8 +
+    one (x2 % 29 == 0) * l.get! 9
 
 /-- The candidates whose algebraic bytes, with the exact tiny-prime bits added
 (and kept in the byte for the prefilter), reach `128 + tinyT - tinyF`. -/
