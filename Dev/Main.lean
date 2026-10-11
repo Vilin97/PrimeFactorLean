@@ -15,6 +15,7 @@ import Dev.MontTest
 import Dev.GnfsPhases
 import Dev.PolyDebug
 import Dev.Trace
+import Dev.Proto
 open PrimeFactorLean
 
 def timed (label : String) (f : Unit → Option Nat) : IO Unit := do
@@ -115,6 +116,8 @@ def devMain (args : List String) : IO Unit := do
   | ["taskscaling", n] => taskScaling [1, 2, 4, 8, 16, 32, 4, 8] n.toNat!
   | ["taskscaling", n, ts] => taskScaling ((ts.splitOn ",").map String.toNat!) n.toNat!
   | ["autotrace", ns, ts] => Trace.main ns.toNat! ts.toNat!
+  | ["ladder8", r] => Proto.bench r.toNat!
+  | ["splitbench", path] => Trace.splitBench path
   | ["siqsdiag", ns, ts] => Trace.siqsDiag ns.toNat! ts.toNat!
   | ["paircheck", path, q0, c] => Trace.pairCheck path q0.toNat! c.toNat!
   | ["paircheck2", path, q0] => Trace.pairCheck2 path q0.toNat!

@@ -783,11 +783,240 @@ def rho50 (m c iters : UInt64) : UInt64 := Id.run do
   if g == m then g := rhoSingle x ys c m mf 100000
   return if g == m || g == 1 then 0 else g
 
+/-! ### ECM for double-large-prime cofactors
+
+Splitting a cofactor of 40 to 52 bits into two primes above the factor-base
+bound, rho's steps form one dependency chain (a modular square of some 30
+cycles each), while the operations of an elliptic curve are largely independent
+of one another. ECM with tiny bounds — stage 1 to `B1` by the Montgomery ladder,
+stage 2 to `B2` by baby steps `j ⊥ 60` and giant steps `60 m` — on Suyama curves
+(group orders divisible by 12) needs about three curves for such factors. All
+arithmetic is `mulmod50` on machine words; every result is a gcd with `m`,
+checked by the caller. -/
+
+/-- `a + b mod m` for `a, b < m < 2^62`, by the sign of `a + b - m` (masks rather
+than comparisons: clang 19's SLP vectorizer crashes on the compare-and-select
+form of `uecmLadder` at `-march=native`). -/
+@[inline] def addM (a b m : UInt64) : UInt64 :=
+  let t := a + b - m
+  t + (m &&& -(t >>> 63))
+
+/-- `a - b mod m` for `a, b < m < 2^62`. -/
+@[inline] def subM (a b m : UInt64) : UInt64 :=
+  let t := a - b
+  t + (m &&& -(t >>> 63))
+
+/-- The Montgomery ladder over `bits[i-1], …, bits[0]` (stage 1 of `uecmCurve`)
+from `(X0 : Z0) = [k]P`, `(X1 : Z1) = [k+1]P` for `P = (x0 : 1)` on the curve
+`a24`; the bit selects (without branching) which point is doubled. -/
+def uecmLadder (m a24 x0 : UInt64) (mf : Float) (bits : ByteArray) :
+    Nat → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 × UInt64
+  | 0, X0, Z0, _, _ => (X0, Z0)
+  | i + 1, X0, Z0, X1, Z1 =>
+    -- all ones when the bit is set
+    let sel := -(bits.get! i).toUInt64
+    let Ax := X0 ^^^ ((X0 ^^^ X1) &&& sel)
+    let Az := Z0 ^^^ ((Z0 ^^^ Z1) &&& sel)
+    let p := addM Ax Az m
+    let q := subM Ax Az m
+    let sp := mulmod50 p p m mf
+    let sq := mulmod50 q q m mf
+    let t := subM sp sq m
+    let DX := mulmod50 sp sq m mf
+    let DZ := mulmod50 t (addM sq (mulmod50 a24 t m mf) m) m mf
+    let u := mulmod50 (subM X1 Z1 m) (addM X0 Z0 m) m mf
+    let w := mulmod50 (addM X1 Z1 m) (subM X0 Z0 m) m mf
+    let e := addM u w m
+    let f := subM u w m
+    let SX := mulmod50 e e m mf
+    let SZ := mulmod50 x0 (mulmod50 f f m mf) m mf
+    uecmLadder m a24 x0 mf bits i (DX ^^^ ((DX ^^^ SX) &&& sel)) (DZ ^^^ ((DZ ^^^ SZ) &&& sel))
+      (SX ^^^ ((SX ^^^ DX) &&& sel)) (SZ ^^^ ((SZ ^^^ DZ) &&& sel))
+
+/-- `[2]P` for `P = (X : Z)`. -/
+@[inline] def uecmDbl (m a24 : UInt64) (mf : Float) (X Z : UInt64) : UInt64 × UInt64 :=
+  let p := addM X Z m
+  let q := subM X Z m
+  let sp := mulmod50 p p m mf
+  let sq := mulmod50 q q m mf
+  let t := subM sp sq m
+  (mulmod50 sp sq m mf, mulmod50 t (addM sq (mulmod50 a24 t m mf) m) m mf)
+
+/-- `P + Q` from `P - Q = (Xd : Zd)`. -/
+@[inline] def uecmAdd (m : UInt64) (mf : Float) (X1 Z1 X0 Z0 Xd Zd : UInt64) : UInt64 × UInt64 :=
+  let u := mulmod50 (subM X1 Z1 m) (addM X0 Z0 m) m mf
+  let w := mulmod50 (addM X1 Z1 m) (subM X0 Z0 m) m mf
+  let e := addM u w m
+  let f := subM u w m
+  (mulmod50 Zd (mulmod50 e e m mf) m mf, mulmod50 Xd (mulmod50 f f m mf) m mf)
+
+/-- The stage-1 exponent `∏ q^⌊log_q B1⌋` over the primes `q ≤ B1`, least
+significant bit first. -/
+def uecmBits (b1 : Nat) : ByteArray := Id.run do
+  let mut k := 1
+  for q in primesUpTo b1 do
+    let mut e := q
+    while e * q ≤ b1 do e := e * q
+    k := k * e
+  let mut out := ByteArray.empty
+  while k > 0 do
+    out := out.push (if k % 2 == 1 then 1 else 0)
+    k := k / 2
+  return out
+
+/-- The babies of stage 2: `j < 30` coprime to `60`. -/
+def uecmBabies : Array Nat := #[1, 7, 11, 13, 17, 19, 23, 29]
+
+/-- The stage-2 schedule for `(B1, B2]` with giant steps `60 m`, `m = 1 … mmax`:
+for giant `m` and baby `i`, whether `60 m - j_i` or `60 m + j_i` is a prime of
+`(B1, B2]` (each prime covered once). -/
+def uecmSched (b1 b2 : Nat) : Nat × ByteArray := Id.run do
+  let mmax := b2 / 60 + 1
+  let isP := (primesUpTo (60 * mmax + 60)).foldl (fun s p => s.insert p) (Std.HashSet.emptyWithCapacity 1024)
+  let mut done : Std.HashSet Nat := {}
+  let mut out := ByteArray.empty
+  for m in [1:mmax + 1] do
+    for j in uecmBabies do
+      let lo := 60 * m - j
+      let hi := 60 * m + j
+      let hit (x : Nat) := x > b1 && x ≤ b2 && isP.contains x && !done.contains x
+      let take := hit lo || hit hi
+      if hit lo then done := done.insert lo
+      if hit hi then done := done.insert hi
+      out := out.push (if take then 1 else 0)
+  return (mmax, out)
+
+/-- A plan of `uecm`: the stage-1 bits, the last giant step and the stage-2 schedule. -/
+def uecmMkPlan (b1 b2 : Nat) : ByteArray × Nat × ByteArray :=
+  let (mm, sch) := uecmSched b1 b2
+  (uecmBits b1, mm, sch)
+
+set_option compiler.extract_closed false in
+/-- The plan of `uecm`, built on first use: `B1 = 85`, `B2 = 25 B1` (on 2000
+products of two primes of 19 to 26 bits, 25 µs per split; `B1` 40 to 125 and
+`B2` 25 or 50 times `B1` all within 25 to 31 µs). -/
+def uecmPlan : Thunk (ByteArray × Nat × ByteArray) :=
+  Thunk.mk fun _ => uecmMkPlan 85 2125
+
+/-- The eight baby points `[j]Q`, `j ∈ uecmBabies`, as words. -/
+structure Babies where
+  x0 : UInt64
+  z0 : UInt64
+  x1 : UInt64
+  z1 : UInt64
+  x2 : UInt64
+  z2 : UInt64
+  x3 : UInt64
+  z3 : UInt64
+  x4 : UInt64
+  z4 : UInt64
+  x5 : UInt64
+  z5 : UInt64
+  x6 : UInt64
+  z6 : UInt64
+  x7 : UInt64
+  z7 : UInt64
+
+/-- `acc · ∏ (X_G Z_j - X_j Z_G)` over the scheduled babies of one giant step
+(`base` its offset in the schedule): the eight factors (`1` where not scheduled)
+multiplied as a tree, so that `acc` waits for one product per giant step rather
+than one per prime. -/
+@[inline] def uecmPairs (m : UInt64) (mf : Float) (bb : Babies) (sch : ByteArray)
+    (base : Nat) (XG ZG acc : UInt64) : UInt64 :=
+  let t (f : UInt8) (x z : UInt64) : UInt64 :=
+    if f == 1 then subM (mulmod50 XG z m mf) (mulmod50 x ZG m mf) m else 1
+  let p01 := mulmod50 (t (sch.get! base) bb.x0 bb.z0) (t (sch.get! (base + 1)) bb.x1 bb.z1) m mf
+  let p23 := mulmod50 (t (sch.get! (base + 2)) bb.x2 bb.z2) (t (sch.get! (base + 3)) bb.x3 bb.z3) m mf
+  let p45 := mulmod50 (t (sch.get! (base + 4)) bb.x4 bb.z4) (t (sch.get! (base + 5)) bb.x5 bb.z5) m mf
+  let p67 := mulmod50 (t (sch.get! (base + 6)) bb.x6 bb.z6) (t (sch.get! (base + 7)) bb.x7 bb.z7) m mf
+  mulmod50 acc (mulmod50 (mulmod50 p01 p23 m mf) (mulmod50 p45 p67 m mf) m mf) m mf
+
+/-- Stage 2 over the giants `G_k = [60 k]Q`, `k = …, mmax` (`(Xp : Zp)` the giant
+before, `(X1 : Z1) = [60]Q`). -/
+def uecmGiants (m : UInt64) (mf : Float) (bb : Babies) (sch : ByteArray)
+    (X1 Z1 : UInt64) (mmax : Nat) : Nat → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 → Nat → UInt64
+  | 0, _, _, _, _, acc, _ => acc
+  | fuel + 1, Xp, Zp, Xc, Zc, acc, k =>
+    if k > mmax then acc
+    else
+      let acc := uecmPairs m mf bb sch (8 * (k - 1)) Xc Zc acc
+      let (Xn, Zn) := uecmAdd m mf Xc Zc X1 Z1 Xp Zp
+      uecmGiants m mf bb sch X1 Z1 mmax fuel Xc Zc Xn Zn acc (k + 1)
+
+/-- One curve (Suyama parameter `σ`) on `m < 2^52`: the gcd of `m` with the
+product of the stage-1 `Z` and the stage-2 factors (`1` or `m` when it found
+nothing; one gcd per curve). -/
+def uecmCurveP (plan : ByteArray × Nat × ByteArray) (m σ : UInt64) (mf : Float) : UInt64 :=
+  let (bits, mmax, sch) := plan
+  -- Suyama: u = σ² - 5, v = 4σ, x₀ = u³/v³, a24 = (v - u)³ (3u + v) / (16 u³ v)
+  let u := subM (mulmod50 σ σ m mf) 5 m
+  let v := mulmod50 4 σ m mf
+  let u2 := mulmod50 u u m mf
+  let u3 := mulmod50 u2 u m mf
+  let v2 := mulmod50 v v m mf
+  let v3 := mulmod50 v2 v m mf
+  -- one inversion: 1 / (16 u³ v⁴)
+  let c := mulmod50 (mulmod50 16 u3 m mf) (mulmod50 v3 v m mf) m mf
+  let s := invLoop m c 0 1 100
+  if s == 0 then gcd64 c m
+  else
+    let inv := if s < 0 then (s + m.toInt64).toUInt64 else s.toUInt64
+    let vmu := subM v u m
+    let a24 := mulmod50 (mulmod50 (mulmod50 (mulmod50 vmu vmu m mf) vmu m mf)
+      (addM (mulmod50 3 u m mf) v m) m mf) (mulmod50 v3 inv m mf) m mf
+    let x0 := mulmod50 (mulmod50 (mulmod50 16 (mulmod50 u3 u3 m mf) m mf) v m mf) inv m mf
+    -- stage 1 from the top bit: (P, [2]P), then the ladder over the rest
+    let (D2X, D2Z) := uecmDbl m a24 mf x0 1
+    let (QX, QZ) := uecmLadder m a24 x0 mf bits (bits.size - 1) x0 1 D2X D2Z
+    -- babies: the odd multiples [j]Q, j < 30, by differential additions from [2]Q
+    let (X2, Z2) := uecmDbl m a24 mf QX QZ
+    let ad (xa za xb zb : UInt64) := uecmAdd m mf xa za X2 Z2 xb zb
+    let (X3, Z3) := uecmAdd m mf X2 Z2 QX QZ QX QZ
+    let (X5, Z5) := ad X3 Z3 QX QZ
+    let (X7, Z7) := ad X5 Z5 X3 Z3
+    let (X9, Z9) := ad X7 Z7 X5 Z5
+    let (X11, Z11) := ad X9 Z9 X7 Z7
+    let (X13, Z13) := ad X11 Z11 X9 Z9
+    let (X15, Z15) := ad X13 Z13 X11 Z11
+    let (X17, Z17) := ad X15 Z15 X13 Z13
+    let (X19, Z19) := ad X17 Z17 X15 Z15
+    let (X21, Z21) := ad X19 Z19 X17 Z17
+    let (X23, Z23) := ad X21 Z21 X19 Z19
+    let (X25, Z25) := ad X23 Z23 X21 Z21
+    let (X27, Z27) := ad X25 Z25 X23 Z23
+    let (X29, Z29) := ad X27 Z27 X25 Z25
+    let bb : Babies := ⟨QX, QZ, X7, Z7, X11, Z11, X13, Z13, X17, Z17, X19, Z19, X23, Z23, X29, Z29⟩
+    -- [30]Q = [2][15]Q, [60]Q = [2][30]Q, [120]Q = [2][60]Q
+    let (X30, Z30) := uecmDbl m a24 mf X15 Z15
+    let (X60, Z60) := uecmDbl m a24 mf X30 Z30
+    let (X120, Z120) := uecmDbl m a24 mf X60 Z60
+    -- the stage-1 Z starts the product (a factor found by stage 1 survives it)
+    let acc := uecmPairs m mf bb sch 0 X60 Z60 QZ
+    let acc := uecmGiants m mf bb sch X60 Z60 mmax (mmax + 1) X60 Z60 X120 Z120 acc 2
+    gcd64 acc m
+
+/-- One curve with the standard plan. -/
+def uecmCurve (m σ : UInt64) (mf : Float) : UInt64 := uecmCurveP uecmPlan.get m σ mf
+
+/-- A factor of a composite `u < 2^52` from up to `curves` curves of `plan` (`0` if none). -/
+def uecmP (plan : ByteArray × Nat × ByteArray) (u : UInt64) (curves : Nat) : UInt64 := go 6 curves
+where
+  go (σ : UInt64) : Nat → UInt64
+    | 0 => 0
+    | k + 1 =>
+      let g := uecmCurveP plan u σ (1.0 / u.toFloat)
+      if g != 1 && g != u then g else go (σ + 1) k
+
+/-- `uecmP` with the standard plan. -/
+def uecm (u : UInt64) (curves : Nat) : UInt64 := uecmP uecmPlan.get u curves
+
 /-- SQUFOF as a last resort (kept in a single call site so that it is only
 evaluated when needed). -/
 @[noinline] def squfofFactor (u : Nat) : Nat := ((SQUFOF.race u).map (·.val)).getD 0
 
-/-- A factor of a composite `u` (`0` if none was found): rho for `u < 2^50`. -/
+/-- A factor of a composite `u` (`0` if none was found): ECM with tiny bounds
+(`uecm`, up to 32 curves) for `u < 2^52`, then rho; on 2000 products of two
+primes of 19 to 26 bits, 25 µs against 55 µs for rho alone. -/
 def cofactorFactor (u : Nat) : Nat :=
   -- Brent's rho finds a factor `p ≤ u^(1/2)` after about `1.25 √p ≤ 1.25 u^(1/4)`
   -- steps: a budget of `8 u^(1/4)` (and at least 2000) rarely gives up early
@@ -795,6 +1024,8 @@ def cofactorFactor (u : Nat) : Nat :=
   -- `u >>> 52 == 0` rather than `u < 2 ^ 52`: `Nat` literals above `2^32` are
   -- parsed from their digits at every use
   let g := if u >>> 52 == 0 then
+      let g := uecm u.toUInt64 32
+      if g != 0 then g else
       let g := rho50 u.toUInt64 1 iters
       if g != 0 then g else rho50 u.toUInt64 3 iters
     else 0

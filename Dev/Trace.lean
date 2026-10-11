@@ -253,3 +253,39 @@ def siqsDiag (n threads : Nat) : IO Unit := do
       shown := shown + 1
 
 end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+/-- Time `SIQS.cofactorFactor` (rho) against `SQUFOF.race` on the composites of a
+file (one per line). -/
+def splitBench (path : String) : IO Unit := do
+  let ns := (← IO.FS.lines path).filterMap (·.trim.toNat?)
+  let t0 ← IO.monoNanosNow
+  let a ← IO.lazyPure fun _ => ns.foldl (fun acc u => if SIQS.cofactorFactor u > 1 then acc + 1 else acc) 0
+  let t1 ← IO.monoNanosNow
+  let b ← IO.lazyPure fun _ => ns.foldl (fun acc u =>
+    let g := SIQS.uecm u.toUInt64 40
+    if g > 1 && g.toNat < u && u % g.toNat == 0 then acc + 1 else acc) 0
+  let t2 ← IO.monoNanosNow
+  IO.println s!"{ns.size} composites: rho {(t1 - t0) / 1000 / ns.size} us each ({a} split), uecm {(t2 - t1) / 1000 / ns.size} us each ({b} split)"
+  -- one curve each: cost and success rate
+  let t3 ← IO.monoNanosNow
+  let c ← IO.lazyPure fun _ => ns.foldl (fun acc u =>
+    let g := SIQS.uecmCurve u.toUInt64 6 (1.0 / u.toFloat)
+    if g > 1 && g.toNat < u then acc + 1 else acc) 0
+  let t4 ← IO.monoNanosNow
+  IO.println s!"one curve: {(t4 - t3) / ns.size} ns each, {c} of {ns.size} split"
+  for (b1, k) in [(40, 50), (55, 50), (70, 25), (70, 50), (85, 25), (85, 50), (100, 30), (125, 25)] do
+    let plan := SIQS.uecmMkPlan b1 (k * b1)
+    let t5 ← IO.monoNanosNow
+    let d ← IO.lazyPure fun _ => ns.foldl (fun acc u =>
+      let g := SIQS.uecmP plan u.toUInt64 40
+      if g > 1 && g.toNat < u && u % g.toNat == 0 then acc + 1 else acc) 0
+    let t6 ← IO.monoNanosNow
+    let e ← IO.lazyPure fun _ => ns.foldl (fun acc u =>
+      let g := SIQS.uecmCurveP plan u.toUInt64 6 (1.0 / u.toFloat)
+      if g > 1 && g.toNat < u then acc + 1 else acc) 0
+    let t7 ← IO.monoNanosNow
+    IO.println s!"B1 {b1} B2 {k * b1}: {(t6 - t5) / 1000 / ns.size} us per split ({d}), one curve {(t7 - t6) / ns.size} ns, {e} of {ns.size}"
+
+end PrimeFactorLean.Trace
