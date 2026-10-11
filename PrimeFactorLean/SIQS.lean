@@ -934,11 +934,12 @@ def uecmMkPlan (b1 b2 : Nat) : ByteArray × Nat × ByteArray :=
   (uecmBits b1, mm, sch)
 
 set_option compiler.extract_closed false in
-/-- The plan of `uecm`, built on first use: `B1 = 85`, `B2 = 25 B1` (on 2000
-products of two primes of 19 to 26 bits, 25 µs per split; `B1` 40 to 125 and
-`B2` 25 or 50 times `B1` all within 25 to 31 µs). -/
+/-- The plan of `uecm`, built on first use: `B1 = 70`, `B2 = 25 B1` (on 2000
+cofactors of the 100-digit number field sieve, two primes of `[650000, 2^26)`:
+13 µs per split; `B1` 50 to 105 with `B2` 25 or 50 times `B1` all within 13 to
+17 µs, 85 (the earlier choice) 14 µs). -/
 def uecmPlan : Thunk (ByteArray × Nat × ByteArray) :=
-  Thunk.mk fun _ => uecmMkPlan 85 2125
+  Thunk.mk fun _ => uecmMkPlan 70 1750
 
 /-- The eight baby points `[j]Q`, `j ∈ uecmBabies`, as words. -/
 structure Babies where

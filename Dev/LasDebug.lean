@@ -1355,6 +1355,55 @@ def lasMiss (polyPath cadoPath : String) : IO Unit := do
   IO.println s!"algebraic misses: segment threshold above the point's own (bits, 0..15+): {algHist}"
   IO.println s!"algebraic misses: tiny-prime bits (0..15+): {tinyHist}"
 
+/-- `Las.factorSurvivor2` up to the cofactor classes (no split): the cost of
+everything but the cofactor factoring. -/
+def factorNoSplit (ctx : Las.LasCtx) (q : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat)
+    (listR listA : List Nat) (pos : Nat) : Nat := Id.run do
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let i : Int := (c : Int) - (I / 2 : Nat)
+  let a0 := i * ua + (j : Int) * va
+  let b0 := i * ub + (j : Int) * vb
+  let (a, b) := if b0 < 0 then (-a0, -b0) else (a0, b0)
+  if b == 0 then return 0
+  if Nat.gcd a.natAbs b.natAbs != 1 then return 0
+  let bn := b.natAbs
+  let sel := ctx.base.sel
+  let nr : Int := sel.ratNorm a b
+  if nr == 0 then return 0
+  let mut u := nr.natAbs
+  let side := ctx.rat
+  for k in Las.smallHits side Rr c.toUInt64 j.toUInt64 I.toUInt64 0 side.largeStart [] do
+    let p := side.primes[k]!
+    let (u', e) := Las.stripNat u p
+    if e > 0 then u := u'
+  for k in listR do
+    let p := side.primes[k]!
+    let (u', e) := Las.stripNat u p
+    if e > 0 then u := u'
+  let cr := Las.cofactorClass u ctx.params.lpbR ctx.params.mfbR ctx.limR
+  if cr == 0 then return 0
+  let na := homEval sel.coeffs a b
+  if na == 0 then return 0
+  let (z0, eq) := Las.stripNat na.natAbs q
+  if eq == 0 then return 0
+  let mut z := z0
+  let sideA := ctx.alg
+  for k in Las.smallHits sideA Ra c.toUInt64 j.toUInt64 I.toUInt64 0 sideA.largeStart [] do
+    let p := sideA.primes[k]!
+    let r := sideA.roots[k]!
+    let ok := Ra[k]! < p || (if r == p then bn % p == 0 else (a - b * (r : Int)) % (p : Int) == 0)
+    if ok then
+      let (z', e) := Las.stripNat z p
+      if e > 0 then z := z'
+  for k in listA do
+    let p := sideA.primes[k]!
+    let (z', e) := Las.stripNat z p
+    if e > 0 then z := z'
+  let ca := Las.cofactorClass z ctx.params.lpbA ctx.params.mfbA ctx.limA
+  return cr * 3 + ca
+
 /-- The production siever (`processQs14` with `tinyT`, `tinyTR`) one stage at a
 time, single-threaded: the time of each stage per special-q and the candidate
 counts between them. -/
@@ -1382,6 +1431,8 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   let mut tm : Array Nat := Array.replicate names.size 0
   let mut cnt : Array Nat := Array.replicate 7 0
   let mut tmB := 0
+  let mut tmNS := 0
+  let mut clsNS : Array Nat := Array.replicate 9 0
   let mut chk : UInt64 := 0
   let mut sc := Las.Scratch.new ctx'
   let las := ctx'
@@ -1506,6 +1557,14 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       ts := ts.push (← IO.monoNanosNow)
       cnt := cnt.modify 4 (· + pass.size)
       cnt := cnt.modify 5 (· + nrel)
+      if get "nosplit" 0 == 1 then
+        let n0 ← IO.monoNanosNow
+        let cls ← IO.lazyPure fun _ => pass.foldl (fun acc k =>
+          acc.modify (factorNoSplit las q ua ub va vb Rr Ra (Las.idealsOf offR ksR k)
+            (Las.idealsOf offA ksA k) surv[k]!) (· + 1)) (Array.replicate 9 0)
+        let n1 ← IO.monoNanosNow
+        tmNS := tmNS + (n1 - n0)
+        clsNS := (Array.range 9).map fun t => clsNS[t]! + cls[t]!
       for k in [0:ts.size - 1] do
         tm := tm.modify (k + 1) (· + (ts[k + 1]! - ts[k]!))
       sc := ⟨bufR, lab, bits⟩
@@ -1515,6 +1574,8 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   IO.println s!"{qs.size} special-q from {q0}: {total / nq / 1000} us per q, {cnt[5]!} rels"
   if get "basis" 0 == 1 then
     IO.println s!"  (Franke–Kleinjung bases alone, both sides: {tmB / nq / 1000} us per q; {chk})"
+  if get "nosplit" 0 == 1 then
+    IO.println s!"  (factor without the splits: {tmNS / nq / 1000} us per q; classes (rat, alg) 00..22 per q: {clsNS.map (· * 10 / nq)} /10)"
   for k in [0:names.size] do
     IO.println s!"  {names[k]!}: {tm[k]! / nq / 1000} us ({tm[k]! * 1000 / max 1 total / 10}.{tm[k]! * 1000 / max 1 total % 10}%)"
   IO.println s!"  per q: candidates {cnt[0]! / nq}, after gcd {cnt[1]! / nq}, after tiny {cnt[2]! / nq}, after prefilter {cnt[3]! / nq}, after rational gate {cnt[6]! / nq}, after gate {cnt[4]! / nq}, rels {cnt[5]! * 10 / nq / 10}.{cnt[5]! * 10 / nq % 10}"
@@ -1604,3 +1665,4 @@ def ratGateStats (path : String) (q0 count : Nat) : IO Unit := do
     sc := ⟨bufR, lab, bits⟩
   let nq := max 1 qs.size
   IO.println s!"rational gate per special-q: hopeless {codes[0]! / nq}, word mismatch {codes[1]! / nq}, class 0 (bounds) {codes[2]! / nq}, probable prime {codes[3]! / nq}, composite {codes[4]! / nq}, one large prime {codes[5]! / nq}"
+

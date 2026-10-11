@@ -746,3 +746,24 @@ def uecmParts (path : String) : IO Unit := do
   IO.println s!"per call: ladder {(t1 - t0) / k} ns, curve {(t2 - t1) / k} ns, gcd64 {(t3 - t2) / k} ns, invLoop {(t4 - t3) / k} ns, ladder2 {(t5 - t4) / k} ns, curve2 {(t6 - t5) / k} ns ({a ^^^ b ^^^ c ^^^ d ^^^ e ^^^ f})"
 
 end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+/-- `uecmP` with the plans `B1`, `k B1` of a grid on the composites of a file:
+time per split and the splits found. -/
+def uecmGrid (path : String) (grid : List (Nat × Nat)) : IO Unit := do
+  let ns := (← IO.FS.lines path).filterMap (·.trim.toNat?)
+  for (b1, k) in grid do
+    let plan := SIQS.uecmMkPlan b1 (k * b1)
+    let t0 ← IO.monoNanosNow
+    let d ← IO.lazyPure fun _ => ns.foldl (fun acc u =>
+      let g := SIQS.uecmP plan u.toUInt64 40
+      if g > 1 && g.toNat < u && u % g.toNat == 0 then acc + 1 else acc) 0
+    let t1 ← IO.monoNanosNow
+    let e ← IO.lazyPure fun _ => ns.foldl (fun acc u =>
+      let g := SIQS.uecmCurveP plan u.toUInt64 6 (1.0 / u.toFloat)
+      if g > 1 && g.toNat < u then acc + 1 else acc) 0
+    let t2 ← IO.monoNanosNow
+    IO.println s!"B1 {b1} B2 {k * b1}: {(t1 - t0) / 1000 / ns.size} us per split ({d}), one curve {(t2 - t1) / ns.size} ns, {e} of {ns.size}"
+
+end PrimeFactorLean.Trace
