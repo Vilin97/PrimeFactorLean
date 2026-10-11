@@ -22,32 +22,72 @@ square-root steps check their congruences exactly).
 
 namespace PrimeFactorLean.Merge
 
+/-- `symmDiff` from positions `i`, `j` of `a`, `b`, appended to `out` (tail
+recursive: no loop state to allocate). -/
+def symmDiffGo (a b : Array Nat) (i j : Nat) (out : Array Nat) : Array Nat :=
+  if h : i < a.size then
+    if h2 : j < b.size then
+      let x := a[i]
+      let y := b[j]
+      if x < y then symmDiffGo a b (i + 1) j (out.push x)
+      else if y < x then symmDiffGo a b i (j + 1) (out.push y)
+      else symmDiffGo a b (i + 1) (j + 1) out
+    else symmDiffGo a b (i + 1) j (out.push a[i])
+  else if h2 : j < b.size then symmDiffGo a b i (j + 1) (out.push b[j])
+  else out
+termination_by (a.size - i) + (b.size - j)
+
 /-- Symmetric difference of two increasing arrays. -/
-def symmDiff (a b : Array Nat) : Array Nat := Id.run do
-  let mut out : Array Nat := Array.mkEmpty (a.size + b.size)
-  let mut i := 0
-  let mut j := 0
-  -- tail-recursive merge would avoid the loop state; the arrays here are short
-  while i < a.size || j < b.size do
-    if j ≥ b.size || (i < a.size && a[i]! < b[j]!) then
-      out := out.push a[i]!
-      i := i + 1
-    else if i ≥ a.size || b[j]! < a[i]! then
-      out := out.push b[j]!
-      j := j + 1
-    else
-      i := i + 1
-      j := j + 1
-  return out
+def symmDiff (a b : Array Nat) : Array Nat := symmDiffGo a b 0 0 (Array.mkEmpty (a.size + b.size))
+
+/-- Binary search for `x` in `a[lo, hi)` (increasing): the first index `≥ x`. -/
+def lowerBound (a : Array Nat) (x lo hi : Nat) : Nat → Nat
+  | 0 => lo
+  | fuel + 1 =>
+    if lo < hi then
+      let mid := (lo + hi) / 2
+      if a[mid]! < x then lowerBound a x (mid + 1) hi fuel else lowerBound a x lo mid fuel
+    else lo
 
 /-- Whether the increasing array `a` contains `x` (binary search). -/
-def containsSorted (a : Array Nat) (x : Nat) : Bool := Id.run do
-  let mut lo := 0
-  let mut hi := a.size
-  while lo < hi do
-    let mid := (lo + hi) / 2
-    if a[mid]! < x then lo := mid + 1 else hi := mid
-  return lo < a.size && a[lo]! == x
+def containsSorted (a : Array Nat) (x : Nat) : Bool :=
+  let lo := lowerBound a x 0 a.size 64
+  lo < a.size && a[lo]! == x
+
+/-- The weights and the rows of every column (rows from `i`; tail recursive). -/
+def colIndex (rows : Array (Array Nat)) (colWeight : Array Nat) (colRows : Array (Array Nat))
+    (i : Nat) : Nat → Array Nat × Array (Array Nat)
+  | 0 => (colWeight, colRows)
+  | fuel + 1 =>
+    if i < rows.size then
+      let (cw, cr) := colIndexRow rows[i]! i 0 colWeight colRows
+      colIndex rows cw cr (i + 1) fuel
+    else (colWeight, colRows)
+where
+  /-- The entries of row `i` (`r`) from `j`. -/
+  colIndexRow (r : Array Nat) (i j : Nat) (colWeight : Array Nat) (colRows : Array (Array Nat)) :
+      Array Nat × Array (Array Nat) :=
+    if h : j < r.size then
+      let c := r[j]
+      colIndexRow r i (j + 1) (colWeight.set! c (colWeight[c]! + 1)) (colRows.modify c (·.push i))
+    else (colWeight, colRows)
+  termination_by r.size - j
+
+/-- New numbers (from `next`) for the columns of the rows `orig` in order of first
+appearance (rows from position `k` of `orig`, entries of the current row from `j`). -/
+def renumber (rows : Array (Array Nat)) (orig : Array Nat) (numCols dense k j : Nat)
+    (index : Array Nat) (next : Nat) : Nat → Array Nat × Nat
+  | 0 => (index, next)
+  | fuel + 1 =>
+    if k < orig.size then
+      let row := rows[orig[k]!]!
+      if j < row.size then
+        let c := row[j]!
+        if index[c]! == numCols then
+          renumber rows orig numCols dense k (j + 1) (index.set! c next) (next + 1) fuel
+        else renumber rows orig numCols dense k (j + 1) index next fuel
+      else renumber rows orig numCols dense (k + 1) 0 index next fuel
+    else (index, next)
 
 /-- Insertion sort of a short array of naturals (direct comparisons: `Array.qsort`
 here called its comparator through a boxed closure, half of the merge's time). -/
@@ -180,14 +220,11 @@ is in place (passing a structure around would share and copy its arrays). -/
 def mergeLog (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : Nat) :
     Array (Array Nat) × Log × Nat := Id.run do
   let mut rows := rows0.map normalize
-  let mut colRows : Array (Array Nat) := Array.replicate numCols #[]
-  let mut colWeight : Array Nat := Array.replicate numCols 0
-  let mut weight := 0
-  for i in [0:rows.size] do
-    for c in rows[i]! do
-      colRows := colRows.modify c (·.push i)
-      colWeight := colWeight.set! c (colWeight[c]! + 1)
-    weight := weight + rows[i]!.size
+  let (cw0, cr0) := colIndex rows (Array.replicate numCols 0) (Array.replicate numCols #[]) 0
+    (rows.foldl (fun acc r => acc + r.size + 1) 1)
+  let mut colRows : Array (Array Nat) := cr0
+  let mut colWeight : Array Nat := cw0
+  let mut weight := rows.foldl (fun acc r => acc + r.size) 0
   let mut ops : Array Nat := #[]
   let mut alive : Array Bool := Array.replicate rows.size true
   let mut liveRows := rows.size
@@ -263,6 +300,23 @@ def symmDiffSize (a b : Array Nat) (i j acc : Nat) : Nat :=
   else acc + (a.size - i) + (b.size - j)
 termination_by (a.size - i) + (b.size - j)
 
+/-- The column updates of adding the row `prow` to row `r` (`old`; both
+increasing): the columns of `prow` that `old` has lose weight, the others gain
+weight and the row `r` (tail recursive). -/
+def addRowCols (old prow : Array Nat) (r i j : Nat) (colWeight : Array Nat)
+    (colRows : Array (Array Nat)) : Nat → Array Nat × Array (Array Nat)
+  | 0 => (colWeight, colRows)
+  | fuel + 1 =>
+    if j < prow.size then
+      let x := prow[j]!
+      if i < old.size && old[i]! < x then addRowCols old prow r (i + 1) j colWeight colRows fuel
+      else if i < old.size && old[i]! == x then
+        addRowCols old prow r (i + 1) (j + 1) (colWeight.set! x (colWeight[x]! - 1)) colRows fuel
+      else
+        addRowCols old prow r i (j + 1) (colWeight.set! x (colWeight[x]! + 1))
+          (colRows.modify x (·.push r)) fuel
+    else (colWeight, colRows)
+
 /-- A minimum spanning tree (Prim) of the complete graph on `k` vertices with
 edge weights `wt[i k + j]`, rooted at `0`: the parents (`k` for the root) and
 the vertices in breadth-first order. -/
@@ -307,14 +361,11 @@ def mergeLog2 (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : 
       if c < dense then mk := mk ^^^ (1 <<< c) else sp := sp.push c
     rows := rows.push sp
     dmask := dmask.push mk
-  let mut colRows : Array (Array Nat) := Array.replicate numCols #[]
-  let mut colWeight : Array Nat := Array.replicate numCols 0
-  let mut weight := 0
-  for i in [0:rows.size] do
-    for c in rows[i]! do
-      colRows := colRows.modify c (·.push i)
-      colWeight := colWeight.set! c (colWeight[c]! + 1)
-    weight := weight + rows[i]!.size
+  let (cw0, cr0) := colIndex rows (Array.replicate numCols 0) (Array.replicate numCols #[]) 0
+    (rows.foldl (fun acc r => acc + r.size + 1) 1)
+  let mut colRows : Array (Array Nat) := cr0
+  let mut colWeight : Array Nat := cw0
+  let mut weight := rows.foldl (fun acc r => acc + r.size) 0
   let mut ops : Array Nat := #[]
   let mut alive : Array Bool := Array.replicate rows.size true
   let mut liveRows := rows.size
@@ -393,14 +444,9 @@ def mergeLog2 (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : 
         let prow := rows[pr]!
         let old := rows[r]!
         let new := symmDiff old prow
-        let mut i := 0
-        for x in prow do
-          while i < old.size && old[i]! < x do i := i + 1
-          if i < old.size && old[i]! == x then
-            colWeight := colWeight.set! x (colWeight[x]! - 1)
-          else
-            colWeight := colWeight.set! x (colWeight[x]! + 1)
-            colRows := colRows.modify x (·.push r)
+        let (cw', cr') := addRowCols old prow r 0 0 colWeight colRows (old.size + prow.size + 1)
+        colWeight := cw'
+        colRows := cr'
         weight := weight + new.size - old.size
         rows := rows.set! r new
         dmask := dmask.set! r (dmask[r]! ^^^ dmask[pr]!)
@@ -421,23 +467,16 @@ def mergeLog2 (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : 
       if cwmax < maxW then cwmax := cwmax + 1
       else if merges == 0 then idle := idle + 1
   -- renumber the active columns: the dense ones first, as they were
-  let mut index : Array Nat := Array.replicate numCols numCols
-  let mut next := dense
-  let mut outRows : Array (Array Nat) := #[]
-  let mut orig : Array Nat := #[]
-  for i in [0:rows.size] do
-    if alive[i]! then
-      let mk := dmask[i]!
-      let mut r : Array Nat := Array.mkEmpty (rows[i]!.size + dense)
-      for c in [0:dense] do
-        if (mk >>> c) &&& 1 == 1 then r := r.push c
-      for c in rows[i]! do
-        if index[c]! == numCols then
-          index := index.set! c next
-          next := next + 1
-        r := r.push index[c]!
-      outRows := outRows.push r
-      orig := orig.push i
+  let orig := (Array.range rows.size).filter (alive[·]!)
+  let (index, next) := renumber rows orig numCols dense 0 0 (Array.replicate numCols numCols) dense
+    (rows.foldl (fun acc r => acc + r.size + 1) 1)
+  let outRows := orig.map fun i => Id.run do
+    let mk := dmask[i]!
+    let row := rows[i]!
+    let mut r : Array Nat := Array.mkEmpty (row.size + dense)
+    for c in [0:dense] do
+      if (mk >>> c) &&& 1 == 1 then r := r.push c
+    return row.foldl (fun r c => r.push index[c]!) r
   return (outRows, ⟨orig, ops, rows.size⟩, next)
 
 /-- The root of `x` in a union-find forest (`parent`; union by size keeps the
@@ -445,6 +484,36 @@ trees shallow, so no path compression is needed). -/
 def findRoot (parent : Array Nat) (x : Nat) : Nat → Nat
   | 0 => x
   | fuel + 1 => let p := parent[x]!; if p == x then x else findRoot parent p fuel
+
+/-- Union by size of the rows `kept` (by position) joined by the columns of
+weight two (`count`), from position `k` and entry `j` of its row; `first[c]` is
+the first position met with column `c` (`kept.size` for none). Tail recursive. -/
+def joinCliques (rows : Array (Array Nat)) (kept : Array Nat) (numCols dense : Nat)
+    (count : Array Nat) (k j : Nat) (parent size first : Array Nat) : Nat → Array Nat × Array Nat
+  | 0 => (parent, size)
+  | fuel + 1 =>
+    let K := kept.size
+    if k < K then
+      let row := rows[kept[k]!]!
+      if j < row.size then
+        let c := row[j]!
+        if c ≥ dense && c < numCols && count[c]! == 2 then
+          let f := first[c]!
+          if f == K then
+            joinCliques rows kept numCols dense count k (j + 1) parent size (first.set! c k) fuel
+          else
+            let rf := findRoot parent f 64
+            let rk := findRoot parent k 64
+            if rf == rk then joinCliques rows kept numCols dense count k (j + 1) parent size first fuel
+            else if size[rf]! ≥ size[rk]! then
+              joinCliques rows kept numCols dense count k (j + 1) (parent.set! rk rf)
+                (size.set! rf (size[rf]! + size[rk]!)) first fuel
+            else
+              joinCliques rows kept numCols dense count k (j + 1) (parent.set! rf rk)
+                (size.set! rk (size[rk]! + size[rf]!)) first fuel
+        else joinCliques rows kept numCols dense count k (j + 1) parent size first fuel
+      else joinCliques rows kept numCols dense count (k + 1) 0 parent size first fuel
+    else (parent, size)
 
 /-- Clique removal (Cavallar's filtering, CADO-NFS `purge`): while the excess
 (rows less active columns) of the rows `kept` exceeds `target`, delete whole
@@ -472,24 +541,9 @@ def purge (numCols dense : Nat) (rows : Array (Array Nat)) (kept : Array Nat) (t
     let excess := kept.size - active - target
     -- union by size over positions in `kept`, joined by the columns of weight two
     let K := kept.size
-    let mut parent : Array Nat := Array.range K
-    let mut size : Array Nat := Array.replicate K 1
-    let mut first : Array Nat := Array.replicate numCols K
-    for k in [0:K] do
-      for c in rows[kept[k]!]! do
-        if c ≥ dense && c < numCols && count[c]! == 2 then
-          let f := first[c]!
-          if f == K then first := first.set! c k
-          else
-            let rf := findRoot parent f 64
-            let rk := findRoot parent k 64
-            if rf != rk then
-              if size[rf]! ≥ size[rk]! then
-                parent := parent.set! rk rf
-                size := size.set! rf (size[rf]! + size[rk]!)
-              else
-                parent := parent.set! rf rk
-                size := size.set! rk (size[rk]! + size[rf]!)
+    let (parent, size) := joinCliques rows kept numCols dense count 0 0
+      (Array.range K) (Array.replicate K 1) (Array.replicate numCols K)
+      (kept.foldl (fun acc i => acc + rows[i]!.size + 1) 1)
     -- the roots by clique size (buckets), largest first, `excess` of them
     let mut maxSize := 0
     for k in [0:K] do
