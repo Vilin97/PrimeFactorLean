@@ -15,12 +15,20 @@ namespace PrimeFactorLean.Arith
 
 /-! ## Floating-point conversions and constants for hot loops -/
 
+/-- `nf` from `2^32` on: exact through `UInt64` below `2^64`, else the top 64 bits
+scaled by a power of two (within an ulp of `Nat.toFloat`, without its big-number
+arithmetic). -/
+def nfBig (n : Nat) : Float :=
+  let k := n.log2
+  if k < 64 then n.toUInt64.toFloat
+  else Float.scaleB (n >>> (k - 63)).toUInt64.toFloat ((k - 63 : Nat) : Int)
+
 /-- A natural number as a float, through `UInt64` below `2^32`: `Nat.toFloat` is
 `Float.ofNat`, i.e. `Float.ofScientific n false 0`, which runs a big-number
 logarithm and shifts for every argument. (The bound is a 32-bit literal: larger
 `Nat` literals are emitted as decimal strings, parsed where they are used.) -/
 @[inline] def nf (n : Nat) : Float :=
-  if n ≤ 4294967295 then n.toUInt64.toFloat else n.toFloat
+  if n ≤ 4294967295 then n.toUInt64.toFloat else nfBig n
 
 /-- An integer as a float (as `nf`; `Float.ofInt` goes through `Float.ofNat`). -/
 @[inline] def intF (i : Int) : Float :=

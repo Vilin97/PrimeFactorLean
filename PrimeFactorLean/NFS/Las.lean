@@ -604,6 +604,12 @@ special-q at once). -/
   taskMul : Nat := 2
   /-- Prime powers below this are not sieved (`sievePowers`). -/
   powMin : Nat := 0
+  /-- With `tinyT > 0` the algebraic side sieves neither the tiny primes nor
+  their powers: its thresholds are `tinyT` bits lower (instead of `fudge`), and
+  the candidates get the exact tiny-prime bits of their norms (`tinyFilter`). -/
+  tinyT : Nat := 0
+  /-- Slack in bits of the candidates' exact test (`tinyFilter`). -/
+  tinyF : Nat := 0
   deriving Repr, Inhabited
 
 /-- One side's factor base: ideals `(p, r)` (`r = p` projective) with logarithms. -/
@@ -725,6 +731,10 @@ def mkLasCtx (base : Ctx) (params : LasParams) : LasCtx :=
     cs[cs.size - 1]! % (M : Int) == 0 && cs.size ≥ 2 && cs[cs.size - 2]! % (p : Int) != 0
   let (rpw, rpr, rpl, rpb) := smallPowers fb.ratPrimes fb.ratRoots fb.ratLogs I ratLift ratProj
   let (apw, apr, apl, apb) := smallPowers fb.algPrimes fb.algRoots fb.algLogs I algLift algProj
+  -- with `tinyT`, the tiny primes' powers are counted exactly at the candidates
+  let keep := (Array.range apw.size).filter fun k => params.tinyT == 0 || apb[k]! ≥ params.sieveFrom
+  let (apw, apr, apl, apb) := (keep.map (apw[·]!), keep.map (apr[·]!),
+    (⟨keep.map (apl.get! ·)⟩ : ByteArray), keep.map (apb[·]!))
   -- roots modulo p² of the small ideals (simple roots only)
   let sq (primes roots : Array Nat) (lift : Nat → Nat → Nat → Option Nat) : Array Nat :=
     (Array.range primes.size).filterMap fun k =>
@@ -2942,6 +2952,134 @@ def processQ12 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch
       rels := rels.push rel
   return (rels, ⟨bufR, lab, bits⟩)
 
+/-! ### Exact tiny-prime bits at the candidates (`tinyT`)
+
+The tiny primes (below `sieveFrom`) contribute very unequally to algebraic norms
+when the polynomial has many roots modulo small prime powers (multiple and
+projective ones included), which a constant threshold slack cannot follow: with
+`tinyT > 0` the algebraic side does not sieve them, its thresholds are `tinyT`
+bits lower, and each candidate gets the exact bits of the tiny primes in its
+norm — `F(a, b)` modulo `2^64` for `2`, and modulo two odd products of tiny
+prime powers below `2^31` (Montgomery arithmetic, no divisions) for the others. -/
+
+/-- `x y 2^-32 mod M` for odd `M < 2^31` and `x, y < M` (`mi = -M⁻¹ mod 2^32`). -/
+@[inline] def montMul (x y M mi : UInt64) : UInt64 :=
+  let t := x * y
+  let m := (t * mi) &&& 0xFFFFFFFF
+  let u := (t + m * M) >>> 32
+  if u ≥ M then u - M else u
+
+/-- `x + y mod M` (`x, y < M`). -/
+@[inline] def addModU (x y M : UInt64) : UInt64 :=
+  let s := x + y
+  if s ≥ M then s - M else s
+
+/-- One odd modulus of `TinyF`: `M`, `mi = -M⁻¹ mod 2^32`, the basis scaled by
+`2^64` (so that `montMul c ua2 = c ua 2^32`), the offsets `-(I/2) u 2^32`, the
+coefficients `c_k 2^32` and `2^32`, all modulo `M`. -/
+structure TinyMod where
+  M : UInt64
+  mi : UInt64
+  ua2 : UInt64
+  ub2 : UInt64
+  va2 : UInt64
+  vb2 : UInt64
+  offA : UInt64
+  offB : UInt64
+  cs : Array UInt64
+  one : UInt64
+
+/-- `TinyMod` of the modulus `M` for the basis `u, v` and half width `half`. -/
+def mkTinyMod (M : Nat) (cs : Array Int) (ua ub va vb : Int) (half : Nat) : TinyMod :=
+  let R := 4294967296 % M
+  let md (x : Int) : Nat := (x % (M : Int)).toNat
+  let r1 (x : Nat) : UInt64 := (x * R % M).toUInt64
+  let r2 (x : Nat) : UInt64 := (x * R % M * R % M).toUInt64
+  let inv := (invMod (M % 4294967296) 4294967296).getD 1
+  { M := M.toUInt64, mi := ((4294967296 - inv) % 4294967296).toUInt64,
+    ua2 := r2 (md ua), ub2 := r2 (md ub), va2 := r2 (md va), vb2 := r2 (md vb),
+    offA := r1 (md (-(half : Int) * ua)), offB := r1 (md (-(half : Int) * ub)),
+    cs := cs.map fun c => r1 (md c), one := R.toUInt64 }
+
+/-- `Σ_{i ≤ k} c_i a^i b^(d-i)` by Horner from `k` down (Montgomery forms). -/
+def hornerMont (cs : Array UInt64) (a b M mi : UInt64) : Nat → UInt64 → UInt64 → UInt64
+  | 0, acc, _ => acc
+  | k + 1, acc, bp =>
+    let bp := montMul bp b M mi
+    hornerMont cs a b M mi k (addModU (montMul acc a M mi) (montMul cs[k]! bp M mi) M) bp
+
+/-- `F(a, b) mod M` at column `c` of row `j` (standard form). -/
+@[inline] def tinyModEval (t : TinyMod) (c j : UInt64) : UInt64 :=
+  let M := t.M
+  let mi := t.mi
+  let a := addModU (addModU (montMul c t.ua2 M mi) (montMul j t.va2 M mi) M) t.offA M
+  let b := addModU (addModU (montMul c t.ub2 M mi) (montMul j t.vb2 M mi) M) t.offB M
+  let d := t.cs.size - 1
+  montMul (hornerMont t.cs a b M mi d t.cs[d]! t.one) 1 M mi
+
+/-- `v_p(x)` capped at `k` (`0` counts `k`). -/
+@[inline] def valCap (x p : UInt64) : Nat → Nat
+  | 0 => 0
+  | k + 1 => if x % p == 0 then valCap (x / p) p k + 1 else 0
+
+/-- The trailing zero bits of `x` (`64` for `0`). -/
+def ctz64 (x : UInt64) : Nat → Nat
+  | 0 => 0
+  | k + 1 => if x &&& 1 == 0 then ctz64 (x >>> 1) k + 1 else 0
+
+/-- Per special-`q` data for the exact tiny-prime bits of algebraic norms. -/
+structure TinyF where
+  m1 : TinyMod
+  m2 : TinyMod
+  cs64 : Array UInt64
+  ua64 : UInt64
+  ub64 : UInt64
+  va64 : UInt64
+  vb64 : UInt64
+  half : UInt64
+  lgs : FloatArray
+
+/-- The moduli `3^5 5^3 7^2 11^2` and `13^2 17 19 23 29`. -/
+def mkTinyF (ctx : LasCtx) (ua ub va vb : Int) : TinyF :=
+  let cs := ctx.base.sel.coeffs
+  let half := ctx.I / 2
+  let w (x : Int) : UInt64 := (x % 18446744073709551616).toNat.toUInt64
+  { m1 := mkTinyMod 180093375 cs ua ub va vb half, m2 := mkTinyMod 36409529 cs ua ub va vb half,
+    cs64 := cs.map w, ua64 := w ua, ub64 := w ub, va64 := w va, vb64 := w vb,
+    half := half.toUInt64,
+    lgs := ⟨#[2, 3, 5, 7, 11, 13, 17, 19, 23, 29].map fun p => Float.log2 (nf p)⟩ }
+
+/-- The bits of the tiny primes in the algebraic norm at column `c` of row `j`
+(valuations capped at `2^63`, `3^5`, `5^3`, `7^2`, `11^2`, `13^2`, `p` above). -/
+def tinyBits (t : TinyF) (c j : UInt64) : Float :=
+  let x0 := c - t.half
+  let a64 := x0 * t.ua64 + j * t.va64
+  let b64 := x0 * t.ub64 + j * t.vb64
+  let d := t.cs64.size - 1
+  let f64 := hornerU t.cs64 a64 b64 d t.cs64[d]! 1
+  let x1 := tinyModEval t.m1 c j
+  let x2 := tinyModEval t.m2 c j
+  let l := t.lgs
+  nf (ctz64 f64 63) + nf (valCap x1 3 5) * l.get! 1 + nf (valCap x1 5 3) * l.get! 2 +
+    nf (valCap x1 7 2) * l.get! 3 + nf (valCap x1 11 2) * l.get! 4 + nf (valCap x2 13 2) * l.get! 5 +
+    nf (valCap x2 17 1) * l.get! 6 + nf (valCap x2 19 1) * l.get! 7 + nf (valCap x2 23 1) * l.get! 8 +
+    nf (valCap x2 29 1) * l.get! 9
+
+/-- The candidates whose algebraic bytes, with the exact tiny-prime bits added
+(and kept in the byte for the prefilter), reach `128 + tinyT - tinyF`. -/
+def tinyFilter (ctx : LasCtx) (t : TinyF) (bufA : ByteArray) (cands : Array Nat) :
+    ByteArray × Array Nat := Id.run do
+  let I := ctx.I
+  let need := 128 + ctx.params.tinyT
+  let mut b := bufA
+  let mut out : Array Nat := Array.mkEmpty cands.size
+  for pos in cands do
+    let tb := tinyBits t (pos % I).toUInt64 (pos / I).toUInt64
+    let v := (b.get! pos).toNat + (tb + fc 1 / fc 2).toUInt64.toNat
+    b := b.set! pos (min 255 v).toUInt8
+    if v + ctx.params.tinyF ≥ need then out := out.push pos
+  return (b, out)
+
 /-- `processQ12` with a threshold per 64-column segment (`fillSegments`: the
 largest norm on the segment, rather than on the whole row, which misses the
 smooth points of rows whose norms vary widely), the prime powers sieved and the
@@ -2958,14 +3096,20 @@ def processQ13 (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (sc : Scratch) : Array 
   let Pr := powerRoots ctx.rat ua ub va vb
   let Pa := powerRoots ctx.alg ua ub va vb
   let (fR, biasR) := fillSegments ctx b1 false q ua ub va vb ctx.params.mfbR (rowExtras ctx ctx.rat Rr)
-  let (fA, biasA) := fillSegments ctx b2 true q ua ub va vb ctx.params.mfbA (rowExtras ctx ctx.alg Ra)
+  let tinyT := ctx.params.tinyT
+  -- with `tinyT`, the algebraic thresholds' slack is `tinyT` (not `fudge + fudgeA`)
+  let mfbA := if tinyT == 0 then ctx.params.mfbA
+    else ctx.params.mfbA + tinyT - (ctx.params.fudge + ctx.params.fudgeA)
+  let (fA, biasA) := fillSegments ctx b2 true q ua ub va vb mfbA (rowExtras ctx ctx.alg Ra)
   let (bufR, Rr) := sieveLargePaired ctx ctx.rat Rr
     (sievePowers ctx ctx.rat Pr (lineSieveSide ctx ctx.rat Rr fR))
   let (bufA, Ra) := sieveLargePaired ctx ctx.alg Ra
     (sievePowers ctx ctx.alg Pa (lineSieveSide ctx ctx.alg Ra fA))
+  let cands := dropSmallGcd ctx (survivors bufR bufA len)
+  let (bufA, cands) := if tinyT == 0 then (bufA, cands)
+    else tinyFilter ctx (mkTinyF ctx ua ub va vb) bufA cands
   let surv := prefilterGap4 ctx q ua ub va vb bufR bufA biasR biasA (tinyPrimes ctx ctx.rat Rr)
-    (tinyPrimes ctx ctx.alg Ra) slack
-    (dropSmallGcd ctx (survivors bufR bufA len))
+    (if tinyT == 0 then tinyPrimes ctx ctx.alg Ra else #[]) slack cands
   if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
   let bits := markBits bits surv true
@@ -2989,14 +3133,20 @@ def processQ13R (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (ua ub va vb : Int) (R
   let Pr := powerRoots ctx.rat ua ub va vb
   let Pa := powerRoots ctx.alg ua ub va vb
   let (fR, biasR) := fillSegments ctx b1 false q ua ub va vb ctx.params.mfbR (rowExtras ctx ctx.rat Rr)
-  let (fA, biasA) := fillSegments ctx b2 true q ua ub va vb ctx.params.mfbA (rowExtras ctx ctx.alg Ra)
+  let tinyT := ctx.params.tinyT
+  -- with `tinyT`, the algebraic thresholds' slack is `tinyT` (not `fudge + fudgeA`)
+  let mfbA := if tinyT == 0 then ctx.params.mfbA
+    else ctx.params.mfbA + tinyT - (ctx.params.fudge + ctx.params.fudgeA)
+  let (fA, biasA) := fillSegments ctx b2 true q ua ub va vb mfbA (rowExtras ctx ctx.alg Ra)
   let (bufR, Rr) := sieveLargePaired ctx ctx.rat Rr
     (sievePowers ctx ctx.rat Pr (lineSieveSide ctx ctx.rat Rr fR))
   let (bufA, Ra) := sieveLargePaired ctx ctx.alg Ra
     (sievePowers ctx ctx.alg Pa (lineSieveSide ctx ctx.alg Ra fA))
+  let cands := dropSmallGcd ctx (survivors bufR bufA len)
+  let (bufA, cands) := if tinyT == 0 then (bufA, cands)
+    else tinyFilter ctx (mkTinyF ctx ua ub va vb) bufA cands
   let surv := prefilterGap4 ctx q ua ub va vb bufR bufA biasR biasA (tinyPrimes ctx ctx.rat Rr)
-    (tinyPrimes ctx ctx.alg Ra) slack
-    (dropSmallGcd ctx (survivors bufR bufA len))
+    (if tinyT == 0 then tinyPrimes ctx ctx.alg Ra else #[]) slack cands
   if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
   let bits := markBits bits surv true

@@ -295,3 +295,249 @@ def splitBench (path : String) : IO Unit := do
     IO.println s!"B1 {b1} B2 {k * b1}: {(t6 - t5) / 1000 / ns.size} us per split ({d}), one curve {(t7 - t6) / ns.size} ns, {e} of {ns.size}"
 
 end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+open Lanczos in
+/-- The parts of a Lanczos step on the matrix that `Lanczos.dependencies` would
+build from `(numCols, rows)`, timed over `reps` repetitions each. -/
+def lanczosParts (numCols : Nat) (rows : Array (Array Nat)) (threads reps : Nat) : IO Unit := do
+  let kept := GF2.removeSingletons numCols rows
+  let mut index : Array Nat := Array.replicate numCols numCols
+  let mut active := 0
+  for i in kept do
+    for c in rows[i]! do
+      if c < numCols && index[c]! == numCols then
+        index := index.set! c active
+        active := active + 1
+  let take := min kept.size (active + 64)
+  let mut cols : Array (Array Nat) := Array.mkEmpty take
+  for k in [0:take] do
+    cols := cols.push ((rows[kept[k]!]!.filter (· < numCols)).map fun c => index[c]!)
+  let B := Sparse.mk' active cols
+  let n := B.ncols
+  let v := randomBlock n 5
+  let v0 := randomBlock n 6
+  let nnz := cols.foldl (· + ·.size) 0
+  IO.println s!"B: {B.nrows} x {n}, {nnz} entries ({nnz / max 1 n} per column), packed {B.packed}"
+  let t0 ← IO.monoNanosNow
+  let mut acc : UInt64 := 0
+  for _ in [0:reps] do
+    let r ← IO.lazyPure fun _ => mulB B v threads
+    acc := acc ^^^ r.get 3
+  let t1 ← IO.monoNanosNow
+  let bv := mulB B v threads
+  for _ in [0:reps] do
+    let r ← IO.lazyPure fun _ => mulBT B bv threads
+    acc := acc ^^^ r.get 3
+  let t2 ← IO.monoNanosNow
+  let av := mulA B v threads
+  let tasks := threads
+  for _ in [0:reps] do
+    let parts ← IO.lazyPure fun _ => ((chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
+      let (vb, ab, zb) := (v.data.b, av.data.b, v0.data.b)
+      if h : 8 * hi ≤ vb.size ∧ 8 * hi ≤ ab.size ∧ 8 * hi ≤ zb.size ∧ vb.size < USize.size ∧
+          ab.size < USize.size ∧ zb.size < USize.size then
+        let (a1, a2, a3) := innerAcc3 vb ab zb hi h.1 h.2.1 h.2.2.1
+          ⟨h.2.2.2.1, h.2.2.2.2.1, h.2.2.2.2.2⟩ lo Tab.zero Tab.zero Tab.zero
+        (tablesMat a1).get 1 ^^^ (tablesMat a2).get 2 ^^^ (tablesMat a3).get 3
+      else 0).foldl (fun a tk => a ^^^ tk.get) 0
+    acc := acc ^^^ parts
+  let t3 ← IO.monoNanosNow
+  let tD := tables (Mat.ofFn fun i => (i * 7919 + 13).toUInt64 * 0x9E3779B97F4A7C15)
+  for _ in [0:reps] do
+    let r ← IO.lazyPure fun _ => ((chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
+      (nextRange v v v av 0xFFFF0000FFFF0000 tD tD tD lo hi, xRange v v tD lo hi)).foldl
+        (fun (a, b) tk => let (c, e) := tk.get; (a ++ c.b, b ++ e.b))
+        (ByteArray.emptyWithCapacity (8 * n), ByteArray.emptyWithCapacity (8 * n))
+    acc := acc ^^^ (r.1.size + r.2.size).toUInt64
+  let t4 ← IO.monoNanosNow
+  let us (a b : Nat) : Nat := (b - a) / 1000 / reps
+  IO.println s!"per call (us): B x {us t0 t1}, Bt y {us t1 t2}, inner products {us t2 t3}, updates {us t3 t4} ({acc})"
+
+end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+open NFS.PolySelect in
+/-- Our raw collision polynomials for the leading coefficients `[lo, hi)` (RSA-100
+parameters), printed as `ad l m`. -/
+def rawPolys (n lo hi : Nat) : IO Unit := do
+  let rs := collisionRaw n 5 7000 15625 30 lo hi
+  IO.println s!"{rs.size} raw polynomials"
+  for (ad, l, m, _) in rs do IO.println s!"{ad} {l} {m}"
+
+open NFS.PolySelect in
+/-- Our `logNorm` (and the golden-section search it replaces) against CADO-NFS's
+lognorm and skewness on the size-optimized polynomials of a `polyselect` output. -/
+def normCheck (path : String) (count : Nat) : IO Unit := do
+  let lines ← IO.FS.lines path
+  let mut polys : Array (Array Int × Float × Float) := #[]
+  let mut inOpt := false
+  let mut cur : Array Int := #[]
+  for l in lines do
+    if l.startsWith "# Size-optimized" then
+      inOpt := true
+      cur := #[]
+    else if inOpt && l.startsWith "c" then
+      match l.splitOn ": " with
+      | [k, v] =>
+        let i := (k.drop 1).toNat!
+        while cur.size ≤ i do cur := cur.push 0
+        cur := cur.set! i v.toInt!
+      | _ => pure ()
+    else if inOpt && l.startsWith "# exp_E" then
+      -- `# exp_E 26.16, lognorm 31.21, skew 4587.02, 5 rroots`
+      let parts := l.splitOn ", "
+      let num (t : String) : Float := match (t.splitOn " ").getLast? with
+        | some x => match x.splitOn "." with
+          | [a, b] => a.toNat!.toFloat + b.toNat!.toFloat / Float.ofNat (10 ^ b.length)
+          | _ => x.toNat!.toFloat
+        | none => 0
+      polys := polys.push (cur, num parts[1]!, num parts[2]!)
+      inOpt := false
+  let golden (cs : Array Int) : Float × Float := Id.run do
+    let d := cs.size - 1
+    let w := normPoly cs
+    let dF := Arith.nf d
+    let f (t : Float) : Float := hornerF w (Float.exp (2 * t)) * Float.exp (-dF * t)
+    let mut lo : Float := 0.0
+    let mut hi : Float := 80.0
+    let phi : Float := 0.6180339887498949
+    for _ in [0:45] do
+      let a := hi - phi * (hi - lo)
+      let b := lo + phi * (hi - lo)
+      if f a < f b then hi := b else lo := a
+    let t := (lo + hi) / 2.0
+    return (0.5 * Float.log (f t), Float.exp t)
+  let mut maxDn : Float := 0
+  let mut maxDs : Float := 0
+  let mut maxDg : Float := 0
+  for (cs, ln, sk) in polys.extract 0 count do
+    let (n1, s1) := logNorm cs
+    let (n2, _) := golden cs
+    maxDn := max maxDn (n1 - ln).abs
+    maxDs := max maxDs ((s1 - sk) / sk).abs
+    maxDg := max maxDg (n1 - n2).abs
+  IO.println s!"{min count polys.size} polynomials: max |ours - CADO| lognorm {maxDn}, rel. skew {maxDs}; max |root - golden| {maxDg}"
+  let t0 ← IO.monoNanosNow
+  let mut acc : Float := 0
+  for _ in [0:20] do
+    for (cs, _, _) in polys do acc := acc + (logNorm cs).1
+  let t1 ← IO.monoNanosNow
+  for _ in [0:20] do
+    for (cs, _, _) in polys do acc := acc + (golden cs).1
+  let t2 ← IO.monoNanosNow
+  IO.println s!"logNorm {(t1 - t0) / (20 * polys.size)} ns, golden {(t2 - t1) / (20 * polys.size)} ns ({acc})"
+  let fs := polys.map fun (cs, _, _) => toFloats cs
+  let t3 ← IO.monoNanosNow
+  for _ in [0:20] do
+    for (cs, _, _) in polys do acc := acc + (toFloats cs).get! 0
+  let t4 ← IO.monoNanosNow
+  for _ in [0:20] do
+    for f in fs do acc := acc + (normPolyF f).get! 0
+  let t5 ← IO.monoNanosNow
+  for _ in [0:20] do
+    for f in fs do acc := acc + (logNormF f).1
+  let t6 ← IO.monoNanosNow
+  for _ in [0:20] do
+    for f in fs do acc := acc + (logNormFH f 5000).1
+  let t7 ← IO.monoNanosNow
+  let k := 20 * polys.size
+  IO.println s!"toFloats {(t4 - t3) / k} ns, normPolyF {(t5 - t4) / k} ns, logNormF {(t6 - t5) / k} ns, logNormFH(5000) {(t7 - t6) / k} ns ({acc})"
+
+open NFS.PolySelect in
+/-- Our Murphy `E` (RSA-100 bounds) of the polynomial pairs of a CADO-NFS format
+file (blocks separated by blank lines; `#` lines ignored). -/
+def murphyFile (path : String) (lpbA lpbR logI qmin : Nat := 26) : IO Unit := do
+  let txt ← IO.FS.readFile path
+  let tbl := dickmanTable
+  let (lpbR, logI, qmin) := if lpbA == 26 && lpbR == 26 then (25, 11, 180000) else (lpbR, logI, qmin)
+  let area := Float.exp2 (2 * logI - 1).toFloat * qmin.toFloat
+  let bf := Float.exp2 lpbA.toFloat
+  let bg := Float.exp2 lpbR.toFloat
+  for blk in txt.splitOn "\n\n" do
+    let mut cs : Array Int := #[]
+    let mut y0 : Int := 0
+    let mut y1 : Int := 0
+    for l in blk.splitOn "\n" do
+      match l.splitOn ": " with
+      | [k, v] =>
+        if k == "Y0" then y0 := v.trim.toInt!
+        else if k == "Y1" then y1 := v.trim.toInt!
+        else if k.startsWith "c" && !k.startsWith "#" then
+          let i := (k.drop 1).toNat!
+          while cs.size ≤ i do cs := cs.push 0
+          cs := cs.set! i v.trim.toInt!
+      | _ => pure ()
+    if cs.size < 2 || y1 == 0 then continue
+    let (ln, sk) := logNorm cs
+    let e := murphyE tbl cs y1 (-y0) sk bf bg area
+    IO.println s!"Y1 {y1} c{cs.size - 1} {cs.back!}: E*1e7 {(e * 10000000).round} lognorm {ln} alpha {alphaExact cs 2000} skew {sk}"
+
+open NFS.PolySelect in
+/-- `sizeOpt` against `sizeOptF` (and `sizeOpt2` timing) on the raw collision
+polynomials of the leading coefficients `[lo, hi)` (RSA-100 parameters). -/
+def soptCheck (n lo hi : Nat) : IO Unit := do
+  let raws := (collisionRaw n 5 7000 15625 30 lo hi).filter fun (_, _, _, cs) => cs[5]! * cs[3]! ≤ 0
+  IO.println s!"{raws.size} raw polynomials"
+  let t0 ← IO.monoNanosNow
+  let a ← IO.lazyPure fun _ => raws.map fun (_, l, m, cs) => sizeOpt cs l m
+  let t1 ← IO.monoNanosNow
+  let b ← IO.lazyPure fun _ => raws.map fun (_, l, m, cs) => sizeOptF cs l m
+  let t2 ← IO.monoNanosNow
+  let mut same := 0
+  let mut better := 0
+  let mut worse := 0
+  let mut maxD : Float := 0
+  for (x, y) in a.zip b do
+    if x.1 == y.1 && x.2.1 == y.2.1 then same := same + 1
+    else if y.2.2 < x.2.2 then better := better + 1 else worse := worse + 1
+    maxD := max maxD (x.2.2 - y.2.2).abs
+  IO.println s!"sizeOpt {(t1 - t0) / 1000000} ms, sizeOptF {(t2 - t1) / 1000000} ms: same {same}, F better {better}, F worse {worse}, max |dln| {maxD}"
+
+open NFS.PolySelect in
+/-- `collide` and `fromCollision` on one special-`q` root (RSA-100 parameters). -/
+def collideTest (n ad Q rQ : Nat) : IO Unit := do
+  let d := 5
+  let P := 7000
+  let ntilde := d ^ d * ad ^ (d - 1) * n
+  let m0 := Arith.iroot ntilde d
+  let primesP := (Arith.primesUpTo (2 * P)).filter (· ≥ P)
+  let M := 4 * P * P
+  let prs : Array (Nat × Array Nat) := primesP.filterMap fun p =>
+    if (d * ad) % p == 0 || n % p == 0 then none
+    else
+      let rs := liftedRoots d ntilde m0 p
+      if rs.isEmpty then none else some (p, rs)
+  let QQ := Q * Q
+  let invs := prs.map fun (p, _) => (invModW (QQ % (p * p)).toUInt64 (p * p).toUInt64).toNat
+  let cols := collide prs invs rQ M
+  IO.println s!"{cols.size} collisions: {cols}"
+  for (i, p1, p2) in cols do
+    let mt : Int := (m0 : Int) + (rQ : Int) + i * (QQ : Int)
+    let l := p1 * p2 * Q
+    IO.println s!"{i} {p1} {p2} l={l} -> {(fromCollision n d ad mt l).isSome}"
+
+open NFS.PolySelect in
+/-- The special-`q` primes (with root counts) and `k` of the collision search for
+the leading coefficient `ad` (RSA-100 parameters). -/
+def sqList (n ad : Nat) : IO Unit := do
+  let d := 5
+  let ntilde := d ^ d * ad ^ (d - 1) * n
+  let m0 := Arith.iroot ntilde d
+  let sq0 : Array (Nat × Array Nat) := specialQPrimes.toArray.filterMap fun q =>
+    if (d * ad) % q == 0 || n % q == 0 then none
+    else
+      let rs := liftedRoots d ntilde m0 q
+      if rs.isEmpty then none else some (q, rs)
+  let p2 := (2 * 7000 : Nat).toFloat
+  let (sq, k) := suitableQ sq0 d 15625 (m0.toFloat / (p2 * p2 * p2 * p2))
+  IO.println s!"k {k} lq {sq.size}: {sq.map fun (q, rs) => (q, rs.size)}"
+  let qs := specialQList sq k 15625
+  IO.println s!"{qs.size} special-q, {qs.foldl (fun a (_, r, _) => a + r.size) 0} roots"
+  for (Q, rs, _) in qs do IO.println s!"{Q} {rs.size} {rs}"
+  for (q, rs) in sq0 do IO.println s!"root {q} {rs}"
+  for p in (Arith.primesUpTo 14000).filter (· ≥ 7000) do
+    if (d * ad) % p != 0 && n % p != 0 then
+      IO.println s!"proot {p} {liftedRoots d ntilde m0 p}"
+
+end PrimeFactorLean.Trace

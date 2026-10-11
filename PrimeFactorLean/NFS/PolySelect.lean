@@ -98,43 +98,154 @@ def alpha (cs : Array Int) : Float := Id.run do
     a := a + (fc 1 / (pf - fc 1) - nf roots * pf / (pf * pf - fc 1)) * Float.log pf
   return a
 
-/-- `s^d · ‖F‖²(s) = Σ_k w_k s^k` as a polynomial in the skewness `s` (unboxed
-coefficients `w_0 … w_{2d}`; odd `k` vanish). -/
-def normPoly (cs : Array Int) : FloatArray := Id.run do
-  let d := cs.size - 1
-  let mut w : FloatArray := FloatArray.emptyWithCapacity (2 * d + 1)
-  for k in [0:2 * d + 1] do
-    let mut c : Float := 0
-    if k % 2 == 0 then
-      for i in [0:d + 1] do
-        if i ≤ k && k - i ≤ d then c := c + intF cs[i]! * intF cs[k - i]!
-      c := c * fc 4 / ((nf (k + 1)) * (nf (2 * d - k + 1)))
-    w := w.push c
+/-- The binomial coefficient `C(n, k)`. -/
+def binomial (n k : Nat) : Nat := Id.run do
+  let mut c := 1
+  for i in [0:k] do c := c * (n - i) / (i + 1)
+  return c
+
+/-- The weights of CADO-NFS's `L2` norm in degree `d`:
+`π / (4^d (d+1)) · C(2d,d) C(d,k) / C(2d,2k)` for `k = 0 … d`. -/
+def diskWeightsOf (d : Nat) : FloatArray := Id.run do
+  let scale : Float := fc 314159265358979 / fc 100000000000000 /
+    (Float.exp2 (nf (2 * d)) * nf (d + 1))
+  let mut w : FloatArray := FloatArray.emptyWithCapacity (d + 1)
+  for k in [0:d + 1] do
+    w := w.push (nf (binomial (2 * d) d * binomial d k) / nf (binomial (2 * d) (2 * k)) * scale)
   return w
 
-/-- `Σ_k w_k s^k` by Horner's rule. -/
-def evalNormPoly (w : FloatArray) (s : Float) : Float := Id.run do
-  let mut acc : Float := 0
-  for k' in [0:w.size] do
-    acc := acc * s + w.get! (w.size - 1 - k')
-  return acc
+/-- `diskWeightsOf d` for `d ≤ 10`, computed once. -/
+def diskWeights : Array FloatArray := (Array.range 11).map diskWeightsOf
 
-/-- `log` of the `L²` norm at the optimal skewness, and that skewness
-(golden-section search on `log s`). -/
-def logNorm (cs : Array Int) : Float × Float := Id.run do
-  let d := cs.size - 1
-  let w := normPoly cs
+/-- `Σ_{j=i}^{i+n-1} c_j c_{k-j}` added to `acc`. -/
+def convGo (cf : FloatArray) (k i : Nat) (acc : Float) : Nat → Float
+  | 0 => acc
+  | n + 1 => convGo cf k (i + 1) (acc + cf.get! i * cf.get! (k - i)) n
+
+/-- The coefficients `p_j = w_j Σ_{i+i'=2j} a_i a_{i'}` for `j` from `j` on. -/
+def normPolyGo (cf wt : FloatArray) (d j : Nat) (out : FloatArray) : Nat → FloatArray
+  | 0 => out
+  | n + 1 =>
+    let k := 2 * j
+    let lo := k - min k d
+    let c := convGo cf k lo 0 (min k d + 1 - lo)
+    normPolyGo cf wt d (j + 1) (out.push (c * wt.get! j)) n
+
+/-- `s^d ‖F‖²(s) = P(s²)` for CADO-NFS's `L2` norm (the integral of
+`F(x √s, y / √s)²` over the unit disk), from float coefficients: the coefficients
+of `P(x) = π / (4^d (d+1)) Σ_j C(2d,d) C(d,j) / C(2d,2j) (Σ_{i+i'=2j} a_i a_{i'}) x^j`. -/
+def normPolyF (cf : FloatArray) : FloatArray :=
+  let d := cf.size - 1
+  let wt := if d < 11 then diskWeights[d]! else diskWeightsOf d
+  normPolyGo cf wt d 0 (FloatArray.emptyWithCapacity (d + 1)) (d + 1)
+
+/-- The coefficients as floats. -/
+def toFloats (cs : Array Int) : FloatArray :=
+  cs.foldl (fun a c => a.push (intF c)) (FloatArray.emptyWithCapacity cs.size)
+
+/-- `normPolyF` of the integer coefficients. -/
+def normPoly (cs : Array Int) : FloatArray := normPolyF (toFloats cs)
+
+/-- `acc x^n + Σ_{i<n} q_i x^i` by Horner's rule. -/
+def hornerGo (q : FloatArray) (x acc : Float) : Nat → Float
+  | 0 => acc
+  | i + 1 => hornerGo q x (acc * x + q.get! i) i
+
+/-- `Σ_k q_k x^k`. -/
+@[inline] def hornerF (q : FloatArray) (x : Float) : Float := hornerGo q x (fc 0) q.size
+
+/-- `q(x) = Σ_j (2j - d) p_j x^j` (the numerator of the derivative of the norm in
+the skewness, in `x = s²`), Horner from index `j - 1` down. -/
+def qAtGo (p : FloatArray) (d : Nat) (x acc : Float) : Nat → Float
+  | 0 => acc
+  | j + 1 => qAtGo p d x (acc * x + (nf (2 * j) - nf d) * p.get! j) j
+
+/-- `q'(x) = Σ_j j (2j - d) p_j x^(j-1)`, Horner from index `j` down to 1. -/
+def qdAtGo (p : FloatArray) (d : Nat) (x acc : Float) : Nat → Float
+  | 0 => acc
+  | j + 1 => qdAtGo p d x (acc * x + nf (j + 1) * (nf (2 * j + 2) - nf d) * p.get! (j + 1)) j
+
+/-- The sign changes of the nonzero `(2j - d) p_j` from `j` on (`sgn` the last sign). -/
+def qChanges (p : FloatArray) (d j : Nat) (sgn : Float) (acc : Nat) : Nat → Nat
+  | 0 => acc
+  | n + 1 =>
+    let c := (nf (2 * j) - nf d) * p.get! j
+    if c == fc 0 then qChanges p d (j + 1) sgn acc n
+    else if sgn != fc 0 && (c < fc 0) != (sgn < fc 0) then qChanges p d (j + 1) c (acc + 1) n
+    else qChanges p d (j + 1) c acc n
+
+/-- The first `y = x r^i` (`i ≥ 1`) with `q y ≥ 0` (`q x < 0`), or `0`. -/
+def bracketUp (p : FloatArray) (d : Nat) (r x : Float) : Nat → Float
+  | 0 => fc 0
+  | n + 1 => let y := x * r
+    if qAtGo p d y (fc 0) (d + 1) < fc 0 then bracketUp p d r y n else y
+
+/-- The first `y = x / r^i` (`i ≥ 1`) with `q y < 0` (`q x ≥ 0`), or `0`. -/
+def bracketDown (p : FloatArray) (d : Nat) (r x : Float) : Nat → Float
+  | 0 => fc 0
+  | n + 1 => let y := x / r
+    if qAtGo p d y (fc 0) (d + 1) < fc 0 then y else bracketDown p d r y n
+
+/-- Safeguarded Newton for the root of `q` in `[lo, hi]` (`q lo < 0 ≤ q hi`): a step
+leaving the bracket is replaced by the bracket's geometric midpoint. -/
+def skewNewton (p : FloatArray) (d : Nat) (lo hi x : Float) : Nat → Float
+  | 0 => x
+  | n + 1 =>
+    let v := qAtGo p d x (fc 0) (d + 1)
+    let lo := if v < fc 0 then x else lo
+    let hi := if v < fc 0 then hi else x
+    let dv := qdAtGo p d x (fc 0) d
+    let xn := x - v / dv
+    let xn := if dv > fc 0 && xn > lo && xn < hi then xn else Float.sqrt (lo * hi)
+    if (xn - x).abs ≤ x / fc 10000000000 then xn else skewNewton p d lo hi xn n
+
+/-- A lognorm and its skewness (unboxed). -/
+structure LnSk where
+  ln : Float
+  sk : Float
+
+/-- `log` of the `L²` norm at the optimal skewness, and that skewness. With
+`x = s²`, `s^d ‖F‖²(s) = P(x)` and the optimum is at the positive root of
+`q(x) = Σ_j (2j - d) p_j x^j` (CADO-NFS `L2_skewness`): found by safeguarded
+Newton when the coefficients of `q` change sign once (a unique positive root),
+else by golden-section search on `log s`. From float coefficients; a skewness
+`hint > 0` (a neighbour's) starts the bracketing near the answer. -/
+def logNormS (cf : FloatArray) (hint : Float) : LnSk := Id.run do
+  let d := cf.size - 1
+  let p := normPolyF cf
+  if qChanges p d 0 (fc 0) 0 (d + 1) == 1 then
+    -- bracket from the hint `s₀` (`x = s₀²`) by factors 2, else from 1 by factors 16
+    let x0 := if hint > fc 0 then hint * hint else fc 1
+    let r := if hint > fc 0 then fc 2 else fc 16
+    let up := qAtGo p d x0 (fc 0) (d + 1) < fc 0
+    let y := if up then bracketUp p d r x0 120 else bracketDown p d r x0 120
+    if y > fc 0 then
+      let lo := if up then y / r else y
+      let hi := if up then y else y * r
+      let x := skewNewton p d lo hi (Float.sqrt (lo * hi)) 60
+      return ⟨fc 1 / fc 2 * (Float.log (hornerF p x) - nf d / fc 2 * Float.log x), Float.sqrt x⟩
   let dF := nf d
-  let f (t : Float) : Float := evalNormPoly w (Float.exp t) * Float.exp (-dF * t)
-  let mut lo : Float := 0.0
-  let mut hi : Float := 80.0
-  let phi : Float := 0.6180339887498949
+  let f (t : Float) : Float := hornerF p (Float.exp (fc 2 * t)) * Float.exp (Float.neg dF * t)
+  let mut lo : Float := fc 0
+  let mut hi : Float := fc 80
+  let phi : Float := fc 6180339887498949 / fc 10000000000000000
   for _ in [0:45] do
     let a := hi - phi * (hi - lo)
     let b := lo + phi * (hi - lo)
     if f a < f b then hi := b else lo := a
-  let t := (lo + hi) / 2.0
-  return (0.5 * Float.log (f t), Float.exp t)
+  let t := (lo + hi) / fc 2
+  return ⟨fc 1 / fc 2 * Float.log (f t), Float.exp t⟩
+
+/-- `logNormS` as a pair. -/
+@[inline] def logNormFH (cf : FloatArray) (hint : Float) : Float × Float :=
+  let r := logNormS cf hint
+  (r.ln, r.sk)
+
+/-- `logNormFH` without a hint. -/
+@[inline] def logNormF (cf : FloatArray) : Float × Float := logNormFH cf (fc 0)
+
+/-- `logNormF` of the integer coefficients. -/
+def logNorm (cs : Array Int) : Float × Float := logNormF (toFloats cs)
 
 /-- A candidate: coefficients, `m`, `p` and its score `log‖F‖ + α`. -/
 structure Cand where
@@ -379,9 +490,10 @@ def liftedRoots (d c m0 p : Nat) : Array Nat := Id.run do
     out := out.push ((rr + pp - m0 % pp) % pp)
   return out
 
-/-- The special-`q` primes of CADO-NFS (`SPECIAL_Q`). -/
+/-- The special-`q` primes of CADO-NFS (`SPECIAL_Q`, whose first entry 2 its
+`comp_sq_roots` skips). -/
 def specialQPrimes : List Nat :=
-  [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
+  [3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
    97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191,
    193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271]
 
@@ -402,10 +514,57 @@ def nextComb (idx : Array Nat) (n : Nat) : Option (Array Nat) := Id.run do
       return some out
   return none
 
+/-- CADO-NFS's order of the special-`q` primes (`polyselect_qroots_rearrange`): a
+selection sort by decreasing number of roots that swaps (so it is not stable). -/
+def rearrangeQ (sq : Array (Nat × Array Nat)) : Array (Nat × Array Nat) := Id.run do
+  let mut a := sq
+  for i in [0:a.size] do
+    let mut mx := i
+    for j in [i + 1:a.size] do
+      if a[j]!.2.size > a[mx]!.2.size then mx := j
+    a := a.swapIfInBounds i mx
+  return a
+
+/-- The number of root combinations over the `k`-subsets of the first `lq`
+primes of `sq`: the elementary symmetric polynomial `e_k` of their root counts. -/
+def numberComb (sq : Array (Nat × Array Nat)) (k lq : Nat) : Nat := Id.run do
+  let mut e : Array Nat := (Array.replicate (k + 1) 0).set! 0 1
+  for i in [0:min lq sq.size] do
+    let a := sq[i]!.2.size
+    for j' in [0:k] do
+      let j := k - j'
+      e := e.set! j (e[j]! + a * e[j - 1]!)
+  return e[k]!
+
+/-- The special-`q` primes in CADO-NFS's order and the number `k` of factors of a
+special-`q` (`find_suitable_lq`): `k` grows while `d^k < nq` and the product of
+the first `k` primes stays below `lim = m₀ / (2P)⁴`; the special-`q` are drawn
+from the least number `lq` of leading primes whose `k`-subsets carry at least
+`nq` root combinations. -/
+def suitableQ (sq0 : Array (Nat × Array Nat)) (d nq : Nat) (lim : Float) (cado : Bool := true) :
+    Array (Nat × Array Nat) × Nat := Id.run do
+  let sq := if cado then rearrangeQ sq0 else sq0
+  let mut k0 := 0
+  let mut prod := 1
+  let mut sqv : Float := fc 1
+  for (q, _) in sq do
+    if prod ≥ nq then break
+    if sqv * q.toFloat ≥ lim then break
+    prod := prod * d
+    sqv := sqv * q.toFloat
+    k0 := k0 + 1
+  let k := max 1 (min k0 8)
+  if !cado then return (sq, k)
+  let mut lq := k
+  while lq < sq.size && numberComb sq k lq < nq do lq := lq + 1
+  return (sq.extract 0 lq, k)
+
 /-- Up to `nq` special-`q`: products `Q` of `k` primes of `sq` (lexicographic
-subsets) and every combination of their roots, combined modulo `Q²`. -/
-def specialQList (sq : Array (Nat × Array Nat)) (k nq : Nat) : Array (Nat × Array Nat) := Id.run do
-  let mut out : Array (Nat × Array Nat) := #[]
+subsets, also returned as their indices) and every combination of their roots,
+combined modulo `Q²`. -/
+def specialQList (sq : Array (Nat × Array Nat)) (k nq : Nat) :
+    Array (Nat × Array Nat × Array Nat) := Id.run do
+  let mut out : Array (Nat × Array Nat × Array Nat) := #[]
   if sq.size < k || k == 0 then return out
   let mut idx : Array Nat := (Array.range k)
   let mut total := 0
@@ -425,7 +584,7 @@ def specialQList (sq : Array (Nat × Array Nat)) (k nq : Nat) : Array (Nat × Ar
       QQ := QQ * qq
     let Q := idx.foldl (fun acc i => acc * sq[i]!.1) 1
     let take := min rsQ.size (nq - total)
-    out := out.push (Q, rsQ.extract 0 take)
+    out := out.push (Q, rsQ.extract 0 take, idx)
     total := total + take
     if total ≥ nq then break
     match nextComb idx sq.size with
@@ -512,8 +671,9 @@ def collideTab (prs : Array (Nat × Array Nat)) (invs : Array Nat) (rQ M : Nat) 
 
 /-- The pair of `m̃` and `ℓ` (Lemma 2.1 with modulus `ℓ` after fixing
 `a_d = ad` and the centered `a_{d-1} ≡ m̃ / ℓ (mod d a_d)`): the coefficients and
-`m`, with `n = Σ a_j m^j ℓ^{d-j}` checked. -/
-def fromCollision (n d ad : Nat) (mt : Int) (l : Nat) : Option (Array Int × Nat) := Id.run do
+`m`, with `n = Σ a_j m^j ℓ^{d-j}` checked. `m` may be negative (`m̃ < 0` for
+collisions far below `m₀`), as in CADO-NFS. -/
+def fromCollision (n d ad : Nat) (mt : Int) (l : Nat) : Option (Array Int × Int) := Id.run do
   let dad := d * ad
   if l == 0 || dad == 0 then return none
   let some linv := invMod (l % dad) dad | return none
@@ -522,7 +682,7 @@ def fromCollision (n d ad : Nat) (mt : Int) (l : Nat) : Option (Array Int × Nat
   let num := mt - a1 * (l : Int)
   if num % (dad : Int) != 0 then return none
   let mI := num / (dad : Int)
-  if mI ≤ 0 then return none
+  if mI == 0 then return none
   let li : Int := l
   let mut cs : Array Int := Array.replicate (d + 1) 0
   cs := cs.set! d (ad : Int)
@@ -535,7 +695,7 @@ def fromCollision (n d ad : Nat) (mt : Int) (l : Nat) : Option (Array Int × Nat
     if t % li != 0 then return none
     t := t / li
     let mj := mI ^ j
-    let a0 := t / mj
+    let a0 := t.fdiv mj  -- floor (as CADO-NFS; `m` may be negative)
     let some mjinv := invMod (mj % li).toNat l | return none
     let k0 := ((t % li).toNat * mjinv % l + l - (a0 % li).toNat) % l
     let k : Int := if 2 * k0 ≥ l then (k0 : Int) - li else k0
@@ -551,7 +711,7 @@ def fromCollision (n d ad : Nat) (mt : Int) (l : Nat) : Option (Array Int × Nat
     acc := acc + cs[i]! * mI ^ i * lp
     lp := lp * li
   if acc != (n : Int) then return none
-  return some (cs, mI.toNat)
+  return some (cs, mI)
 
 /-- `f(x + k)` (Taylor shift). -/
 def translate (cs : Array Int) (k : Int) : Array Int := Id.run do
@@ -571,11 +731,12 @@ def rotJ (cs : Array Int) (l m lam : Int) (j : Nat) : Array Int :=
 translations `x ↦ x + k` and rotations by `x^j (ℓ x - m)`, `j ≤ d - 2`, with
 step sizes doubled on success and halved on failure. Returns the polynomial,
 the new `m` (translation changes `ℓ x - m` to `ℓ x - (m - ℓ k)`) and the lognorm. -/
-def sizeOpt (cs0 : Array Int) (l m0 : Int) (maxIter : Nat := 300) : Array Int × Int × Float := Id.run do
+def sizeOpt (cs0 : Array Int) (l m0 : Int) (maxIter : Nat := 300) (rot : Bool := true) :
+    Array Int × Int × Float := Id.run do
   let d := cs0.size - 1
   let ln (c : Array Int) : Float := (logNorm c).1
   let guard : Float := fc 1 / fc 1000
-  let nrot := d - 1
+  let nrot := if rot then d - 1 else 0
   let base := ln cs0
   let mut steps : Array Int := #[]
   for j in [0:nrot] do
@@ -634,6 +795,119 @@ def sizeOpt (cs0 : Array Int) (l m0 : Int) (maxIter : Nat := 300) : Array Int ×
       steps := steps.set! j (if changed[j]! then 2 * k else if k > 1 then k / 2 else k)
   return (cs, m, best)
 
+/-- `f(x + k)` on float coefficients. -/
+def translateF (cf : FloatArray) (k : Float) : FloatArray := Id.run do
+  let d := cf.size - 1
+  let mut c := cf
+  for i in [0:d] do
+    for j' in [0:d - i] do
+      let j := d - 1 - j'
+      c := c.set! j (c.get! j + k * c.get! (j + 1))
+  return c
+
+/-- `f + λ x^j (ℓ x - m)` on float coefficients. -/
+@[inline] def rotJF (cf : FloatArray) (l m lam : Float) (j : Nat) : FloatArray :=
+  let cf := cf.set! (j + 1) (cf.get! (j + 1) + lam * l)
+  cf.set! j (cf.get! j - lam * m)
+
+/-- `sizeOpt` with the trial polynomials in floating point (no big-integer
+arithmetic per trial): the accepted moves (`0` a translation, `j + 1` a rotation
+by `x^j g`) are replayed exactly at the end. -/
+def sizeOptF (cs0 : Array Int) (l m0 : Int) (maxIter : Nat := 300) (rot : Bool := true) :
+    Array Int × Int × Float := Id.run do
+  let d := cs0.size - 1
+  let f0 := toFloats cs0
+  let r0 := logNormS f0 (fc 0)
+  let base := r0.ln
+  let sk0 := r0.sk
+  -- trial polynomials are near the current one: its skewness seeds their search
+  let ln (c : FloatArray) : Float := (logNormS c sk0).ln
+  let guard : Float := fc 1 / fc 1000
+  let nrot := if rot then d - 1 else 0
+  let lf := intF l
+  let mut steps : Array Int := #[]
+  for j in [0:nrot] do
+    let mut k : Int := 1
+    for _ in [0:80] do
+      let kf := intF k
+      if ln (rotJF f0 lf (intF m0) kf j) > base + guard &&
+          ln (rotJF f0 lf (intF m0) (Float.neg kf) j) > base + guard then break
+      k := 2 * k
+    steps := steps.push k
+  let mut kt : Int := 1
+  for _ in [0:80] do
+    let kf := intF kt
+    if ln (translateF f0 kf) > base + guard && ln (translateF f0 (Float.neg kf)) > base + guard then break
+    kt := 2 * kt
+  let mut cf := f0
+  let mut m := m0
+  let mut best := base
+  let mut sk := sk0
+  let mut moves : Array (Nat × Int) := #[]
+  for _ in [0:maxIter] do
+    let mut changedT := false
+    let c1 := translateF cf (intF kt)
+    let e1 := logNormS c1 sk
+    let v1 := e1.ln
+    if v1 < best then
+      cf := c1
+      m := m - l * kt
+      best := v1
+      sk := e1.sk
+      changedT := true
+      moves := moves.push (0, kt)
+    else
+      let c2 := translateF cf (intF (-kt))
+      let e2 := logNormS c2 sk
+      let v2 := e2.ln
+      if v2 < best then
+        cf := c2
+        m := m + l * kt
+        best := v2
+        sk := e2.sk
+        changedT := true
+        moves := moves.push (0, -kt)
+    let mut changed : Array Bool := Array.replicate nrot false
+    let mf := intF m
+    for j in [0:nrot] do
+      let k := steps[j]!
+      let r1 := rotJF cf lf mf (intF k) j
+      let e1 := logNormS r1 sk
+      let w1 := e1.ln
+      if w1 < best then
+        cf := r1
+        best := w1
+        sk := e1.sk
+        changed := changed.set! j true
+        moves := moves.push (j + 1, k)
+      else
+        let r2 := rotJF cf lf mf (intF (-k)) j
+        let e2 := logNormS r2 sk
+        let w2 := e2.ln
+        if w2 < best then
+          cf := r2
+          best := w2
+          sk := e2.sk
+          changed := changed.set! j true
+          moves := moves.push (j + 1, -k)
+    let mut finished := !changedT && kt == 1
+    for j in [0:nrot] do
+      if changed[j]! || steps[j]! != 1 then finished := false
+    if finished then break
+    kt := if changedT then 2 * kt else if kt > 1 then kt / 2 else kt
+    for j in [0:nrot] do
+      let k := steps[j]!
+      steps := steps.set! j (if changed[j]! then 2 * k else if k > 1 then k / 2 else k)
+  -- replay the moves exactly (a rotation uses the `m` of its time)
+  let mut cs := cs0
+  let mut mm := m0
+  for (op, k) in moves do
+    if op == 0 then
+      cs := translate cs k
+      mm := mm - l * k
+    else cs := rotJ cs l mm k (op - 1)
+  return (cs, mm, (logNorm cs).1)
+
 /-- Murphy's `α` over the primes below `B` (simple and projective roots). -/
 def alphaB (cs : Array Int) (B : Nat) : Float := Id.run do
   let d := cs.size - 1
@@ -656,6 +930,27 @@ def evalModQ (red : Array UInt64) (q x : UInt64) : UInt64 := Id.run do
     v := (v * x + red[red.size - 1 - i']!) % q
   return v
 
+/-- The number of distinct roots modulo the prime `p` of `f` (reduced, nonzero
+of degree at least one): `deg gcd(f, x^p - x)`. -/
+def numRootsModP (p : Nat) (f : ModP.Pol) : Nat :=
+  let xp := ModP.powMod p f #[0, 1] p
+  (ModP.gcd p f (ModP.sub p xp #[0, 1])).size - 1
+
+/-- `alphaExact` of a linear `ℓ x - m` with `gcd(ℓ, m) = 1`: one root on
+`ℙ¹(ℤ/p^k)` at every level. -/
+def alphaLinear (B : Nat) : Float := Id.run do
+  let mut a : Float := 0
+  for p in primesUpTo B do
+    let pf := nf p
+    let mut ev : Float := 0
+    let mut q := p
+    for _ in [0:13] do
+      ev := ev + fc 1 / (nf q + nf (q / p))
+      if q * p > 4096 then break
+      q := q * p
+    a := a + (fc 1 / (pf - fc 1) - ev) * Float.log pf
+  return a
+
 /-- Murphy's `α` over the primes below `B`, with the expected valuation
 `Σ_k N_k / (p^k + p^{k-1})` (`N_k`: the roots of `F` on `ℙ¹(ℤ/p^k)`) counted
 exactly for `p^k ≤ 4096`, which covers multiple roots modulo small primes. -/
@@ -665,6 +960,15 @@ def alphaExact (cs : Array Int) (B : Nat) : Float := Id.run do
   for p in primesUpTo B do
     let pf := nf p
     let lp := Float.log pf
+    if p * p > 4096 then
+      -- one level: the distinct roots modulo `p` (`deg gcd(f, x^p - x)`), and the
+      -- root at infinity when `p ∣ a_d` (every point when `p` divides `f`)
+      let red : Array Nat := cs.map fun c => (c % (p : Int)).toNat
+      let f := ModP.trim red
+      let n := if f.size == 0 then p + 1
+        else (if f.size ≤ 1 then 0 else numRootsModP p f) + (if red[d]! == 0 then 1 else 0)
+      a := a + (fc 1 / (pf - fc 1) - nf n / (pf + fc 1)) * lp
+      continue
     let mut ev : Float := 0
     let mut q := p
     let mut level := 0
@@ -738,7 +1042,7 @@ def alphaSieve (cs : Array Int) (l m u : Int) (vlo : Int) (len : Nat) : FloatArr
 /-- The lognorm at a fixed skewness `s`. -/
 def lognormAt (cs : Array Int) (s : Float) : Float :=
   let d := cs.size - 1
-  fc 1 / fc 2 * Float.log (evalNormPoly (normPoly cs) s * Float.pow s (-((nf d))))
+  fc 1 / fc 2 * Float.log (hornerF (normPoly cs) (s * s) * Float.pow s (-((nf d))))
 
 /-- The range `[kmin, kmax]` of rotations `k x^i (ℓ x - m)` keeping the lognorm
 at skewness `s` at most `maxLog` (CADO-NFS `expected_growth`: doubling, then
@@ -835,7 +1139,7 @@ of area `area`; smoothness bounds `bf`, `bg`). -/
 def murphyE (tbl : FloatArray) (cs : Array Int) (l m : Int) (s bf bg area : Float) (B : Nat := 2000)
     (K : Nat := 200) : Float := Id.run do
   let af := alphaExact cs B
-  let ag := alphaExact #[-m, l] B
+  let ag := if Nat.gcd l.natAbs m.natAbs == 1 then alphaLinear B else alphaExact #[-m, l] B
   let x0 := Float.sqrt (area * s)
   let y0 := Float.sqrt (area / s)
   let csF : Array Float := cs.map intF
@@ -859,6 +1163,207 @@ def murphyE (tbl : FloatArray) (cs : Array Int) (l m : Int) (s bf bg area : Floa
     e := e + dickman tbl vf * dickman tbl vg
   return e / (nf K)
 
+/-! ### Size optimization with lattice reduction (CADO-NFS `size_optimization`)
+
+The local descent alone stops far from the best sizes (on the raw polynomials of
+CADO-NFS's RSA-100 search: mean lognorm 33.8 against its 31.1). CADO-NFS first
+tries translations that make the coefficients of degree 2 and 3 small together
+(roots of their resultant), and for each reduces the lattice spanned by
+`f(x + k)` and the rotations `x^i g(x + k)` (`i ≤ d - 2`), with the coordinates
+weighted by powers of a skewness: its short vectors of degree `d` are
+polynomials `a f + λ g`, which keep the root of `g` modulo `n`. -/
+
+/-- `x` rounded to an integer (saturating beyond `2^63`). -/
+def roundInt (x : Float) : Int :=
+  let r := x.round
+  if r ≥ fc 0 then (r.toUInt64.toNat : Int) else -(((Float.neg r).toUInt64.toNat : Nat) : Int)
+
+/-- The real roots of `a x² + b x + c` (`a` may vanish). -/
+def quadRoots (a b c : Float) : Array Float :=
+  if a == fc 0 then (if b == fc 0 then #[] else #[Float.neg c / b])
+  else
+    let disc := b * b - fc 4 * a * c
+    if disc < fc 0 then #[]
+    else
+      let sq := Float.sqrt disc
+      #[(Float.neg b + sq) / (fc 2 * a), (Float.neg b - sq) / (fc 2 * a)]
+
+/-- `Σ_{i<n} a_i b_i` from index `i` on, added to `acc`. -/
+def dotGo (a b : FloatArray) (i : Nat) (acc : Float) : Nat → Float
+  | 0 => acc
+  | n + 1 => dotGo a b (i + 1) (acc + a.get! i * b.get! i) n
+
+/-- `a - c b` (entrywise). -/
+def axpyGo (a b : FloatArray) (c : Float) (i : Nat) : Nat → FloatArray
+  | 0 => a
+  | n + 1 => axpyGo (a.set! i (a.get! i - c * b.get! i)) b c (i + 1) n
+
+/-- LLL reduction (`δ = 0.99`) of the integer rows `b`: floating-point
+Gram–Schmidt of the rows `0 … k` recomputed at every step (the dimension is at
+most six) from float copies of the rows, refreshed when a row changes. -/
+def lll (b0 : Array (Array Int)) : Array (Array Int) := Id.run do
+  let n := b0.size
+  if n ≤ 1 then return b0
+  let dim := b0[0]!.size
+  let delta : Float := fc 99 / fc 100
+  let mut b := b0
+  let mut bf : Array FloatArray := b0.map toFloats
+  let mut k := 1
+  let mut iters := 0
+  while k < n && iters < 5000 do
+    iters := iters + 1
+    -- Gram–Schmidt of the rows `0..k`
+    let mut bs : Array FloatArray := #[]
+    let mut Bn : FloatArray := FloatArray.emptyWithCapacity (k + 1)
+    let mut mu : Array FloatArray := #[]
+    for i in [0:k + 1] do
+      let bi := bf[i]!
+      let mut v := bi
+      let mut row : FloatArray := FloatArray.emptyWithCapacity (k + 1)
+      for j in [0:i] do
+        let c := if Bn.get! j == fc 0 then fc 0 else dotGo bi bs[j]! 0 (fc 0) dim / Bn.get! j
+        row := row.push c
+        v := axpyGo v bs[j]! c 0 dim
+      bs := bs.push v
+      Bn := Bn.push (dotGo v v 0 (fc 0) dim)
+      mu := mu.push row
+    -- size reduction of row `k`
+    let mut changed := false
+    let mut muk := mu[k]!
+    for j' in [0:k] do
+      let j := k - 1 - j'
+      let c := muk.get! j
+      if c.abs > fc 51 / fc 100 then
+        let q := roundInt c
+        b := b.set! k (Array.zipWith (fun x y => x - q * y) b[k]! b[j]!)
+        let qf := intF q
+        for i in [0:j] do muk := muk.set! i (muk.get! i - qf * mu[j]!.get! i)
+        muk := muk.set! j (c - qf)
+        changed := true
+    if changed then
+      bf := bf.set! k (toFloats b[k]!)
+      continue
+    let c := muk.get! (k - 1)
+    if Bn.get! k ≥ (delta - c * c) * Bn.get! (k - 1) then k := k + 1
+    else
+      let t := b[k]!
+      b := (b.set! k b[k - 1]!).set! (k - 1) t
+      let tf := bf[k]!
+      bf := (bf.set! k bf[k - 1]!).set! (k - 1) tf
+      k := max 1 (k - 1)
+  return b
+
+/-- The shortest polynomial of degree `d` in the reduced lattice of `f(x + k)`
+and `x^i g(x + k)` (`i ≤ maxRot`, `g = ℓ x - m`), weighted by `skew`: the
+polynomial, the translated `m` and its weighted squared norm. -/
+def bestNorm (cs : Array Int) (l m skew k : Int) (maxRot : Nat) : Option (Array Int × Int × Float) :=
+  Id.run do
+  let d := cs.size - 1
+  let ft := translate cs k
+  let mt := m - l * k
+  let pw : Array Int := (Array.range (d + 1)).map fun j => skew ^ j
+  let mut rows : Array (Array Int) := #[(Array.range (d + 1)).map fun j => ft[j]! * pw[j]!]
+  for i in [0:maxRot + 1] do
+    rows := rows.push ((Array.range (d + 1)).map fun j =>
+      if j == i then -mt * pw[j]! else if j == i + 1 then l * pw[j]! else 0)
+  let red := lll rows
+  let mut best : Option (Array Int × Int × Float) := none
+  for r in red do
+    if r[d]! == 0 then continue
+    let nrm := (r.map fun x => let f := intF x; f * f).foldl (· + ·) (fc 0)
+    match best with
+    | some (_, _, b) => if nrm ≥ b then continue
+    | none => pure ()
+    best := some ((Array.range (d + 1)).map fun j => r[j]! / pw[j]!, mt, nrm)
+  return best
+
+/-- `bestNorm` iterated over the translations that cancel the coefficient of
+degree `d - 2` (CADO-NFS `best_norm2`, at most `depth` levels). -/
+def bestNorm2 (cs : Array Int) (l m skew k : Int) (maxRot : Nat) (minNorm : Float) :
+    Nat → Option (Array Int × Int × Float)
+  | 0 => none
+  | depth + 1 => Id.run do
+    let d := cs.size - 1
+    let some (ft, mt, nrm) := bestNorm cs l m skew k maxRot | return none
+    if nrm ≥ minNorm then return none
+    let mut best := (ft, mt, nrm)
+    let eq2 := nf (d * (d - 1) / 2) * intF ft[d]!
+    let eq1 := nf (d - 1) * intF ft[d - 1]!
+    let eq0 := intF ft[d - 2]!
+    -- `ft` is `f` translated by `k` (and rotated): its own translations add to `k`
+    for r in quadRoots eq2 eq1 eq0 do
+      let k2 := k + roundInt r
+      if k2 == k then continue
+      if let some c := bestNorm2 cs l m skew k2 maxRot best.2.2 depth then
+        if c.2.2 < best.2.2 then best := c
+    return some best
+
+/-- Translations `k` for which `(f + q₂ x² g)(x + k)` has vanishing coefficients
+of degree 2 and 3 for some `q₂` (CADO-NFS `sopt_find_translations_deg5`), with
+rational approximations of `q₂` of denominator at most 100. -/
+def translationsDeg5 (cs : Array Int) (l m : Int) : Array Int := Id.run do
+  let a5 := intF cs[5]!
+  let a4 := intF cs[4]!
+  let a3 := intF cs[3]!
+  let a2 := intF cs[2]!
+  let g1 := intF l
+  let g0 := intF (-m)
+  let r2 := (fc 5 * a5 * g0 - a4 * g1) * (fc 5 * a5 * g0 - a4 * g1)
+  let r1 := fc 8 * a4 * a4 * a4 * g0 - fc 30 * a3 * a4 * a5 * g0 + fc 50 * a2 * a5 * a5 * g0 -
+    fc 2 * a3 * a4 * a4 * g1 + fc 10 * a3 * a3 * a5 * g1 - fc 10 * a2 * a4 * a5 * g1
+  let r0 := Float.neg (fc 3) * a3 * a3 * a4 * a4 + fc 8 * a2 * a4 * a4 * a4 + fc 10 * a3 * a3 * a3 * a5 -
+    fc 30 * a2 * a3 * a4 * a5 + fc 25 * a2 * a2 * a5 * a5
+  let mut out : Array Int := #[]
+  for q in quadRoots r2 r1 r0 do
+    if q.abs > fc 10000000000 then continue
+    -- rational approximations with denominators up to 100 (16 at most)
+    let mut bestE : Float := fc 2
+    let mut approx : Array Float := #[]
+    for den in [1:101] do
+      if approx.size ≥ 16 then break
+      let dF := nf den
+      let num := (dF * q).round
+      let e := (q - num / dF).abs
+      if e < bestE then
+        bestE := e
+        approx := approx.push (num / dF)
+    for qr in approx do
+      for k in quadRoots (fc 10 * a5) (fc 4 * a4) (g1 * qr + a3) do
+        out := out.push (roundInt k)
+  return out
+
+/-- Size optimization as CADO-NFS: translations `0` and `translationsDeg5`
+(degree 5), each through `bestNorm2` and the local descent `sizeOpt`, scored by
+lognorm plus the expected rotation gain. Returns the polynomial, `m` and the
+lognorm. -/
+def sizeOpt2 (cs0 : Array Int) (l m0 : Int) : Array Int × Int × Float := Id.run do
+  let d := cs0.size - 1
+  let (c0, mm0, ln0) := sizeOptF cs0 l m0
+  let mut best := (c0, mm0, ln0)
+  let mut bestScore := ln0 + expectedRotationGain c0 l mm0
+  let skew0 := Float.pow ((intF m0).abs / (intF cs0[d]!).abs) (fc 1 / nf d)
+  let skew := max 1 (roundInt skew0)
+  let ks : Array Int := (if d == 5 then translationsDeg5 cs0 l m0 else #[]).push 0
+  let mut seen : Array Int := #[]
+  for k in ks do
+    if seen.contains k then continue
+    seen := seen.push k
+    let some (ft, mt, _) := bestNorm2 cs0 l m0 skew k (d - 2) (fc 1 / fc 0) 8 | continue
+    let (f2, m2, ln2) := sizeOptF ft l mt
+    let sc := ln2 + expectedRotationGain f2 l m2
+    if sc < bestScore then
+      bestScore := sc
+      best := (f2, m2, ln2)
+  return best
+
+/-- `Π_{i ∈ idx} t[i np + j] mod pps[j]` for every `j < np` (`idx` nonempty). -/
+def invsOf (t pps idx : Array Nat) (np : Nat) : Array Nat := Id.run do
+  let mut out := t.extract (idx[0]! * np) (idx[0]! * np + np)
+  for i in idx.extract 1 idx.size do
+    for j in [0:np] do
+      out := out.set! j (out[j]! * t[i * np + j]! % pps[j]!)
+  return out
+
 /-- A collision candidate after size optimization. -/
 structure CCand where
   cs : Array Int
@@ -869,7 +1374,9 @@ structure CCand where
 
 /-- The best size-optimized collision polynomials (by lognorm + `α`) for the
 leading coefficients `ad ∈ [adLo, adHi)` stepping by `incr`. -/
-def collisionSearch (n d P nq incr adLo adHi keep : Nat) : Array CCand := Id.run do
+def collisionSearch (n d P nq incr adLo adHi keep : Nat) (lllSopt : Bool := false)
+    (cadoQ : Bool := true) : Array CCand :=
+  Id.run do
   let mut best : Array CCand := #[]
   let primesP := (primesUpTo (2 * P)).filter (· ≥ P)
   let M := 4 * P * P
@@ -893,19 +1400,15 @@ def collisionSearch (n d P nq incr adLo adHi keep : Nat) : Array CCand := Id.run
         let rs := liftedRoots d ntilde m0 q
         if rs.isEmpty then none else some (q, rs)
     let p2 := (2 * P).toFloat
-    let lim := m0.toFloat / (p2 * p2 * p2 * p2)
-    let mut k := 0
-    let mut prod := 1
-    let mut sqv : Float := fc 1
-    for (q, _) in sq do
-      if prod ≥ nq then break
-      if sqv * q.toFloat ≥ lim then break
-      prod := prod * d
-      sqv := sqv * q.toFloat
-      k := k + 1
-    for (Q, rsQ) in specialQList sq (max 1 (min k 8)) nq do
+    let (sq, k) := suitableQ sq d nq (m0.toFloat / (p2 * p2 * p2 * p2)) cadoQ
+    -- `1/Q² mod p²` as the product of the `1/q² mod p²` of the factors of `Q`
+    let np := prs.size
+    let pps : Array Nat := prs.map fun (p, _) => p * p
+    let invQ : Array Nat := sq.foldl (fun acc (q, _) => pps.foldl (fun acc pp =>
+      acc.push (invModW ((q * q) % pp).toUInt64 pp.toUInt64).toNat) acc) #[]
+    for (Q, rsQ, idx) in specialQList sq k nq do
       let QQ := Q * Q
-      let invs := prs.map fun (p, _) => (invModW (QQ % (p * p)).toUInt64 (p * p).toUInt64).toNat
+      let invs := invsOf invQ pps idx np
       for rQ in rsQ do
         gen := gen + 1
         if gen ≥ 524288 then
@@ -922,7 +1425,7 @@ def collisionSearch (n d P nq incr adLo adHi keep : Nat) : Array CCand := Id.run
           | some (cs, m) =>
             -- CADO discards a_d a_{d-2} > 0 (size optimization works badly)
             if cs[d]! * cs[d - 2]! > 0 then continue
-            let (cs', m', ln) := sizeOpt cs l m
+            let (cs', m', ln) := if lllSopt then sizeOpt2 cs l m else sizeOptF cs l m
             -- the same pair up to signs: `m > 0` by `x ↦ -x`, `c_d > 0` by `f ↦ -f`
             -- (discarding them lost about half of the candidates)
             let (cs', m') := if m' < 0 then
@@ -941,6 +1444,41 @@ def collisionSearch (n d P nq incr adLo adHi keep : Nat) : Array CCand := Id.run
               if c.score < best[wi]!.score then best := best.set! wi c
     ad := ad + incr
   return best
+
+/-- The raw collision polynomials of `collisionSearch` for the leading
+coefficients `[adLo, adHi)`, before any filter: `(a_d, ℓ, m, coefficients)`
+(a development aid for comparisons with CADO-NFS). -/
+def collisionRaw (n d P nq incr adLo adHi : Nat) : Array (Nat × Nat × Int × Array Int) := Id.run do
+  let mut out : Array (Nat × Nat × Int × Array Int) := #[]
+  let primesP := (primesUpTo (2 * P)).filter (· ≥ P)
+  let M := 4 * P * P
+  let mut ad := (adLo + incr - 1) / incr * incr
+  if ad == 0 then ad := incr
+  while ad < adHi do
+    let ntilde := d ^ d * ad ^ (d - 1) * n
+    let m0 := iroot ntilde d
+    let prs : Array (Nat × Array Nat) := primesP.filterMap fun p =>
+      if (d * ad) % p == 0 || n % p == 0 then none
+      else
+        let rs := liftedRoots d ntilde m0 p
+        if rs.isEmpty then none else some (p, rs)
+    let sq : Array (Nat × Array Nat) := specialQPrimes.toArray.filterMap fun q =>
+      if (d * ad) % q == 0 || n % q == 0 then none
+      else
+        let rs := liftedRoots d ntilde m0 q
+        if rs.isEmpty then none else some (q, rs)
+    let p2 := (2 * P).toFloat
+    let (sq, k) := suitableQ sq d nq (m0.toFloat / (p2 * p2 * p2 * p2))
+    for (Q, rsQ, _) in specialQList sq k nq do
+      let QQ := Q * Q
+      let invs := prs.map fun (p, _) => (invModW (QQ % (p * p)).toUInt64 (p * p).toUInt64).toNat
+      for rQ in rsQ do
+        for (i, p1, p2) in collide prs invs rQ M do
+          let mt : Int := (m0 : Int) + (rQ : Int) + i * (QQ : Int)
+          let l := p1 * p2 * Q
+          if let some (cs, m) := fromCollision n d ad mt l then out := out.push (ad, l, m, cs)
+    ad := ad + incr
+  return out
 
 /-- Root optimization: rotations `(u x + v)(ℓ x - m)` within the lognorm margin
 `margin` (at most `maxU` values of `u`, `maxV` of `v`, centered). The `top`
@@ -983,6 +1521,162 @@ def rootOpt (c : CCand) (margin : Float) (maxU maxV top : Nat) (reopt : Bool := 
       best := { c with cs, score := sc }
   return { best with score := bestScore }
 
+/-! ### Root optimization as CADO-NFS (`ropt_linear`, degrees 4 and 5)
+
+The rotations `f + (u x + v) g` are bounded as in CADO-NFS: `u` and `v` grow by
+powers of two while the rotated polynomial, re-optimized by translation, keeps
+`lognorm + expectedRotationGain` within `0.5%` of the original's. Each `u` gets
+a sieve of `α` over `v` (primes below 200); the best `v` of each `u` are
+translation-optimized and ranked by lognorm plus their sieved `α`, and the best
+of those by Murphy's `E`. -/
+
+/-- `lognorm + expectedRotationGain` of `f + k x^j g` re-optimized by translation. -/
+def rotScore (cs : Array Int) (l m k : Int) (j : Nat) : Float :=
+  let (f, m', ln) := sizeOptF (rotJ cs l m k j) l m 300 false
+  ln + expectedRotationGain f l m'
+
+/-- The first powers of two `-2^a`, `2^b` for which `f + k x^j g` re-optimized by
+translation scores above `bound` (CADO-NFS `rotate_bounds_U_lu`, `_V_mpz`). -/
+def rotBounds (cs : Array Int) (l m : Int) (j : Nat) (bound : Float) (maxI : Nat) :
+    Int × Int := Id.run do
+  let mut hi : Int := 1
+  for _ in [0:maxI] do
+    if rotScore cs l m hi j > bound then break
+    hi := 2 * hi
+  let mut lo : Int := -1
+  for _ in [0:maxI] do
+    if rotScore cs l m lo j > bound then break
+    lo := 2 * lo
+  return (lo, hi)
+
+/-- One prime power of the `α` sieve: `q = p^k`, the weight `log p / (q + q/p)` of
+a root modulo `q`, and for each `x` with `p ∤ g(x)` the residue `-f(x)/g(x)`: `x`
+is a root of `f + (u x + v) g` modulo `q` exactly when `v ≡ -f(x)/g(x) - u x`. -/
+structure AlphaTab where
+  q : Nat
+  w : Float
+  xs : Array Nat
+  rs : Array Nat
+
+/-- The `α` sieve tables of `f` for the prime powers `p^k ≤ 1024`, `p < 200`, and
+the constant part `Σ log p / (p - 1)`. -/
+def alphaTabs (cs : Array Int) (l m : Int) : Array AlphaTab × Float := Id.run do
+  let mut out : Array AlphaTab := #[]
+  let mut const : Float := fc 0
+  for p in primesUpTo 200 do
+    let pf := nf p
+    let lp := Float.log pf
+    const := const + lp / (pf - fc 1)
+    let mut q := p
+    for _ in [0:12] do
+      let qi : Int := q
+      let red : Array UInt64 := cs.map fun c => (c % qi).toNat.toUInt64
+      let lm := (l % qi).toNat
+      let mm := (m % qi).toNat
+      let mut xs : Array Nat := #[]
+      let mut rs : Array Nat := #[]
+      for x in [0:q] do
+        let gx := (lm * x + q - mm) % q
+        if gx % p == 0 then continue
+        let fx := (evalModQ red q.toUInt64 x.toUInt64).toNat
+        let gi := (invMod gx q).getD 0
+        xs := xs.push x
+        rs := rs.push ((q - fx * gi % q) % q)
+      out := out.push { q, w := lp / (nf q + nf (q / p)), xs, rs }
+      if q * p > 1024 then break
+      q := q * p
+  return (out, const)
+
+/-- Subtract `wr` at `s, s + q, …` below `len`. -/
+def sieveSub (arr : FloatArray) (s q len : Nat) (wr : Float) : Nat → FloatArray
+  | 0 => arr
+  | n + 1 => if s < len then sieveSub (arr.set! s (arr.get! s - wr)) (s + q) q len wr n else arr
+
+/-- `α` (primes below 200, affine roots) of `f + (u x + v) g` for `v ∈ [vlo, vlo + len)`
+from the tables of `alphaTabs`. -/
+def alphaSieveTab (tabs : Array AlphaTab) (const : Float) (u vlo : Int) (len : Nat) :
+    FloatArray := Id.run do
+  let mut arr : FloatArray := FloatArray.emptyWithCapacity len
+  for _ in [0:len] do arr := arr.push const
+  for t in tabs do
+    let q := t.q
+    let qi : Int := q
+    let um := (u % qi).toNat
+    let vl := (vlo % qi).toNat
+    let mut cnt : Array Nat := Array.replicate q 0
+    for i in [0:t.xs.size] do
+      let vr := (t.rs[i]! + q - um * t.xs[i]! % q) % q
+      cnt := cnt.set! vr (cnt[vr]! + 1)
+    for r in [0:q] do
+      let c := cnt[r]!
+      if c != 0 then arr := sieveSub arr ((r + q - vl) % q) q len (nf c * t.w) (len / q + 1)
+  return arr
+
+/-- The index of the largest first component. -/
+def worstIdx (best : Array (Float × Nat)) : Nat := Id.run do
+  let mut wi := 0
+  for j in [1:best.size] do
+    if best[j]!.1 > best[wi]!.1 then wi := j
+  return wi
+
+/-- The `T` smallest entries of `arr` from index `i` on, as `(value, index)`. -/
+def topGo (arr : FloatArray) (T : Nat) (best : Array (Float × Nat)) (wi i : Nat) :
+    Nat → Array (Float × Nat)
+  | 0 => best
+  | n + 1 =>
+    let v := arr.get! i
+    if best.size < T then
+      let best := best.push (v, i)
+      topGo arr T best (worstIdx best) (i + 1) n
+    else if v < best[wi]!.1 then
+      let best := best.set! wi (v, i)
+      topGo arr T best (worstIdx best) (i + 1) n
+    else topGo arr T best wi (i + 1) n
+
+/-- Root optimization of a candidate of degree 4 or 5 as CADO-NFS's `ropt_linear`: the
+best pair by Murphy's `E` (bounds `bf`, `bg`, `area`), with that `E`. `uMul`,
+`vMul` scale the rotation bounds, `uCap` and `maxLen` cap `|u|` and the sieved
+`v` per `u` (CADO-NFS restricts wide ranges to sublattices instead); the `T`
+best `v` of each `u` by `α` are translation-optimized, and the `F` best of
+those by lognorm plus `α` are ranked by `E`. -/
+def rootOpt2 (tbl : FloatArray) (c : CCand) (bf bg area : Float)
+    (uMul vMul uCap maxLen T F : Nat) : CCand × Float := Id.run do
+  let cs := c.cs
+  let l : Int := c.l
+  let m := c.m
+  let (n0, _) := logNorm cs
+  let bound := (n0 + expectedRotationGain cs l m) * (fc 1005 / fc 1000)
+  let (ulo0, uhi0) := rotBounds cs l m 1 bound 62
+  let (vlo0, vhi0) := rotBounds cs l m 0 bound 150
+  let ulo := max (ulo0 * uMul) (-(uCap : Int))
+  let uhi := min (uhi0 * uMul) (uCap : Int)
+  let half : Int := (maxLen / 2 : Nat)
+  let vlo := max (vlo0 * vMul) (-half)
+  let vhi := min (vhi0 * vMul) half
+  let len := (vhi - vlo + 1).toNat
+  let (tabs, const) := alphaTabs cs l m
+  let mut short : Array (Float × Array Int × Int) := #[]
+  for ui in [0:(uhi - ulo + 1).toNat] do
+    let u := ulo + ui
+    let arr := alphaSieveTab tabs const u vlo len
+    let base := rotJ cs l m u 1
+    for (a, t) in topGo arr T #[] 0 0 len do
+      let (f, m', ln) := sizeOptF (rotJ base l m (vlo + t) 0) l m 300 false
+      short := short.push (ln + a, f, m')
+  let mut best := c
+  let s0 := (logNorm cs).2
+  let mut bestE := murphyE tbl cs l m s0 bf bg area
+  for (_, f, m') in (short.qsort fun a b => a.1 < b.1).extract 0 F do
+    -- the same pair up to signs: `m > 0` by `x ↦ -x`, `c_d > 0` by `f ↦ -f`
+    let (f, m') := if m' < 0 then ((f.mapIdx fun i c => if i % 2 == 1 then -c else c), -m')
+      else (f, m')
+    let f := if f.back! < 0 then f.map (- ·) else f
+    let e := murphyE tbl f l m' (logNorm f).2 bf bg area
+    if e > bestE then
+      bestE := e
+      best := { c with cs := f, m := m' }
+  return (best, bestE)
+
 /-- A polynomial pair by collision search, size and root optimization, ranked
 by Murphy's `E` with bounds `2^lpbA`, `2^lpbR` over `area`. -/
 def selectCollision (n d P nq incr admax keep : Nat) (U V : Nat) (lpbR lpbA : Nat) (area : Float)
@@ -992,22 +1686,28 @@ def selectCollision (n d P nq incr admax keep : Nat) (U V : Nat) (lpbR lpbA : Na
   -- about four tasks per thread: leading coefficients cost unequal times, and
   -- the task pool balances many small tasks (one per thread left threads idle)
   let per := (count + 4 * t - 1) / (4 * t)
+  -- CADO-NFS's root optimization in degrees 4 and 5; in degree 5 also its
+  -- special-q order and size optimization with lattice reduction (on RSA-100
+  -- they reach CADO-NFS's polynomial; in degree 4 its special-q order picked
+  -- worse polynomials at 80 digits)
   let tasks := (List.range ((count + per - 1) / per)).map fun i =>
     Task.spawn fun _ => collisionSearch n d P nq incr (1 + i * per * incr)
-      (min (admax + 1) (1 + (i + 1) * per * incr)) keep
+      (min (admax + 1) (1 + (i + 1) * per * incr)) keep (d == 5) (d == 5)
   let mut cands : Array CCand := tasks.foldl (fun acc tk => acc ++ tk.get) #[]
   cands := (cands.qsort fun a b => a.score < b.score).extract 0 keep
   if cands.isEmpty then return none
-  let rot := cands.toList.map fun c => Task.spawn fun _ => rootOpt c (fc 1) U V 32
   let tbl := dickmanTable
   let bf := Float.exp2 lpbA.toFloat
   let bg := Float.exp2 lpbR.toFloat
+  let rot := cands.toList.map fun c => Task.spawn fun _ =>
+    if d == 4 || d == 5 then rootOpt2 tbl c bf bg area 2 8 16 262144 16 16
+    else
+      let r := rootOpt c (fc 1) U V 32
+      (r, murphyE tbl r.cs r.l r.m (logNorm r.cs).2 bf bg area)
   let mut best : Option (Float × CCand) := none
   for tk in rot do
-    let c := tk.get
+    let (c, e) := tk.get
     if c.m ≤ 0 || c.cs[d]! ≤ 0 then continue
-    let s := (logNorm c.cs).2
-    let e := murphyE tbl c.cs c.l c.m s bf bg area
     match best with
     | none => best := some (e, c)
     | some (e0, _) => if e > e0 then best := some (e, c)

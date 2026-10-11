@@ -373,7 +373,8 @@ def lasParFile (path : String) (q0 per : Nat) (ts : List Nat) (kvs : List String
   let lasParams : Las.LasParams :=
     { logI := get "logI" params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA,
       mfbR := params.mfbR, mfbA := params.mfbA, fudge := get "fudge" params.lasFudge,
-      jDiv := get "jDiv" 2, sieveFrom := get "from" 30 }
+      jDiv := get "jDiv" 2, sieveFrom := get "from" 30, tinyT := get "tinyT" 0,
+      tinyF := get "tinyF" 0 }
   let las := Las.mkLasCtx ctx lasParams
   let v := get "v" 0
   let slack := get "slack" 3
@@ -510,6 +511,37 @@ def fs2Class (ctx : Las.LasCtx) (q : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat
   let some _ := Las.largePrimesOf cr u ctx.params.lpbR | return (4, splits)
   return (5, splits)
 
+/-- An oracle for the tiny primes: the exact tiny-prime bits of the algebraic
+norm (all powers) added to the algebraic byte wherever the rational side passed
+and the algebraic byte is within 40 bits of the threshold. -/
+def oracleTiny (las : Las.LasCtx) (ua ub va vb : Int) (bufR bufA : ByteArray) : ByteArray := Id.run do
+  let tq := Las.mkTinyQ las ua ub va vb
+  let I := las.I
+  let mut b := bufA
+  for pos in [0:las.I * las.J] do
+    if bufR.get! pos ≥ 128 && b.get! pos ≥ 88 then
+      let t := Las.tinyAlg tq (pos % I) (pos / I) I
+      let v := (b.get! pos).toNat + (t + 0.5).toUInt64.toNat
+      b := b.set! pos (min 255 v).toUInt8
+  return b
+
+/-- The candidates' exact tiny-prime bits (all powers) added to their algebraic
+bytes, less the threshold relaxation `T` plus `tf`; those still at least `128`
+remain (`tinyx=2`). -/
+def tinyCandidates (las : Las.LasCtx) (ua ub va vb : Int) (bufA : ByteArray) (cands : Array Nat)
+    (T tf : Nat) : ByteArray × Array Nat := Id.run do
+  let tq := Las.mkTinyQ las ua ub va vb
+  let I := las.I
+  let mut b := bufA
+  let mut out : Array Nat := #[]
+  for pos in cands do
+    let t := Las.tinyAlg tq (pos % I) (pos / I) I
+    let w := (b.get! pos).toNat + (t + 0.5).toUInt64.toNat
+    -- the byte keeps the sieved and tiny bits over the bias (as the prefilter reads it)
+    b := b.set! pos (min 255 w).toUInt8
+    if w + tf ≥ 128 + T then out := out.push pos
+  return (b, out)
+
 /-- `processQs14` phase by phase on one thread: times and survivor counts. -/
 def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := do
   let (n, sel) ← readCadoPoly path
@@ -562,30 +594,49 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       let Ra := Ras[jx]!
       let ⟨b1, b2, bits⟩ := sc
       let a0 ← IO.monoNanosNow
+      let tinyx := get "tinyx" 0
+      -- the oracle's algebraic side: no tiny-prime powers in the sieve
+      let keep := (Array.range las.alg.pw.size).filter fun k =>
+        las.alg.pwBase[k]! ≥ las.params.sieveFrom
+      let pwK := keep.map (las.alg.pw[·]!)
+      let pwRootsK := keep.map (las.alg.pwRoots[·]!)
+      let pwLogsK : ByteArray := ⟨keep.map (las.alg.pwLogs.get! ·)⟩
+      let pwBaseK := keep.map (las.alg.pwBase[·]!)
+      let algSide := if tinyx == 0 then las.alg else
+        { las.alg with pw := pwK, pwRoots := pwRootsK, pwLogs := pwLogsK, pwBase := pwBaseK }
+      let mfbA' := if tinyx == 0 then las.params.mfbA
+        else if tinyx == 2 then las.params.mfbA + get "T" 16 - las.params.fudge
+        else las.params.mfbA + get "tfudge" 2 - las.params.fudge
       let Pr ← IO.lazyPure fun _ => Las.powerRoots las.rat ua ub va vb
-      let Pa ← IO.lazyPure fun _ => Las.powerRoots las.alg ua ub va vb
+      let Pa ← IO.lazyPure fun _ => Las.powerRoots algSide ua ub va vb
       let exR ← IO.lazyPure fun _ => Las.rowExtras las las.rat Rr
       let exA ← IO.lazyPure fun _ => Las.rowExtras las las.alg Ra
       let a1 ← IO.monoNanosNow
       let (fR, biasR) ← IO.lazyPure fun _ => Las.fillSegments las b1 false q ua ub va vb las.params.mfbR exR
-      let (fA, biasA) ← IO.lazyPure fun _ => Las.fillSegments las b2 true q ua ub va vb las.params.mfbA exA
+      let (fA, biasA) ← IO.lazyPure fun _ => Las.fillSegments las b2 true q ua ub va vb mfbA' exA
       let a2 ← IO.monoNanosNow
       let lR ← IO.lazyPure fun _ => Las.lineSieveSide las las.rat Rr fR
       let lA ← IO.lazyPure fun _ => Las.lineSieveSide las las.alg Ra fA
       let a3 ← IO.monoNanosNow
       let pR ← IO.lazyPure fun _ => Las.sievePowers las las.rat Pr lR
-      let pA ← IO.lazyPure fun _ => Las.sievePowers las las.alg Pa lA
+      let pA ← IO.lazyPure fun _ => Las.sievePowers las algSide Pa lA
       let a4 ← IO.monoNanosNow
       let (bufR, RrB) ← IO.lazyPure fun _ => if pair then Las.sieveLargePaired las las.rat Rr pR
         else Las.sieveLargeCached las las.rat Rr pR
       let (bufA, RaB) ← IO.lazyPure fun _ => if pair then Las.sieveLargePaired las las.alg Ra pA
         else Las.sieveLargeCached las las.alg Ra pA
+      let bufA ← IO.lazyPure fun _ => if tinyx == 1 then oracleTiny las ua ub va vb bufR bufA else bufA
       let a5 ← IO.monoNanosNow
-      let s0 ← IO.lazyPure fun _ => Las.survivors bufR bufA len
+      let s00 ← IO.lazyPure fun _ => Las.survivors bufR bufA len
+      let (bufA, s0) ← IO.lazyPure fun _ => if tinyx == 2 then
+          tinyCandidates las ua ub va vb bufA s00 (get "T" 16) (get "tfudge" 2)
+        else (bufA, s00)
+      cnt := cnt.modify 4 (· + s00.size)
       let s1 ← IO.lazyPure fun _ => Las.dropSmallGcd las s0
       let a6 ← IO.monoNanosNow
       let surv ← IO.lazyPure fun _ => Las.prefilterGap4 las q ua ub va vb bufR bufA biasR biasA
-        (Las.tinyPrimes las las.rat RrB) (Las.tinyPrimes las las.alg RaB) slack s1
+        (Las.tinyPrimes las las.rat RrB) (if tinyx == 0 then Las.tinyPrimes las las.alg RaB else #[])
+        slack s1
       let a7 ← IO.monoNanosNow
       cnt := cnt.modify 0 (· + s0.size)
       cnt := cnt.modify 1 (· + s1.size)
@@ -733,7 +784,7 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   let nq := max 1 qs.size
   let us (k : Nat) : String := s!"{tm[k]! / 1000 / nq}"
   IO.println s!"{qs.size} special-q from {q0}: us/q roots {us 0}, powroots+extras {us 1}, fill {us 2}, line {us 3}, powers {us 4}, large {us 5}, survivors {us 6}, prefilter {us 7}, label {us 8}, resieve {us 9}, factor {us 10}"
-  IO.println s!"per q: survivors {cnt[0]! / nq}, after gcd {cnt[1]! / nq}, after prefilter {cnt[2]! / nq}, relations {cnt[3]! * 100 / nq / 100}.{cnt[3]! * 100 / nq % 100}"
+  IO.println s!"per q: candidates {cnt[4]! / nq}, survivors {cnt[0]! / nq}, after gcd {cnt[1]! / nq}, after prefilter {cnt[2]! / nq}, relations {cnt[3]! * 100 / nq / 100}.{cnt[3]! * 100 / nq % 100}"
   IO.println s!"factorSurvivor2 outcomes (total): trivial {cnt[4]!}, rat class {cnt[5]!}, alg class {cnt[6]!}, alg split fail {cnt[7]!}, rat split fail {cnt[8]!}, ok {cnt[9]!}; splits {cnt[10]!}"
   IO.println s!"us/q: both bounds on every survivor {us 11}, exact cofactors (no splits) on every survivor {tmX / 1000 / nq} ({cnt[11]!})"
   IO.println s!"per q: rational bound passed {passR / nq}, both {passB / nq}"
@@ -981,6 +1032,97 @@ def readCadoRels (path : String) : IO (Array (Nat × Nat × Nat × Array (Int ×
         | _ => pure ()
       | none => pure ()
   return out
+
+/-- The relations of a CADO-NFS `las` output with their factorizations:
+`(a, b, rational primes, algebraic primes)` (with multiplicity). -/
+def readCadoRelsFull (path : String) : IO (Std.HashMap (Int × Nat) (Array Nat × Array Nat)) := do
+  let lines ← IO.FS.lines path
+  let hex (s : String) : Nat := s.foldl (fun acc c =>
+    acc * 16 + (if c.isDigit then c.toNat - '0'.toNat else c.toNat - 'a'.toNat + 10)) 0
+  let mut out : Std.HashMap (Int × Nat) (Array Nat × Array Nat) := {}
+  for l in lines do
+    if l.startsWith "#" || l.length == 0 then continue
+    match l.splitOn ":" with
+    | [ab, r, a] =>
+      match ab.splitOn "," with
+      | [x, y] =>
+        let rs := (r.splitOn ",").toArray.filter (· ≠ "") |>.map hex
+        let as := (a.splitOn ",").toArray.filter (· ≠ "") |>.map hex
+        out := out.insert (x.toInt!, y.toNat!) (rs, as)
+      | _ => pure ()
+    | _ => pure ()
+  return out
+
+/-- Details of the algebraic-byte misses of `lasMiss`: for each, the sieved bits
+against the contributions of CADO-NFS's factorization (tiny primes `< sieveFrom`
+with all powers and first powers only, sieved primes, primes above the bound). -/
+def lasMiss2 (polyPath cadoPath : String) (nShow : Nat) : IO Unit := do
+  let (n, sel) ← readCadoPoly polyPath
+  let params := chooseParams (GNFS.decimalDigits n)
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
+      mfbA := params.mfbA, fudge := params.lasFudge }
+  let las := Las.mkLasCtx ctx lasParams
+  let blocks ← readCadoRels cadoPath
+  let full ← readCadoRelsFull cadoPath
+  let mut sc := Las.Scratch.new las
+  let I := las.I
+  let mut shown := 0
+  let mut sums : Array Float := Array.replicate 8 0
+  let mut nMiss := 0
+  for (q, ρ, _, rels) in blocks do
+    let (u, v) := reduceLattice q ρ las.skew
+    let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
+    let Rr := Las.latticeRoots las.rat ua ub va vb
+    let Ra := Las.latticeRoots las.alg ua ub va vb
+    let ⟨b1, b2, bits⟩ := sc
+    let Pr := Las.powerRoots las.rat ua ub va vb
+    let Pa := Las.powerRoots las.alg ua ub va vb
+    let (fR, _) := Las.fillSegments las b1 false q ua ub va vb las.params.mfbR (Las.rowExtras las las.rat Rr)
+    let (fA, biasA) := Las.fillSegments las b2 true q ua ub va vb las.params.mfbA (Las.rowExtras las las.alg Ra)
+    let (bufR, _) := Las.sieveLargePaired las las.rat Rr (Las.sievePowers las las.rat Pr (Las.lineSieveSide las las.rat Rr fR))
+    let (bufA, _) := Las.sieveLargePaired las las.alg Ra (Las.sievePowers las las.alg Pa (Las.lineSieveSide las las.alg Ra fA))
+    let det := ua * vb - ub * va
+    for (a, b) in rels do
+      let ni := a * vb - (b : Int) * va
+      let nj := ua * (b : Int) - ub * a
+      if ni % det != 0 || nj % det != 0 then continue
+      let (i, j) := if nj / det < 0 then (-(ni / det), -(nj / det)) else (ni / det, nj / det)
+      if i < -(I / 2 : Nat) || i ≥ (I / 2 : Nat) || j ≤ 0 || j ≥ (las.J : Int) then continue
+      let pos := j.toNat * I + (i + (I / 2 : Nat)).toNat
+      if bufR.get! pos < 128 || bufA.get! pos ≥ 128 then continue
+      nMiss := nMiss + 1
+      let seg := pos / 64
+      let sieved := (bufA.get! pos).toNat - (biasA.get! seg).toNat
+      let thr := 128 - (biasA.get! seg).toNat
+      let some (_, aps) := full[(a, b)]? | continue
+      -- the algebraic primes without the special-q
+      let aps := aps.eraseIdxIfInBounds ((aps.findIdx? (· == q)).getD aps.size)
+      let lg (p : Nat) : Float := Float.log2 (Arith.nf p)
+      let mut tinyAll : Float := 0
+      let mut tinyFirst : Float := 0
+      let mut med : Float := 0
+      let mut large : Float := 0
+      let mut prev := 0
+      for p in aps do
+        if p < las.params.sieveFrom then
+          tinyAll := tinyAll + lg p
+          if p != prev then tinyFirst := tinyFirst + lg p
+        else if p ≤ params.algBound then med := med + lg p
+        else large := large + lg p
+        prev := p
+      let total := tinyAll + med + large
+      sums := (((sums.modify 0 (· + total)).modify 1 (· + tinyAll)).modify 2 (· + tinyFirst)).modify 3 (· + med)
+      sums := ((sums.modify 4 (· + large)).modify 5 (· + Arith.nf sieved)).modify 6 (· + Arith.nf thr)
+      if shown < nShow then
+        shown := shown + 1
+        IO.println s!"({a},{b}) i={i} j={j}: norm {total.round} bits = tiny {tinyAll.round} (first powers {tinyFirst.round}) + sieved-range {med.round} + large {large.round}; sieved {sieved}, threshold {thr}; alg primes {aps}"
+    sc := ⟨bufR, bufA, bits⟩
+  let k := Arith.nf (max 1 nMiss)
+  IO.println s!"{nMiss} algebraic-byte misses; means: norm {sums[0]! / k}, tiny {sums[1]! / k} (first powers {sums[2]! / k}), sieved-range {sums[3]! / k}, large {sums[4]! / k}; sieved {sums[5]! / k}, threshold {sums[6]! / k}"
 
 /-- Where our siever loses the relations CADO-NFS finds on the same special-q:
 outside our region, below a sieve threshold, dropped by the small-gcd filter or

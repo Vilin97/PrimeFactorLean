@@ -108,6 +108,7 @@ def devMain (args : List String) : IO Unit := do
   | ["gatedebug", path, q0, cnt] => gateDebug path q0.toNat! cnt.toNat!
   | ["mergecheck", seed] => mergeCheck seed.toNat!
   | ["lasmiss", poly, cado] => lasMiss poly cado
+  | ["lasmiss2", poly, cado, k] => lasMiss2 poly cado k.toNat!
   | ["lanczosbench", n, w, t] => lanczosBench n.toNat! w.toNat! t.toNat!
   | ["lanczosbench", n, w, t, pk] => lanczosBench n.toNat! w.toNat! t.toNat! pk.toNat!
   | ["gathercmp", n, m] => gatherCompare n.toNat! m.toNat!
@@ -116,6 +117,13 @@ def devMain (args : List String) : IO Unit := do
   | ["taskscaling", n] => taskScaling [1, 2, 4, 8, 16, 32, 4, 8] n.toNat!
   | ["taskscaling", n, ts] => taskScaling ((ts.splitOn ",").map String.toNat!) n.toNat!
   | ["autotrace", ns, ts] => Trace.main ns.toNat! ts.toNat!
+  | ["rawpolys", ns, lo, hi] => Trace.rawPolys ns.toNat! lo.toNat! hi.toNat!
+  | ["sqlist", ns, ad] => Trace.sqList ns.toNat! ad.toNat!
+  | ["normcheck", path, c] => Trace.normCheck path c.toNat!
+  | ["murphyfile", path] => Trace.murphyFile path
+  | ["murphyfile", path, a, r, li, q] => Trace.murphyFile path a.toNat! r.toNat! li.toNat! q.toNat!
+  | ["soptcheck", ns, lo, hi] => Trace.soptCheck ns.toNat! lo.toNat! hi.toNat!
+  | ["collidetest", ns, ad, q, r] => Trace.collideTest ns.toNat! ad.toNat! q.toNat! r.toNat!
   | ["ladder8", r] => Proto.bench r.toNat!
   | ["splitbench", path] => Trace.splitBench path
   | ["siqsdiag", ns, ts] => Trace.siqsDiag ns.toNat! ts.toNat!
@@ -182,7 +190,7 @@ def devMain (args : List String) : IO Unit := do
   | ["ecmcurves", ns, b1, c] => ecmCurveBench ns.toNat! b1.toNat! c.toNat!
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
   | "gnfsover" :: ns :: ts :: kvs => gnfsPhases ns.toNat! ts.toNat! 0 0 none kvs
-  | "gnfspost" :: path :: ts :: kvs => gnfsPostFile path ts.toNat! kvs
+  | "gnfspost" :: path :: ts :: kvs => gnfsPostFile path ts.toNat! kvs (if kvs.contains "lzparts" then some (fun mc mr => Trace.lanczosParts mc mr ts.toNat! 10) else none)
   | "polystages" :: ns :: ts :: kvs => polyStages ns.toNat! ts.toNat! kvs
   | ["soptcompare", path] => soptCompare path
   | "snfsover" :: ns :: ts :: b :: k :: sgn :: d :: kvs =>
@@ -216,11 +224,11 @@ def devMain (args : List String) : IO Unit := do
       (ECMM.split n { b1 := b1.toNat!, curves := curves.toNat!, threads := ts.toNat! }).map (·.val)
   | ["nfsdebug", ns, ts, d, fbB, a, lp, fudge, lines, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 0 75 200 12 true 60 300 2000 20000 100 0 64 60 0 40
+    let params : NFS.Params := NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! lines.toNat! 48 80 fudge.toNat! 40 40 2000 0 256 4 0 0 0 0 0 0 12 0 0 75 200 12 true 60 300 2000 20000 100 0 64 60 0 40
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfslattice", ns, ts, d, fbB, a, lp, fudge, li, lj, qpt, rounds] =>
     let n := ns.toNat!
-    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 0 75 200 12 true 60 300 2000 20000 100 0 64 60 0 40) with }
+    let params : NFS.Params := { (NFS.Params.mk d.toNat! fbB.toNat! fbB.toNat! a.toNat! lp.toNat! 25 48 80 fudge.toNat! 40 40 2000 li.toNat! lj.toNat! qpt.toNat! 0 0 0 0 0 0 12 0 0 75 200 12 true 60 300 2000 20000 100 0 64 60 0 40) with }
     nfsDebug n ts.toNat! params rounds.toNat!
   | ["nfsdebug", ns, ts] =>
     let n := ns.toNat!

@@ -23,6 +23,7 @@ def applyOverrides (p : Params) (kvs : List String) : Params :=
       | "mfbA" => { p with mfbA := x }
       | "fudge" => { p with lasFudge := x }
       | "fudgeA" => { p with lasFudgeA := x }
+      | "tinyT" => { p with lasTinyT := x }
       | "qmin" => { p with qmin := x }
       | "logI" => { p with lasLogI := x }
       | "psP" => { p with psP := x }
@@ -79,7 +80,8 @@ def loadRels (path : String) : IO (Nat × Selection × Array Rel) := do
 
 /-- Everything after sieving, timed: filtering, merge, Lanczos, square roots. -/
 def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads : Nat)
-    (rels : Array Rel) (rows : Rows) (t0 t3 : Nat) (inMatrix : Bool := false) : IO Unit := do
+    (rels : Array Rel) (rows : Rows) (t0 t3 : Nat) (inMatrix : Bool := false)
+    (parts : Option (Nat → Array (Array Nat) → IO Unit) := none) : IO Unit := do
   let numCols := rows.next
   let dense := 2 + ctx.fb.chars.size
   let t4 ← IO.monoNanosNow
@@ -106,6 +108,7 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
       Merge.mergeLog numCols dense keptRows (params.mergeDensity - 1000) 32
     else Merge.mergeLog2 numCols dense keptRows params.mergeDensity 32
   let t5b ← IO.monoNanosNow
+  if let some f := parts then f mcols mrows
   -- Lanczos components, timed (the dependencies are those of `Lanczos.dependencies`)
   let la0 ← IO.monoNanosNow
   let kept2 ← IO.lazyPure fun _ => GF2.removeSingletons mcols mrows
@@ -180,6 +183,7 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
       mfbA := params.mfbA, fudge := params.lasFudge, fudgeA := params.lasFudgeA,
+      tinyT := params.lasTinyT,
       variant := (overrides.findSome? fun kv => match kv.splitOn "=" with
         | ["variant", v] => v.toNat?
         | _ => none).getD params.lasVariant,
@@ -288,7 +292,8 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix")
 
 /-- `gnfsPost` on relations written by `dumpRels` (parameters by size, with overrides). -/
-def gnfsPostFile (path : String) (threads : Nat) (overrides : List String) : IO Unit := do
+def gnfsPostFile (path : String) (threads : Nat) (overrides : List String)
+    (parts : Option (Nat → Array (Array Nat) → IO Unit) := none) : IO Unit := do
   let t0 ← IO.monoNanosNow
   let (n, sel, rels) ← loadRels path
   let params0 := applyOverrides (chooseParams (decimalDigits n)) overrides
@@ -300,7 +305,7 @@ def gnfsPostFile (path : String) (threads : Nat) (overrides : List String) : IO 
   let rows ← IO.lazyPure fun _ => rels.foldl Rows.add (Rows.empty ctx.fb)
   let t3 ← IO.monoNanosNow
   IO.println s!"loaded {rels.size} relations, rows in {ms t0 t3} ms"
-  gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix")
+  gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix") parts
 
 open PrimeFactorLean.NFS.PolySelect in
 /-- `PolySelect.selectCollision` with its two stages timed (collision search,
@@ -316,7 +321,7 @@ def polyStages (n threads : Nat) (overrides : List String) : IO Unit := do
     let tasks := (List.range ((count + per - 1) / per)).map fun i =>
       Task.spawn fun _ => collisionSearch n d params.psP params.psNq params.psIncr
         (1 + i * per * params.psIncr) (min (params.psAdMax + 1) (1 + (i + 1) * per * params.psIncr))
-        params.psKeep
+        params.psKeep (overrides.contains "lll=1") (!overrides.contains "cadoq=0")
     let all : Array CCand := tasks.foldl (fun acc tk => acc ++ tk.get) #[]
     (all.qsort fun a b => a.score < b.score).extract 0 params.psKeep
   let t1 ← IO.monoNanosNow
@@ -337,9 +342,28 @@ def polyStages (n threads : Nat) (overrides : List String) : IO Unit := do
     | _ => none).getD dflt
   let margin := (get "margin10" 10).toFloat / 10
   let (U, V, top) := (get "ropU" 16, get "ropV" 100000, get "ropTop" 32)
-  let rot ← IO.lazyPure fun _ =>
-    (cands.toList.map fun c => Task.spawn fun _ => rootOpt c margin U V top (get "reopt" 0 == 1)).map Task.get
+  let tbl0 := dickmanTable
+  let area0 := Float.exp2 (2 * params.lasLogI - 1).toFloat * params.qmin.toFloat
+  let bf0 := Float.exp2 params.lpbA.toFloat
+  let bg0 := Float.exp2 params.lpbR.toFloat
+  let rot ← if get "ropt2" 0 == 1 then IO.lazyPure fun _ =>
+      (cands.toList.map fun c => Task.spawn fun _ =>
+        (rootOpt2 tbl0 c bf0 bg0 area0 (get "uMul" 2) (get "vMul" 8) (get "uCap" 16)
+          (get "maxLen" 262144) (get "T" 16) (get "F" 16)).1).map Task.get
+    else IO.lazyPure fun _ =>
+      (cands.toList.map fun c => Task.spawn fun _ => rootOpt c margin U V top (get "reopt" 0 == 1)).map Task.get
   let t2 ← IO.monoNanosNow
+  if get "bounds" 0 == 1 then
+    for c in cands do
+      let (n0, _) := logNorm c.cs
+      let bound := (n0 + expectedRotationGain c.cs c.l c.m) * (1005 / 1000 : Float)
+      let ub := rotBounds c.cs c.l c.m 1 bound 62
+      let vb := rotBounds c.cs c.l c.m 0 bound 150
+      IO.println s!"  l {c.l} ad {c.cs[d]!}: u {ub} v {vb}"
+  if get "verbose" 0 == 1 then
+    for c in rot do
+      let sk := (logNorm c.cs).2
+      IO.println s!"  l {c.l} ad {c.cs[d]!}: E*1e7 {(murphyE tbl0 c.cs c.l c.m sk bf0 bg0 area0 * 10000000).round}"
   IO.println s!"collision search {ms t0 t1} ms ({count} leading coefficients, {cands.size} kept), root optimization {ms t1 t2} ms ({rot.length}; margin {margin}, U {U}, V {V}, top {top})"
   let tbl := dickmanTable
   let area := Float.exp2 (2 * params.lasLogI - 1).toFloat * params.qmin.toFloat
@@ -353,7 +377,7 @@ def polyStages (n threads : Nat) (overrides : List String) : IO Unit := do
     | some (e0, _) => if e > e0 then best := some (e, c)
   if let some (e, c) := best then
     let (ln, sk) := logNorm c.cs
-    IO.println s!"best: E {e}, lognorm {ln}, alpha {alphaExact c.cs 2000}, skew {sk}"
+    IO.println s!"best: E*1e7 {(e * 10000000).round}, lognorm {ln}, alpha {alphaExact c.cs 2000}, skew {sk}"
     if let some path := overrides.findSome? (fun (kv : String) => match kv.splitOn "=" with
         | ["out", v] => some v
         | _ => none) then
@@ -376,10 +400,22 @@ def soptCompare (path : String) : IO Unit := do
   let mut sumCado : Float := 0
   let mut better := 0
   let mut sum0 : Float := 0
+  -- CADO-NFS's size-optimized polynomials (lines `c0: …` without `#`), scored by our norm
+  let mut opt : Array Int := #[]
+  let mut sumCadoOurs : Float := 0
+  let mut nCadoOurs := 0
   for l in lines do
+    if l.startsWith "c" && !l.startsWith "#" && (l.splitOn ": ").length == 2 then
+      opt := opt.push ((l.splitOn ": ")[1]!).toInt!
+      if opt.size == 6 then
+        if nCadoOurs < 400 then
+          sumCadoOurs := sumCadoOurs + (logNorm opt).1
+          nCadoOurs := nCadoOurs + 1
+        opt := #[]
     if l.startsWith "# Raw polynomial" then
       inRaw := true
       raw := #[]
+      opt := #[]
     else if inRaw && l.startsWith "# Y0: " then y0 := (l.drop 6).toInt!
     else if inRaw && l.startsWith "# Y1: " then y1 := (l.drop 6).toInt!
     else if inRaw && l.startsWith "# c" then
@@ -391,7 +427,7 @@ def soptCompare (path : String) : IO Unit := do
       let cadoLn := ((l.splitOn "lognorm ")[1]!.splitOn ",")[0]!.trim
       if count ≥ 400 then break
       let (_, _, ln0) := sizeOpt raw y1 (-y0)
-      let ln := ln0
+      let (_, _, ln) := sizeOpt2 raw y1 (-y0)
       sum0 := sum0 + ln0
       count := count + 1
       let cl := cadoLn.toNat?.map (·.toFloat) |>.getD 0
@@ -406,3 +442,4 @@ def soptCompare (path : String) : IO Unit := do
       raw := #[]
     i := i + 1
   IO.println s!"{count} polynomials: mean lognorm ours {sumOurs / count.toFloat} (local descent only {sum0 / count.toFloat}), CADO-NFS {sumCado / count.toFloat}; ours better on {better}"
+  IO.println s!"CADO-NFS's size-optimized polynomials by our norm: mean {sumCadoOurs / nCadoOurs.toFloat} ({nCadoOurs})"
