@@ -49,26 +49,54 @@ def inertPrime (g : List Int) (start : Nat) (tries : Nat := 5000) : Option Nat :
 /-- Bit length of the largest coefficient. -/
 def maxBits (xs : List Int) : Nat := xs.foldl (fun acc c => max acc (c.natAbs.log2 + 1)) 0
 
-/-- Candidate square root of `γ`, lifted until `p^k` has at least `bits` bits. -/
+/-- Candidate square root of `γ`, lifted until `p^k` has at least `bits` bits:
+Newton's iteration `z ← z (3 - γ z²) / 2` for `γ^(-1/2)` modulo `P = p^(2^k)`,
+`γ` reduced once at the last precision and from each precision to the one
+below, the halving a shift (`P` is odd). -/
 def sqrtCandidate (g γ : List Int) (p bits : Nat) : Option (List Int) := Id.run do
   let f := ModP.ofInts p (g ++ [1])
   let γp := ModP.rem p (ModP.ofInts p γ) f
   if γp.size == 0 then return none
   let some s := ModP.fqSqrt p f γp | return none
   let z0 := ModP.fqInv p f s
+  -- the precisions `p^2, p^4, …`
+  let mut Ps : Array Nat := #[]
   let mut P := p
-  let mut z : List Int := z0.toList.map (fun (c : Nat) => (c : Int))
   let mut fuel := 64
   while P.log2 < bits + 1 && fuel > 0 do
     fuel := fuel - 1
     P := P * P
-    let γP := modList P γ
-    let z2 := mulMod g P z z
-    let t := mulMod g P γP z2
+    Ps := Ps.push P
+  -- `γ` modulo each of them, from the last down
+  let mut γs : Array (List Int) := Array.replicate Ps.size []
+  let mut cur := γ
+  for i in [0:Ps.size] do
+    let k := Ps.size - 1 - i
+    cur := modList Ps[k]! cur
+    γs := γs.set! k cur
+  let mut z : List Int := z0.toList.map (fun (c : Nat) => (c : Int))
+  -- coefficients in `[0, Q)`: halving modulo the odd `Q` is a shift
+  let halve (Q : Nat) (c : Int) : Int := if c % 2 == 0 then c / 2 else (c + Q) / 2
+  -- (the last precision by Karp and Markstein's step below)
+  let last := if Ps.size ≥ 2 then Ps.size - 1 else Ps.size
+  for k in [0:last] do
+    let Q := Ps[k]!
+    let z2 := mulMod g Q z z
+    let t := mulMod g Q γs[k]! z2
     let three := addL [3] (t.map fun c => -c)
-    let inv2 := (P + 1) / 2
-    z := modList P ((mulMod g P z three).map fun c => c * (inv2 : Int))
-  let β := mulMod g P (modList P γ) z
+    z := (mulMod g Q z three).map (halve Q)
+  if last == Ps.size then
+    let β := mulMod g P (if Ps.isEmpty then modList P γ else γs[Ps.size - 1]!) z
+    return some (centerList P β)
+  -- `z ≡ γ^(-1/2)` modulo `h`; `x₀ = γ z` has `x₀² ≡ γ (mod h)`, and
+  -- `x₀ + z (γ - x₀²) / 2` is the square root modulo `h²`: `γ - x₀² = h e`, so
+  -- only products modulo `h` (half the size) are needed
+  let h := Ps[last - 1]!
+  let x0 := mulMod g h γs[last - 1]! z
+  let x0sq := mulMod g P x0 x0
+  let e := (addL γs[last]! (x0sq.map fun c => -c)).map fun c => (c % (P : Int)) / (h : Int)
+  let d := (mulMod g h z e).map (halve h)
+  let β := addL x0 (d.map fun c => c * (h : Int))
   return some (centerList P β)
 
 /-- Square root of `γ` in `ℤ[ω]`, verified by exact squaring (`none` if the

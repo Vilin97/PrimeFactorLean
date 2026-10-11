@@ -50,7 +50,9 @@ def prodTreeInt (depth : Nat) (xs : List Int) : Int :=
       prodTreeInt 0 (xs.take ((k + 2) / 2)) * prodTreeInt 0 (xs.drop ((k + 2) / 2))
     else
       let left := Task.spawn fun _ => prodTreeInt (depth - 1) (xs.take ((k + 2) / 2))
-      left.get * prodTreeInt (depth - 1) (xs.drop ((k + 2) / 2))
+      -- the right half before waiting for the left one (as in `prodTreePar`)
+      let right := prodTreeInt (depth - 1) (xs.drop ((k + 2) / 2))
+      left.get * right
 termination_by xs.length
 
 theorem prodTreeInt_eq_le : ∀ (k depth : Nat) (xs : List Int), xs.length ≤ k →
