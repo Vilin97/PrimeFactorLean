@@ -1175,16 +1175,25 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) :=
     let rels := collect ctx needed (max 1 cfg.threads) cfg.maxRounds
     if h : ctx.n = n then h ▸ extract ctx rels (max 1 cfg.threads) else none
 
+/-- The threads worth using on `digits` digits: below 44 digits a sieving round
+of many tasks costs more than it gains (wall time, best of three: 22 digits 7.4
+ms on 2 threads, 27.6 ms on 16; 30 digits 7.5 ms on 4, 17.4 ms on 16; 38 digits
+11.0 ms on 8, 11.5 ms on 16). -/
+def threadsFor (digits threads : Nat) : Nat :=
+  min threads (if digits < 28 then 2 else if digits < 36 then 4 else if digits < 44 then 8 else threads)
+
 /-- The public splitter: even numbers and perfect powers are handled first;
 inputs below 20 digits use the simpler SIQS of `QS` (no suitable `A` with the
 fast parameters). -/
 def split (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) :=
   if n < 4 then none
   else if n % 2 = 0 then checkFactor n 2
-  else if decimalDigits n < 20 then QS.split n { variant := .siqs, threads := cfg.threads }
-  else match perfectPower n with
-    | some (r, _) => checkFactor n r
-    | none => splitCore n cfg
+  else
+    let threads := threadsFor (decimalDigits n) cfg.threads
+    if decimalDigits n < 20 then QS.split n { variant := .siqs, threads := threads }
+    else match perfectPower n with
+      | some (r, _) => checkFactor n r
+      | none => splitCore n { cfg with threads := threads }
 
 /-- Every factor returned by the fast SIQS is a proper divisor. -/
 theorem split_sound {n : Nat} {cfg : Config} {d : ProperFactor n}
