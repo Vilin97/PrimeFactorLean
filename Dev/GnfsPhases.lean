@@ -85,8 +85,8 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
     (rels : Array Rel) (rows : Rows) (t0 t3 : Nat) (inMatrix : Bool := false)
     (parts : Option (Nat → Array (Array Nat) → IO Unit) := none)
     (preMerge : Option (Nat → Array (Array Nat) → IO Unit) := none)
-    (preFilter : Option (Nat → Array (Array Nat) → IO Unit) := none) (tryDeps : Nat := 0) :
-    IO Unit := do
+    (preFilter : Option (Nat → Array (Array Nat) → IO Unit) := none) (tryDeps : Nat := 0)
+    (cliSqrt : Bool := false) : IO Unit := do
   let numCols := rows.next
   if let some f := preFilter then f numCols rows.sparse
   let dense := 2 + ctx.fb.chars.size
@@ -130,6 +130,23 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
   let t6 ← IO.monoNanosNow
   let wt := mrows.foldl (fun a r => a + r.size) 0
   IO.println s!"filter {ms t3 t5} ms (kept {kept.size}), merge {ms t5 t5b} ms -> {mrows.size} x {mcols} (weight {wt / max 1 mrows.size}/row), Lanczos {ms t5b t6} ms ({deps.size} deps)"
+  if cliSqrt then
+    -- as `GNFS.splitWith`: the square roots in parallel batches of four
+    let ts0 ← IO.monoNanosNow
+    let mut i := 0
+    let mut found : Option Nat := none
+    while i < deps.size && found.isNone do
+      let batch := (deps.extract i (i + 4)).toList.map fun dep => Task.spawn fun _ =>
+        (congruence st (dep.toList.map fun j => rels[j]!) p).bind (·.factor)
+      for tk in batch do
+        if found.isNone then
+          if let some d := tk.get then found := some d.val
+      i := i + 4
+    let ts1 ← IO.monoNanosNow
+    IO.println s!"square roots (batches of four, {i / 4} batch(es)): {ms ts0 ts1} ms -> {found}"
+    let t7 ← IO.monoNanosNow
+    IO.println s!"total {ms t0 t7} ms"
+    return
   let mut tried := 0
   for dep in deps do
     tried := tried + 1
@@ -309,6 +326,7 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     dumpRels path n sel rels
     IO.println s!"relations written to {path}"
   gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix")
+    (cliSqrt := overrides.contains "clisqrt")
 
 /-- `gnfsPost` on relations written by `dumpRels` (parameters by size, with overrides). -/
 def gnfsPostFile (path : String) (threads : Nat) (overrides : List String)
@@ -334,7 +352,7 @@ def gnfsPostFile (path : String) (threads : Nat) (overrides : List String)
   gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix") parts preMerge
     preFilter ((overrides.findSome? fun kv => match kv.splitOn "=" with
       | ["trydeps", v] => v.toNat?
-      | _ => none).getD 0)
+      | _ => none).getD 0) (overrides.contains "clisqrt")
 
 open PrimeFactorLean.NFS.PolySelect in
 /-- `PolySelect.selectCollision` with its two stages timed (collision search,

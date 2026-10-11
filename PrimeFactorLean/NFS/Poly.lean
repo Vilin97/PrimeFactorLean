@@ -317,7 +317,10 @@ def prodTreePar (g : List Int) (depth : Nat) (xs : List (List Int)) : List Int :
     if depth = 0 then prodTree g xs
     else
       let left := Task.spawn fun _ => prodTreePar g (depth - 1) (xs.take ((k + 2) / 2))
-      mulZ g left.get (prodTreePar g (depth - 1) (xs.drop ((k + 2) / 2)))
+      -- the right half here before waiting for the left one (as an argument
+      -- after `left.get` it would only start once the left half is done)
+      let right := prodTreePar g (depth - 1) (xs.drop ((k + 2) / 2))
+      mulZ g left.get right
 termination_by xs.length
 
 theorem prodTreePar_eq_le (g : List Int) : ∀ (k depth : Nat) (xs : List (List Int)),

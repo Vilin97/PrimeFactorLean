@@ -767,3 +767,124 @@ def uecmGrid (path : String) (grid : List (Nat × Nat)) : IO Unit := do
     IO.println s!"B1 {b1} B2 {k * b1}: {(t1 - t0) / 1000 / ns.size} us per split ({d}), one curve {(t2 - t1) / ns.size} ns, {e} of {ns.size}"
 
 end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+/-- `Σ cᵢ 2^(S i)` of a list of naturals (slots `S` bits wide). -/
+def packNat (cs : List Nat) (S : Nat) : Nat :=
+  cs.foldr (fun c acc => c ||| (acc <<< S)) 0
+
+/-- Kronecker substitution: `mulL xs ys` from one product of the packed lists
+(balanced digits of `S` bits, `S` above twice the coefficients' bits). -/
+def kronMul (xs ys : List Int) : List Int := Id.run do
+  if xs.isEmpty || ys.isEmpty then return []
+  let bits (zs : List Int) : Nat := zs.foldl (fun m c => max m (c.natAbs.log2 + 1)) 0
+  let L := xs.length + ys.length - 1
+  let S := bits xs + bits ys + (min xs.length ys.length).log2 + 3
+  let pk (zs : List Int) : Int :=
+    (packNat (zs.map fun c => if c ≥ 0 then c.toNat else 0) S : Int) -
+      (packNat (zs.map fun c => if c < 0 then c.natAbs else 0) S : Int)
+  let z := pk xs * pk ys
+  let neg := z < 0
+  let mut u := z.natAbs
+  let half := 1 <<< (S - 1)
+  let mask := (1 <<< S) - 1
+  let mut out : Array Int := Array.mkEmpty L
+  for _ in [0:L] do
+    let low := u &&& mask
+    u := u >>> S
+    let carry := low ≥ half
+    if carry then u := u + 1
+    let d : Int := if carry then (low : Int) - ((1 <<< S : Nat) : Int) else (low : Int)
+    out := out.push (if neg then -d else d)
+  return out.toList
+
+/-- `kronMul` against `NFS.mulLAuto` on polynomials with `bits`-bit coefficients
+(built from powers, forced before the timings). -/
+def kronBench (bits deg reps : Nat) : IO Unit := do
+  let m3 := bits * 100 / 159
+  let m7 := bits * 100 / 281
+  let coef (seed k : Nat) : Int :=
+    let v : Int := ((3 ^ m3 * (seed * 31 + k + 1) + 7 ^ m7 * (k + 2) : Nat) : Int)
+    if k % 3 == 0 then -v else v
+  let xs := (List.range (deg + 1)).map (coef 1)
+  let ys := (List.range (deg + 1)).map (coef 2)
+  let sz := xs.foldl (fun a c => a + c.natAbs.log2) 0 + ys.foldl (fun a c => a + c.natAbs.log2) 0
+  IO.println s!"inputs: {sz} bits in all"
+  let t0 ← IO.monoNanosNow
+  let mut a := 0
+  for _ in [0:reps] do
+    let r ← IO.lazyPure fun _ => NFS.mulLAuto xs ys
+    a := a + r.length
+  let t1 ← IO.monoNanosNow
+  let mut b := 0
+  for _ in [0:reps] do
+    let r ← IO.lazyPure fun _ => kronMul xs ys
+    b := b + r.length
+  let t2 ← IO.monoNanosNow
+  let same := NFS.mulLAuto xs ys == kronMul xs ys
+  IO.println s!"{bits} bits, degree {deg}: mulLAuto {(t1 - t0) / 1000000 / reps} ms, kronMul {(t2 - t1) / 1000000 / reps} ms, same {same} ({a} {b})"
+
+end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+/-- Time one product of two `bits`-bit integers (`Nat` and `Int`). -/
+def mulBench (bits : Nat) : IO Unit := do
+  let mk (seed : Nat) : Nat := Id.run do
+    let mut x : Nat := seed
+    let mut acc : Nat := 1
+    for _ in [0:bits / 61 + 1] do
+      x := (x * 6364136223846793005 + 1442695040888963407) % 18446744073709551616
+      acc := (acc <<< 61) ||| (x >>> 3)
+    return acc
+  let a := mk 1
+  let b := mk 2
+  let t0 ← IO.monoNanosNow
+  let p ← IO.lazyPure fun _ => a * b
+  let t1 ← IO.monoNanosNow
+  let ai : Int := a
+  let bi : Int := -(b : Int)
+  let t2 ← IO.monoNanosNow
+  let q ← IO.lazyPure fun _ => ai * bi
+  let t3 ← IO.monoNanosNow
+  let r ← IO.lazyPure fun _ => (List.range 5).map fun k => Task.spawn fun _ => (a + k) * b
+  let s := r.foldl (fun acc t => acc + t.get.log2) 0
+  let t4 ← IO.monoNanosNow
+  IO.println s!"{bits} bits: Nat mul {(t1 - t0) / 1000000} ms, Int mul {(t3 - t2) / 1000000} ms, 5 parallel Nat muls {(t4 - t3) / 1000000} ms ({p.log2} {q.natAbs.log2} {s})"
+
+end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+/-- The product `γ` of the square root on synthetic data shaped like an RSA-100
+dependency (`count` pairs `(a, b)` of 30 and 20 bits, the RSA-100 polynomial):
+`prodTreePar` at several depths, and the whole `sqrtFind`. -/
+def gammaBench (count : Nat) (depths : List Nat) : IO Unit := do
+  let cs : Array Int := #[-2225236004483188541369784, -93389187468837479525, 11905468723572312, -423328853227, -25528380, 900]
+  let sel : NFS.Selection := { coeffs := cs, m := 25595796516068257174, y1 := 65995981247339 }
+  let g := NFS.monicLower sel.coeffs
+  let fp := NFS.derivative g
+  let cd := sel.lead
+  let mut S : Array (Int × Int) := Array.mkEmpty count
+  let mut x : Nat := 12345
+  for _ in [0:count] do
+    x := (x * 6364136223846793005 + 1442695040888963407) % 18446744073709551616
+    let a : Int := ((x >>> 20) % 1073741824 : Nat)
+    let b : Int := ((x >>> 4) % 1048576 + 1 : Nat)
+    S := S.push (if x % 2 == 0 then -a else a, b)
+  let xs := fp :: fp :: S.toList.map fun ab => [(cd : Int) * ab.1, -ab.2]
+  IO.println s!"{xs.length} factors"
+  for d in depths do
+    let t0 ← IO.monoNanosNow
+    let γ ← IO.lazyPure fun _ => NFS.prodTreePar g d xs
+    let t1 ← IO.monoNanosNow
+    IO.println s!"prodTreePar depth {d}: {(t1 - t0) / 1000000} ms ({NFS.maxBits γ} bits)"
+  let γ := NFS.prodTreePar g 3 xs
+  let some p := NFS.inertPrime g 1000003 | IO.println "no inert prime"
+  let t2 ← IO.monoNanosNow
+  let r ← IO.lazyPure fun _ => (NFS.sqrtFind g γ p fun _ => true).map NFS.maxBits
+  let t3 ← IO.monoNanosNow
+  IO.println s!"sqrtFind (not a square: the lift alone): {(t3 - t2) / 1000000} ms ({r})"
+
+end PrimeFactorLean.Trace
