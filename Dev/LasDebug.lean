@@ -1150,6 +1150,12 @@ def lasMiss3 (polyPath cadoPath : String) (tinyT : Nat) : IO Unit := do
   -- 0 outside, 1 rat byte, 2 alg byte, 3 gcd, 4 tiny, 5 prefilter, 6 gate, 7 factoring, 8 found
   let mut cnt : Array Nat := Array.replicate 9 0
   let mut lpHist : Array (Array Nat) := Array.replicate 9 (Array.replicate 9 0)
+  let mut jHist : Array Nat := Array.replicate 16 0
+  -- tiny-prime bits (2, 3, 5, 7, 11..29) of the relations lost at the algebraic byte, and of the found
+  let mut tinyMiss : Array Float := Array.replicate 5 0
+  let mut tinyFound : Array Float := Array.replicate 5 0
+  let mut nMiss := 0
+  let mut nFound := 0
   for (q, ρ, _, rels) in blocks do
     let (u, v) := reduceLattice q ρ las.skew
     let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
@@ -1204,11 +1210,31 @@ def lasMiss3 (polyPath cadoPath : String) (tinyT : Nat) : IO Unit := do
         if !gatedPos.contains pos then return 6
         return 7
       cnt := cnt.modify stage (· + 1)
+      if stage == 8 then
+        let ni := a * vb - (b : Int) * va
+        let nj := ua * (b : Int) - ub * a
+        let j := (if nj / det < 0 then -(nj / det) else nj / det).toNat
+        jHist := jHist.modify (min 15 (j / 64)) (· + 1)
+      if let some (_, aps) := full[(a, b)]? then
+        if stage == 2 || stage == 8 then
+          let mut t : Array Float := Array.replicate 5 0
+          for p in aps do
+            if p < 30 then
+              let k := if p == 2 then 0 else if p == 3 then 1 else if p == 5 then 2 else if p == 7 then 3 else 4
+              t := t.modify k (· + Float.log2 (Arith.nf p))
+          if stage == 2 then
+            tinyMiss := (Array.range 5).map fun k => tinyMiss[k]! + t[k]!
+            nMiss := nMiss + 1
+          else
+            tinyFound := (Array.range 5).map fun k => tinyFound[k]! + t[k]!
+            nFound := nFound + 1
       if let some (rps, aps) := full[(a, b)]? then
         let nr := (rps.filter (· > params.ratBound)).size
         let na := (aps.filter (· > params.algBound)).size
         lpHist := lpHist.modify stage fun h => h.modify (min 2 nr * 3 + min 2 na) (· + 1)
     sc := ⟨bufR, lab, bits⟩
+  IO.println s!"found relations by row j / 64: {jHist}"
+  IO.println s!"mean tiny bits (2, 3, 5, 7, 11-29): alg-byte misses {tinyMiss.map (· / Arith.nf (max 1 nMiss))}, found {tinyFound.map (· / Arith.nf (max 1 nFound))}"
   let names := #["outside", "rat byte", "alg byte", "gcd", "tiny", "prefilter", "gate", "factoring", "found"]
   for k in [0:9] do
     IO.println s!"{names[k]!}: {cnt[k]!}  (by (ratLP, algLP) 00 01 02 10 11 12 20 21 22: {lpHist[k]!})"

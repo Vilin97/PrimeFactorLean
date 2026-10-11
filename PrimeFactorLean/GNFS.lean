@@ -577,12 +577,17 @@ def rowsReady (rs : Rows) (dense extra : Nat) : Bool :=
   let kept := GF2.removeSingletons rs.next rs.sparse
   kept.size ≥ activeColumns rs.next rs.sparse kept + dense + extra
 
+/-- `rowsExcess` with the surviving rows themselves. -/
+def rowsExcessKept (rs : Rows) (dense extra : Nat) : Int × Bool × Array Nat :=
+  let kept := GF2.removeSingletons rs.next rs.sparse
+  let e : Int := (kept.size : Int) - (activeColumns rs.next rs.sparse kept + dense : Nat)
+  (e, e ≥ extra, kept)
+
 /-- The excess (rows minus active columns and `dense`) after singleton removal,
 and whether it reaches `extra`. -/
 def rowsExcess (rs : Rows) (dense extra : Nat) : Int × Bool × Nat :=
-  let kept := GF2.removeSingletons rs.next rs.sparse
-  let e : Int := (kept.size : Int) - (activeColumns rs.next rs.sparse kept + dense : Nat)
-  (e, e ≥ extra, kept.size)
+  let (e, ok, kept) := rowsExcessKept rs dense extra
+  (e, ok, kept.size)
 
 /-- Whether the matrix of `rels` has enough excess after singleton removal. -/
 def matrixReady (ctx : Ctx) (params : Params) (rels : Array Rel) : Bool :=
@@ -658,6 +663,7 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   let mut predicted := 0
   let mut lastGain := 0
   let mut lastCount := 1
+  let mut finalKept : Option (Nat × Array Nat) := none
   while !ready && round < cfg.maxRounds do
     round := round + 1
     let before := coll.rels.size
@@ -711,11 +717,13 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
     if !ready && bg.isNone && coll.rels.size ≥ base &&
         (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11) then
       lastCheck := coll.rels.size
-      let (ok, p', tg) := readiness params.extra coll.rels.size prev
-        (rowsExcess rows dense params.extra)
+      let (e, ok', kept) := rowsExcessKept rows dense params.extra
+      let (ok, p', tg) := readiness params.extra coll.rels.size prev (e, ok', kept.size)
       ready := ok
       prev := p'
       target := tg
+      -- the filter below starts from these survivors when nothing came since
+      if ok then finalKept := some (coll.rels.size, kept)
     let gained := coll.rels.size - before
     if target > 0 then predicted := target
     lastGain := gained
@@ -739,7 +747,9 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   -- filtering on the sparse rows (the dense sign, parity and character columns
   -- that `fullRow` adds are never removed): singletons, then cliques down to
   -- an excess of `purgeExcess`, which beyond that only enlarges the matrix
-  let kept := GF2.removeSingletons numCols rows.sparse
+  let kept := match finalKept with
+    | some (sz, k) => if sz == rels.size then k else GF2.removeSingletons numCols rows.sparse
+    | none => GF2.removeSingletons numCols rows.sparse
   let kept := if params.purgeExcess == 0 then kept
     else Merge.purge numCols dense rows.sparse kept params.purgeExcess
   -- the dense words of the survivors (a Jacobi symbol per character), in
