@@ -542,6 +542,7 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   let mut tmP : Array Nat := Array.replicate 4 0
   let mut gateMismatch := 0
   let mut tmG := 0
+  let mut tmGp : Array Nat := Array.replicate 4 0
   let mut i := 0
   let len := las.I * las.J
   while i < qs.size do
@@ -620,6 +621,29 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
         let pass ← IO.lazyPure fun _ => Las.gateAll las bd surv offR ksR offA ksA
         let tg1 ← IO.monoNanosNow
         tmG := tmG + (tg1 - tg0)
+        -- the gate's parts, timed one by one (same steps as gateAll; `gateparts=1`)
+        if get "gateparts" 0 == 1 then
+          let IU := las.I.toUInt64
+          let logI := las.params.logI.toUInt64
+          let g0 ← IO.monoNanosNow
+          let (lgR, prR) ← IO.lazyPure fun _ =>
+            Las.smallScanAll bd.tabR las.rat.pinvLim las.rat.lg2 las.rat.sieveStart surv IU logI
+          let g1 ← IO.monoNanosNow
+          let idx ← IO.lazyPure fun _ => (Array.range surv.size).filter fun s =>
+            Las.ratPass las bd ksR offR[s]! offR[s + 1]! surv[s]! (lgR.get! s) prR[s]!
+          let g2 ← IO.monoNanosNow
+          let (lgA, prA) ← IO.lazyPure fun _ =>
+            Las.smallScanAll bd.tabA las.alg.pinvLim las.alg.lg2 las.alg.sieveStart (idx.map (surv[·]!)) IU logI
+          let g3 ← IO.monoNanosNow
+          let out ← IO.lazyPure fun _ => (Array.range idx.size).filter fun t =>
+            let s := idx[t]!
+            Las.algPass las bd ksA offA[s]! offA[s + 1]! surv[s]! (lgA.get! t) prA[t]!
+          let g4 ← IO.monoNanosNow
+          if out.size != pass.size then IO.println "gate parts disagree"
+          tmGp := tmGp.modify 0 (· + (g1 - g0))
+          tmGp := tmGp.modify 1 (· + (g2 - g1))
+          tmGp := tmGp.modify 2 (· + (g3 - g2))
+          tmGp := tmGp.modify 3 (· + (g4 - g3))
         for k in pass do
           if (Las.factorSurvivor2 las q ρ ua ub va vb RrB RaB (Las.idealsOf offR ksR k)
               (Las.idealsOf offA ksA k) surv[k]!).isSome then
@@ -714,7 +738,7 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   IO.println s!"us/q: both bounds on every survivor {us 11}, exact cofactors (no splits) on every survivor {tmX / 1000 / nq} ({cnt[11]!})"
   IO.println s!"per q: rational bound passed {passR / nq}, both {passB / nq}"
   IO.println s!"gate per q: rat bound {gates[0]! / nq}, rat class {gates[1]! / nq}, alg bound {gates[2]! / nq}, alg class {gates[3]! / nq}, passed (rat?/alg? undecided) {gates[4]! / nq} {gates[5]! / nq} {gates[6]! / nq} {gates[7]! / nq}"
-  IO.println s!"gateAll differs from survivorGate on {gateMismatch} special-q; gateAll {tmG / 1000 / nq} us/q"
+  IO.println s!"gateAll differs from survivorGate on {gateMismatch} special-q; gateAll {tmG / 1000 / nq} us/q (rat scan {tmGp[0]! / 1000 / nq}, rat checks {tmGp[1]! / 1000 / nq}, alg scan {tmGp[2]! / 1000 / nq}, alg checks {tmGp[3]! / 1000 / nq})"
   IO.println s!"us/q on every survivor: smallLogs rat {tmP[0]! / 1000 / nq}, tinyRat {tmP[1]! / 1000 / nq}, tinyAlg {tmP[2]! / 1000 / nq}, smallHits rat {tmP[3]! / 1000 / nq}"
 
 /-- The floating-point cofactor bounds against the exact cofactors over the

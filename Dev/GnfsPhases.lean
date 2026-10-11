@@ -79,7 +79,7 @@ def loadRels (path : String) : IO (Nat × Selection × Array Rel) := do
 
 /-- Everything after sieving, timed: filtering, merge, Lanczos, square roots. -/
 def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads : Nat)
-    (rels : Array Rel) (rows : Rows) (t0 t3 : Nat) : IO Unit := do
+    (rels : Array Rel) (rows : Rows) (t0 t3 : Nat) (inMatrix : Bool := false) : IO Unit := do
   let numCols := rows.next
   let dense := 2 + ctx.fb.chars.size
   let t4 ← IO.monoNanosNow
@@ -88,15 +88,19 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
   let kept ← IO.lazyPure fun _ => if params.purgeExcess == 0 then kept0
     else Merge.purge numCols dense rows.sparse kept0 params.purgeExcess
   let t5c ← IO.monoNanosNow
-  let keptRows ← IO.lazyPure fun _ =>
+  -- (dev: `inMatrix` keeps the dense columns in the matrix, as before `denseCombine`)
+  let words ← IO.lazyPure fun _ =>
     let chunk := (kept.size + threads - 1) / threads
-    let rowTasks := (List.range threads).map fun t => Task.spawn fun _ =>
+    let tasks := (List.range threads).map fun t => Task.spawn fun _ =>
       (Array.range (min kept.size ((t + 1) * chunk) - min kept.size (t * chunk))).map fun i =>
-        let k := kept[t * chunk + i]!
-        fullRow ctx.fb rels[k]! rows.sparse[k]!
-    rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
+        denseWord ctx.fb rels[kept[t * chunk + i]!]!
+    tasks.foldl (fun acc tk => acc ++ tk.get) #[]
+  let keptRows ← IO.lazyPure fun _ => if inMatrix then
+      kept.map fun k => fullRow ctx.fb rels[k]! rows.sparse[k]!
+    else kept.map fun k => rows.sparse[k]!
   let t5 ← IO.monoNanosNow
-  IO.println s!"singletons {ms t4 t5a} ms ({kept0.size} rows), purge {ms t5a t5c} ms -> {kept.size} rows, full rows {ms t5c t5} ms"
+  IO.println s!"singletons {ms t4 t5a} ms ({kept0.size} rows), purge {ms t5a t5c} ms -> {kept.size} rows, dense words and rows {ms t5c t5} ms"
+  let dense := if inMatrix then dense else 0
   -- (dev: a density of 1000 + d selects the older `mergeLog` with density d)
   let (mrows, log, mcols) ← IO.lazyPure fun _ => if params.mergeDensity ≥ 1000 then
       Merge.mergeLog numCols dense keptRows (params.mergeDensity - 1000) 32
@@ -110,7 +114,9 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
   let la2 ← IO.monoNanosNow
   IO.println s!"lanczos setup: singletons {ms la0 la1}, sparse {ms la1 la2} ({kept2.size} rows)"
   let mdeps ← IO.lazyPure fun _ => Lanczos.dependencies mcols mrows 64 threads
-  let deps := (Merge.unmergeLog log mdeps).map fun dep => dep.map fun i => kept[i]!
+  let deps0 := Merge.unmergeLog log mdeps
+  let deps := (if inMatrix then deps0 else denseCombine words deps0 kept.size).map fun dep =>
+    dep.map fun i => kept[i]!
   let t6 ← IO.monoNanosNow
   let wt := mrows.foldl (fun a r => a + r.size) 0
   IO.println s!"filter {ms t3 t5} ms (kept {kept.size}), merge {ms t5 t5b} ms -> {mrows.size} x {mcols} (weight {wt / max 1 mrows.size}/row), Lanczos {ms t5b t6} ms ({deps.size} deps)"
@@ -279,7 +285,7 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
       | _ => none) then
     dumpRels path n sel rels
     IO.println s!"relations written to {path}"
-  gnfsPost n st ctx params p threads rels rows t0 t3
+  gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix")
 
 /-- `gnfsPost` on relations written by `dumpRels` (parameters by size, with overrides). -/
 def gnfsPostFile (path : String) (threads : Nat) (overrides : List String) : IO Unit := do
@@ -294,7 +300,7 @@ def gnfsPostFile (path : String) (threads : Nat) (overrides : List String) : IO 
   let rows ← IO.lazyPure fun _ => rels.foldl Rows.add (Rows.empty ctx.fb)
   let t3 ← IO.monoNanosNow
   IO.println s!"loaded {rels.size} relations, rows in {ms t0 t3} ms"
-  gnfsPost n st ctx params p threads rels rows t0 t3
+  gnfsPost n st ctx params p threads rels rows t0 t3 (overrides.contains "denseInMatrix")
 
 open PrimeFactorLean.NFS.PolySelect in
 /-- `PolySelect.selectCollision` with its two stages timed (collision search,

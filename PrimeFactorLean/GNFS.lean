@@ -374,6 +374,68 @@ def fullRow (fb : FactorBase) (rel : Rel) (sparse : Array Nat) : Array Nat := Id
     if x != 0 && jacobi x.toUInt64 q.toUInt64 == -1 then row := row.push (2 + k)
   return row ++ sparse
 
+/-- The dense columns of a relation as one word (as in `fullRow`): bit `0` the sign
+of the rational norm, bit `1` the parity (always set), bit `2 + k` the
+quadratic character `k`. -/
+def denseWord (fb : FactorBase) (rel : Rel) : UInt64 := Id.run do
+  let mut w : UInt64 := 2
+  if rel.ratNeg then w := w ||| 1
+  for k in [0:fb.chars.size] do
+    let (q, s) := fb.chars[k]!
+    let x := ((rel.a - (rel.b : Int) * (s : Int)) % (q : Int)).toNat
+    if x != 0 && jacobi x.toUInt64 q.toUInt64 == -1 then
+      w := w ||| ((1 : UInt64) <<< (2 + k).toUInt64)
+  return w
+
+/-- The parity of a word's bits. -/
+@[inline] def parity64 (x : UInt64) : Bool :=
+  let x := x ^^^ (x >>> 32)
+  let x := x ^^^ (x >>> 16)
+  let x := x ^^^ (x >>> 8)
+  let x := x ^^^ (x >>> 4)
+  let x := x ^^^ (x >>> 2)
+  let x := x ^^^ (x >>> 1)
+  x &&& 1 == 1
+
+/-- The dense conditions imposed after the linear algebra, as CADO-NFS does with
+the characters: given dependencies `deps` (index sets of rows `< n`) of the
+sparse columns alone and each row's dense word `words` (`denseWord`), the
+combinations of at most 63 of them whose dense words cancel (Gaussian
+elimination over GF(2) on the words), as index sets. With the 50 dense columns
+out of the matrix, its rows weigh a quarter less. -/
+def denseCombine (words : Array UInt64) (deps : Array (Array Nat)) (n : Nat) :
+    Array (Array Nat) := Id.run do
+  let k := min deps.size 63
+  let mut vs : Array UInt64 := Array.mkEmpty k
+  let mut cs : Array UInt64 := Array.mkEmpty k
+  for d in [0:k] do
+    vs := vs.push (deps[d]!.foldl (fun acc i => acc ^^^ words[i]!) 0)
+    cs := cs.push ((1 : UInt64) <<< d.toUInt64)
+  let mut used : Array Bool := Array.replicate k false
+  for b in [0:64] do
+    let bit := (1 : UInt64) <<< b.toUInt64
+    match (List.range k).find? (fun r => !used[r]! && vs[r]! &&& bit != 0) with
+    | none => pure ()
+    | some piv =>
+      used := used.set! piv true
+      let pv := vs[piv]!
+      let pc := cs[piv]!
+      for r in [0:k] do
+        if r != piv && vs[r]! &&& bit != 0 then
+          vs := vs.set! r (vs[r]! ^^^ pv)
+          cs := cs.set! r (cs[r]! ^^^ pc)
+  -- each row's membership in the dependencies, then the combinations
+  let mut memb : Array UInt64 := Array.replicate n 0
+  for d in [0:k] do
+    for i in deps[d]! do memb := memb.set! i (memb[i]! ^^^ ((1 : UInt64) <<< d.toUInt64))
+  let mut out : Array (Array Nat) := #[]
+  for r in [0:k] do
+    if vs[r]! != 0 then continue
+    let c := cs[r]!
+    let dep := (Array.range n).filter fun i => parity64 (memb[i]! &&& c)
+    if !dep.isEmpty then out := out.push dep
+  return out
+
 def buildRows (fb : FactorBase) (rels : Array Rel) : Array (Array Nat) × Nat := Id.run do
   let mut rs := Rows.empty fb
   for rel in rels do rs := rs.add rel
@@ -670,19 +732,22 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   let kept := GF2.removeSingletons numCols rows.sparse
   let kept := if params.purgeExcess == 0 then kept
     else Merge.purge numCols dense rows.sparse kept params.purgeExcess
-  -- full rows of the survivors only (a Jacobi symbol per character), in
+  -- the dense words of the survivors (a Jacobi symbol per character), in
   -- parallel chunks
   let chunk := (kept.size + threads - 1) / threads
-  let rowTasks := (List.range threads).map fun t => Task.spawn fun _ =>
+  let wordTasks := (List.range threads).map fun t => Task.spawn fun _ =>
     (Array.range (min kept.size ((t + 1) * chunk) - min kept.size (t * chunk))).map fun i =>
-      let k := kept[t * chunk + i]!
-      fullRow ctx.fb rels[k]! rows.sparse[k]!
-  let keptRows := rowTasks.foldl (fun acc tk => acc ++ tk.get) #[]
-  -- merge light columns into a smaller, denser matrix
-  let (mrows, log, mcols) := Merge.mergeLog2 numCols dense keptRows params.mergeDensity 32
+      denseWord ctx.fb rels[kept[t * chunk + i]!]!
+  let keptRows := kept.map fun k => rows.sparse[k]!
+  -- merge light columns of the sparse matrix (the dense columns are imposed on
+  -- its kernel afterwards: `denseCombine`)
+  let (mrows, log, mcols) := Merge.mergeLog2 numCols 0 keptRows params.mergeDensity 32
   let mdeps := Lanczos.dependencies mcols mrows 64 threads
-  let deps := Merge.unmergeLog log mdeps
-  let deps := if deps.isEmpty then GF2.dependencies numCols keptRows 64 else deps
+  let words := wordTasks.foldl (fun acc tk => acc ++ tk.get) #[]
+  let deps := denseCombine words (Merge.unmergeLog log mdeps) kept.size
+  let deps := if !deps.isEmpty then deps else
+    -- (fallback: the full rows by elimination)
+    GF2.dependencies numCols (kept.map fun k => fullRow ctx.fb rels[k]! rows.sparse[k]!) 64
   let deps := deps.map fun dep => dep.map fun i => kept[i]!
   -- each dependency splits `n` with probability about 1/2: square roots in
   -- parallel batches of four
