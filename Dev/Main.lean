@@ -106,6 +106,7 @@ def devMain (args : List String) : IO Unit := do
   | "lasphases" :: path :: q0 :: cnt :: kvs => lasPhases path q0.toNat! cnt.toNat! kvs
   | "lasstages" :: path :: q0 :: cnt :: kvs => lasStages path q0.toNat! cnt.toNat! kvs
   | ["ratgate", path, q0, cnt] => ratGateStats path q0.toNat! cnt.toNat!
+  | ["tinystats", path, q0, cnt] => tinyStats path q0.toNat! cnt.toNat!
   | ["boundscheck", path, q0, cnt] => boundsCheck path q0.toNat! cnt.toNat!
   | ["gatedebug", path, q0, cnt] => gateDebug path q0.toNat! cnt.toNat!
   | ["mergecheck", seed] => mergeCheck seed.toNat!
