@@ -15,16 +15,16 @@ field sieve, with kernel-checked proofs of correctness.
   first needed dedicated runs (27.6 and 11.4 minutes); the current `auto`
   factors them in 12.7 s and 28 ms. No algorithm ever returned a wrong answer.
 - **Optimized** with measured speedups. On 16 cores, SIQS splits an 80-digit
-  balanced semiprime in 13 s, and the general number field sieve factors
-  **RSA-100** in 6.1 minutes.
+  balanced semiprime in 12 s, and the general number field sieve factors
+  **RSA-100** in 4.9 minutes.
 - **Compared** with [YAFU](https://github.com/bbuhrow/yafu) and
   [CADO-NFS](https://cado-nfs.gitlabpages.inria.fr/) on the same machine and
   inputs ([details](#comparison-with-yafu-and-cado-nfs)). The `auto` portfolio
   is faster than YAFU in total time on the core, medium and large tiers. It is
-  slower in total on the 60–100-digit tier (179 s vs 137 s), although it wins
-  171 of the 253 cases there. The number field sieve beats CADO-NFS on all 12
-  balanced semiprimes of 60–80 digits. On RSA-100 it is still 2.2× slower than
-  CADO-NFS and 2.1× slower than YAFU.
+  slower in total on the 60–100-digit tier (169 s vs 134 s), although it wins
+  169 of the 253 cases there. The number field sieve beats CADO-NFS on all 12
+  balanced semiprimes of 60–80 digits. On RSA-100 it is still 1.8× slower than
+  CADO-NFS and 1.7× slower than YAFU.
 
 ```text
 $ lake exe factor --threads 16 auto 3533694129556768659166595001485837031654967793751237916243212402585239551
@@ -125,18 +125,19 @@ overlap. A run counts only if it returns the exact reference factorization. The
 tables use the median of the three runs. `factor` certifies every prime factor
 (Pocklington); YAFU reports probable primes, and CADO-NFS reports the split.
 
-Raw records are in `results/compare/109e943-*.jsonl`. Summaries:
+Raw records are in `results/compare/219ac2e-*.jsonl` (an earlier run at commit
+`109e943`: `results/compare/109e943-*.jsonl`). Summaries:
 `python3 scripts/compare_report.py FILE --ours TOOL --base TOOL [--cases]`.
-These runs are at commit `109e943`.
+These runs are at commit `219ac2e`.
 
 **`factor auto` against YAFU `factor()`**, on every case of each tier:
 
 | Tier | Cases | Both solved | `factor auto` total | YAFU total | Geometric mean of time ratios | `auto` faster on |
 |---|---:|---:|---:|---:|---:|---:|
-| core (≤ 8 digits and special values) | 204 | 204 | 0.54 s | 2.12 s | 0.25 | 204 |
-| medium (< 2⁶⁴) | 102 | 102 | 0.31 s | 1.15 s | 0.26 | 101 |
-| large (20–59 digits) | 271 | 271 | 7.84 s | 15.48 s | 0.47 | 225 |
-| huge (60–100 digits) | 253 | 253 | 179 s | 137 s | 0.66 | 171 |
+| core (≤ 8 digits and special values) | 204 | 204 | 0.55 s | 2.13 s | 0.26 | 204 |
+| medium (< 2⁶⁴) | 102 | 102 | 0.31 s | 1.18 s | 0.26 | 101 |
+| large (20–59 digits) | 271 | 271 | 7.81 s | 15.50 s | 0.48 | 223 |
+| huge (60–100 digits) | 253 | 253 | 169 s | 134 s | 0.66 | 169 |
 
 On the core and medium tiers both tools spend most of their time starting up:
 a `factor` run takes about 3 ms, a YAFU run about 10 ms.
@@ -144,50 +145,66 @@ a `factor` run takes about 3 ms, a YAFU run about 10 ms.
 On the huge tier `auto` is faster on two thirds of the cases and in geometric
 mean, but slower in total, for two reasons:
 
-- **Balanced semiprimes (SIQS).** YAFU's AVX-512 SIQS is 1.3–2.6× faster: at 80
-  digits, 5.0–5.3 s against 12.9 s.
-- **Factors found by ECM.** On some Cunningham numbers YAFU's ECM pretest finds a
-  factor at once, and `auto` needs more curves or a sieve. Examples: `2²⁹³ − 1`
-  takes 8.15 s against 0.33 s, `3¹⁹⁹ − 1` 11.5 s against 2.6 s, and `2³¹⁷ − 1`
-  6.5 s against 0.7 s.
+- **Balanced semiprimes (SIQS).** YAFU's AVX-512 SIQS is 1.3–2.5× faster: at 80
+  digits, 5.1–5.2 s against 12.2–12.8 s.
+- **Factors found by ECM.** On some Cunningham numbers with a factor of 24–30
+  digits, YAFU's vectorized ECM finds it at once, and `auto` needs more curves
+  or a sieve. Examples: `2³¹¹ − 1` takes 10.7 s against 1.9 s, `2²⁹³ − 1` 7.1 s
+  against 1.9 s, and `2³¹⁷ − 1` 6.2 s against 0.5 s. ECM is luck: on
+  `3¹⁹⁹ − 1` YAFU took 15.3 s this time (2.6 s in the earlier run), `auto` 9.8 s.
+- **Certificates.** YAFU reports probable primes; `factor` proves them. For
+  `7¹⁰¹ − 1` (3.9 s against 0.02 s) that takes most of the time.
 
 **Number field sieve: `factor gnfs` against CADO-NFS**, on the balanced
 semiprimes from 60 digits (median wall time):
 
 | Case | Digits | `factor gnfs` | CADO-NFS |
 |---|---:|---:|---:|
-| balanced-60-0 | 60 | 2.35 s | 9.75 s |
-| balanced-60-1 | 60 | 2.28 s | 9.78 s |
-| balanced-64-0 | 64 | 4.16 s | 10.50 s |
-| balanced-64-1 | 64 | 3.93 s | 10.50 s |
-| balanced-68-0 | 68 | 5.80 s | 11.17 s |
-| balanced-68-1 | 68 | 6.81 s | 11.21 s |
-| balanced-72-0 | 71 | 7.51 s | 12.83 s |
-| balanced-72-1 | 72 | 8.58 s | 12.94 s |
-| balanced-76-0 | 76 | 16.09 s | 20.49 s |
-| balanced-76-1 | 76 | 15.47 s | 21.61 s |
-| balanced-80-0 | 80 | 25.80 s | 30.24 s |
-| balanced-80-1 | 80 | 27.55 s | 30.23 s |
+| balanced-60-0 | 60 | 1.95 s | 9.73 s |
+| balanced-60-1 | 60 | 1.89 s | 9.77 s |
+| balanced-64-0 | 64 | 3.53 s | 10.48 s |
+| balanced-64-1 | 64 | 3.33 s | 10.51 s |
+| balanced-68-0 | 68 | 4.57 s | 10.73 s |
+| balanced-68-1 | 68 | 5.30 s | 10.73 s |
+| balanced-72-0 | 71 | 6.47 s | 13.27 s |
+| balanced-72-1 | 72 | 7.04 s | 12.79 s |
+| balanced-76-0 | 76 | 14.50 s | 21.36 s |
+| balanced-76-1 | 76 | 13.45 s | 20.58 s |
+| balanced-80-0 | 80 | 21.91 s | 31.39 s |
+| balanced-80-1 | 80 | 23.10 s | 29.63 s |
 
 **RSA-100** (three runs each):
 
 | Tool | Median | Runs |
 |---|---:|---|
-| `factor gnfs` | 366 s | 366, 370, 363 s |
-| CADO-NFS | 166 s | 166, 166, 169 s |
-| YAFU `factor()` | 175 s | 175, 174, 175 s |
+| `factor gnfs` | 294 s | 302, 294, 293 s |
+| CADO-NFS | 167 s | 167, 165, 180 s |
+| YAFU `factor()` | 174 s | 174, 174, 174 s |
 
-**The goal is not met yet.** On RSA-100 the Lean number field sieve is 2.2×
-slower than CADO-NFS and 2.1× slower than YAFU. Most of the gap is lattice
+(At commit `109e943` the Lean number field sieve took 366 s.)
+
+**The goal is not met yet.** On RSA-100 the Lean number field sieve is 1.8×
+slower than CADO-NFS and 1.7× slower than YAFU. Most of the gap is lattice
 sieving:
 
 | | Lean | CADO-NFS |
 |---|---|---|
-| Sieving (wall time) | about 300 s | 120 s, filtering included |
-| Relations collected | 3.21M unique, special-q up to 1.32M | 3.13M unique (4.18M raw), special-q up to 0.87M |
-| Time per special-q (one thread, q = 180000) | 37 ms | 21 ms |
-| Relations per special-q (same q) | 77 | 86 |
-| Linear algebra | 206K-row matrix, 34 s | 175K-row matrix, 21 s |
+| Sieving (wall time) | about 220 s | 120 s, filtering included |
+| Relations collected | 3.20M unique, special-q up to 1.32M | 3.13M unique (4.18M raw), special-q up to 0.87M |
+| Time per special-q (one thread, q = 180000) | 32 ms | 21 ms |
+| Relations per special-q (same q) | 76 | 86 |
+| Linear algebra | 203K-row matrix, 31 s | 175K-row matrix, 21 s |
+
+Where the relations per special-q go: on the same 42 special-q, the Lean siever
+finds 3107 of CADO-NFS's 3604 relations (and 113 others). Of the missed ones,
+354 do not reach the algebraic sieve threshold: their norms are divisible by
+more than the threshold's 8 bits of the unsieved primes below 30. A further
+122 are dropped by the survivor prefilter. Part of the gap is also the
+polynomial. On CADO-NFS's own siever, its RSA-100 polynomial (Murphy E
+1.48·10⁻⁵) yields 25% more relations per special-q than the Lean one
+(1.26·10⁻⁵). That polynomial was an outlier among CADO-NFS's candidates, and
+CADO-NFS's root optimization does no better than the Lean one on the Lean
+candidates.
 
 The work continues on the siever's per-q cost and yield, on linear algebra, and
 on SIQS.
@@ -241,7 +258,7 @@ semiprimes and RSA-100.
 
 - 828 cases within the benchmark limits;
 - the two cases above, in dedicated runs and in the comparison runs;
-- the RSA-100 challenge, by SIQS in 6 h 35 min and by GNFS in 6.1 minutes (see
+- the RSA-100 challenge, by SIQS in 6 h 35 min and by GNFS in 4.9 minutes (see
   [Dataset](#dataset)).
 
 Plain `siqs` passed every case up to 80 digits: 577 up to 59 digits and 130
@@ -293,7 +310,7 @@ giving `gcd = n`. Without backtracking, 43 inputs of 6–9 digits were missed.
 Raw splitters on the dataset's balanced semiprimes, the hardest inputs of their
 size for these methods, using 16 threads (`results/scaling.json`;
 `scripts/scaling.py`). This table predates the current SIQS and number field
-sieve; for those, see the comparison below: 80 digits in 13 s (SIQS) and in 26–28 s
+sieve; for those, see the comparison above: 80 digits in 12 s (SIQS) and in 22–23 s
 (GNFS).
 
 | Digits | `cfrac` | `qs` | `mpqs` | `siqs` | `gnfs` |
@@ -344,8 +361,8 @@ exact multiplication. The hardest is `2²⁷⁷ − 1 = 1121297 · P38 · P40`.
 **RSA-100**, the smallest number of the RSA Factoring Challenge (factored
 in 1991), is the challenge tier. It is not part of the timed benchmark tiers.
 The general number field sieve (`factor --threads 16 gnfs`) factors it in
-**6.1 minutes** on 16 cores: 366 s, the median of three runs in the comparison
-below. Both 50-digit prime factors carry Pocklington certificates. An earlier
+**4.9 minutes** on 16 cores: 294 s, the median of three runs in the comparison
+above. Both 50-digit prime factors carry Pocklington certificates. An earlier
 dedicated SIQS run (`factor --threads 16 siqs`, a 64,000-prime factor base)
 took 6 h 35 min with 1.3 GB of memory (`results/hard-cases.json`).
 
@@ -404,6 +421,9 @@ messages):
 |---|---|
 | SIQS: new sieve and candidate kernels, block Lanczos, retuned parameters; fixed-width Montgomery arithmetic (generated per limb count) for ECM, `p − 1` and rho | SIQS at 80 digits: 181 s → 12.9 s |
 | GNFS: Kleinjung collision polynomial selection, Franke–Kleinjung lattice siever, singleton and clique removal, merge, block Lanczos, square root checked modulo `n` | 60 digits: 150 s → 2.3 s; RSA-100 in 6.1 minutes instead of 6 h 35 min with SIQS |
+| Siever survivors classified on machine words (cofactor modulo `2^64`, checked against a floating-point bound) before any big-number factoring | 100-digit siever, one thread: 36.7 → 32.1 ms per special-q |
+| Each sieving task on a private copy of the siever context: shared objects count references atomically | 16 tasks: 53.4 → 46.2 ms CPU per special-q |
+| Sieving rounds queued ahead while far from ready, smaller rounds near the end | RSA-100: 6.1 → 4.9 minutes (with the two rows above) |
 | Special number field sieve for divisors of `bⁿ ± 1`, chosen by measured cost | `10⁹⁷ − 1`: 27.6 minutes → 12.7 s |
 | ECM stage 2 with normalized baby and giant steps and a prime-pair schedule shared by all curves | 80 digits, `B1 = 50000`: stage 2 29.1 → 14.6 ms per curve |
 | Plans and tables built lazily instead of at program start | startup 20 ms → 4 ms |
