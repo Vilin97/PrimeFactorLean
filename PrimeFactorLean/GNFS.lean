@@ -518,7 +518,8 @@ special-`q` ideals from `lo`, and the end of their range: the ideals are dealt
 round-robin to `taskMul` times as many tasks as threads (so that every task
 gets a similar mix), each task on its own copy of the context and with a sieve
 buffer set from `scratch` (consumed; new ones as needed). -/
-def spawnRoundLas (las : Las.LasCtx) (threads count lo : Nat) (scratch : List Las.Scratch) :
+def spawnRoundLas (las : Las.LasCtx) (threads count lo : Nat) (scratch : List Las.Scratch)
+    (taskMul : Nat := las.params.taskMul) :
     List (Task (Array Rel × Las.Scratch)) × Nat := Id.run do
   let mut qs : Array (Nat × Nat) := #[]
   let mut hi := lo
@@ -527,7 +528,7 @@ def spawnRoundLas (las : Las.LasCtx) (threads count lo : Nat) (scratch : List La
     hi := hi + 512
   -- more tasks than threads (`taskMul`): a round waits for its slowest task,
   -- and the pool rebalances smaller tasks
-  let T := max 1 (las.params.taskMul * threads)
+  let T := max 1 (taskMul * threads)
   let scs := scratch ++ (List.range (T - min T scratch.length)).map fun _ => Las.Scratch.new las
   let tasks := (scs.zip (List.range T)).map fun (sc0, t) =>
     Task.spawn fun _ => Id.run do
@@ -688,9 +689,15 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
         let r := fresh.foldl Rows.add r0
         (r, if due then some (rowsExcess r dense params.extra) else none))
     if params.lasLogI > 0 then
+      -- a round that is not followed by a queued one waits for its slowest task
+      -- with the threads idling: four times as many tasks there (late rounds of
+      -- an RSA-100 run 19.6 -> 17.8 s; queued rounds lose more to the context
+      -- copies of the tasks than they gain)
       let (tasks, hi) := match pending with
         | some p => p
         | none => spawnRoundLas las threads count (max coll.nextQ params.qmin) scratch
+            (if prev.isNone && pipeline && coll.rels.size < pipeUntil then las.params.taskMul
+             else 4 * las.params.taskMul)
       if pending.isNone then scratch := []
       -- Far from ready (nothing survives singleton removal yet), the next round
       -- is queued before this one is collected: its tasks start as this round's

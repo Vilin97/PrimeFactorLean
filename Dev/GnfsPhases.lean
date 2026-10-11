@@ -250,6 +250,9 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   let mut lastGain := 0
   let mut lastCount := 1
   let syncEnd := overrides.contains "syncend"
+  let lateMul := (overrides.findSome? fun kv => match kv.splitOn "=" with
+    | ["lateMul", v] => v.toNat?
+    | _ => none).getD 4
   while !ready && round < 3000 do
     round := round + 1
     let a ← IO.monoNanosNow
@@ -272,6 +275,8 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     let (tasks, hi) := match pending with
       | some p => p
       | none => spawnRoundLas las threads count (max coll.nextQ params.qmin) scratch
+          (if prev.isNone && pipe && coll.rels.size < pipeUntil then las.params.taskMul
+           else lateMul * las.params.taskMul)
     if pending.isNone then scratch := []
     pending := if prev.isNone && pipe && coll.rels.size < pipeUntil then
         some (spawnRoundLas las threads count hi scratch)

@@ -249,6 +249,8 @@ def devMain (args : List String) : IO Unit := do
   | ["qsdebug", ns, numA] =>
     let n := ns.toNat!
     qsDebug n (QS.chooseParams (QS.decimalDigits n)) numA.toNat!
+  | ["siqsx", ns, ts, fbs, m, lp, dlp, slack] => timed s!"siqs fb={fbs} M={m} lp={lp} dlp={dlp} slack={slack}" fun _ => (SIQS.split ns.toNat! { threads := ts.toNat!, params := some { (SIQS.chooseParams (QS.decimalDigits ns.toNat!)) with fbSize := fbs.toNat!, M := m.toNat!, lpMult := lp.toNat!, dlpDiv := dlp.toNat!, slack := slack.toNat! } }).map (·.val)
+  | ["siqsv", ns, ts, spv, slack, pre] => timed s!"siqs spv={spv} slack={slack} pre={pre}" fun _ => (SIQS.split ns.toNat! { threads := ts.toNat!, params := some { (SIQS.chooseParams (QS.decimalDigits ns.toNat!)) with spv := spv.toNat!, slack := slack.toNat!, preSlack := pre.toNat! } }).map (·.val)
   | ["siqsp", ns, ts, fbs, m, lp, dlp] =>
     let n := ns.toNat!
     let params : QS.Params := { (QS.Params.mk fbs.toNat! m.toNat! lp.toNat! 40 6 dlp.toNat! 0) with }
