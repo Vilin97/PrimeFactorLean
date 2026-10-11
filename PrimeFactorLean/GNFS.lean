@@ -595,8 +595,8 @@ def matrixReady (ctx : Ctx) (params : Params) (rels : Array Rel) : Bool :=
 /-- Readiness bookkeeping after a check `(excess, ok, kept)` of `size` relations:
 whether the matrix is ready, the last measurement (none while nothing survives
 singleton removal) and the extrapolated relation target (`0`: none). The target
-extrapolates the last two excesses, with a tenth more since the excess grows
-faster than linearly. -/
+extrapolates the last two excesses linearly: the excess grows faster than
+linearly, so the target errs on the late side. -/
 def readiness (extra size : Nat) (prev : Option (Nat × Int)) (chk : Int × Bool × Nat) :
     Bool × Option (Nat × Int) × Nat :=
   let (excess, ok, kept) := chk
@@ -606,7 +606,7 @@ def readiness (extra size : Nat) (prev : Option (Nat × Int)) (chk : Int × Bool
       | some (r0, e0) =>
         if excess > e0 && size > r0 then
           let need := ((extra : Int) - excess) * ((size - r0 : Nat) : Int) / (excess - e0)
-          size + (11 * need.toNat) / 10
+          size + need.toNat
         else 0
       | none => 0
     (ok, some (size, excess), target)
@@ -654,18 +654,25 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   let mut rows := Rows.empty ctx.fb
   let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
   let dense := 2 + ctx.fb.chars.size
+  -- the extrapolated relation count for readiness, and the last round's yield
+  let mut predicted := 0
+  let mut lastGain := 0
+  let mut lastCount := 1
   while !ready && round < cfg.maxRounds do
     round := round + 1
     let before := coll.rels.size
     -- Readiness is a full singleton removal: once the relation count can
     -- suffice and after every tenth of growth, then after every round once an
-    -- excess has been measured (it grows fast near the end). Far from ready
-    -- (no excess measured yet), the rows of the relations so far are built and
-    -- checked in a task while this round sieves; near the end the check
-    -- follows the round, since one a round late would oversieve.
-    let due := coll.rels.size ≥ base && coll.rels.size * 10 ≥ lastCheck * 11
+    -- excess has been measured (it grows fast near the end). The rows of the
+    -- relations so far are built and checked in a task while this round
+    -- sieves, unless this round may reach the extrapolated count: then the
+    -- check follows the round, since one a round late would oversieve.
+    let nearReady := prev.isSome && predicted > 0 &&
+      (before + lastGain * count / lastCount) * 100 ≥ predicted * 97
+    let due := coll.rels.size ≥ base &&
+      (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11)
     let mut bg : Option (Task (Rows × Option (Int × Bool × Nat))) := none
-    if prev.isNone && params.lasLogI > 0 then
+    if !nearReady && params.lasLogI > 0 then
       let fresh := coll.rels.extract rows.sparse.size coll.rels.size
       let r0 := rows
       rows := default
@@ -710,6 +717,9 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
       prev := p'
       target := tg
     let gained := coll.rels.size - before
+    if target > 0 then predicted := target
+    lastGain := gained
+    lastCount := max 1 count
     if params.lasLogI > 0 && gained > 0 then
       -- rounds of a tenth of growth, a twenty-fifth from `pipeUntil` on (the
       -- readiness check lags a round behind, and singleton removal goes from

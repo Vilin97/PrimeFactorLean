@@ -222,14 +222,22 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   let base := ctx.fb.ratPrimes.size + ctx.fb.algPrimes.size + ctx.fb.chars.size + 2
   let dense := 2 + ctx.fb.chars.size
   let mut tWait := 0
+  let mut predicted := 0
+  let mut lastGain := 0
+  let mut lastCount := 1
+  let syncEnd := overrides.contains "syncend"
   while !ready && round < 3000 do
     round := round + 1
     let a ← IO.monoNanosNow
     let before := coll.rels.size
-    -- as `GNFS.splitWith`: far from ready, rows and checks in a task during the round
-    let due := coll.rels.size ≥ base && coll.rels.size * 10 ≥ lastCheck * 11
+    -- as `GNFS.splitWith`: rows and checks in a task during the round, unless
+    -- the round may reach the extrapolated count (`syncend`: the older rule)
+    let nearReady := prev.isSome && (syncEnd || (predicted > 0 &&
+      (before + lastGain * count / lastCount) * 100 ≥ predicted * 97))
+    let due := coll.rels.size ≥ base &&
+      (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11)
     let mut bg : Option (Task (Rows × Option (Int × Bool × Nat))) := none
-    if prev.isNone then
+    if !nearReady then
       let fresh := coll.rels.extract rows.sparse.size coll.rels.size
       let r0 := rows
       rows := default
@@ -277,6 +285,9 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     tWait := tWait + (b2 - b)
     tCheck := tCheck + (c2 - b2)
     let gained := coll.rels.size - before
+    if target > 0 then predicted := target
+    lastGain := gained
+    lastCount := max 1 count
     IO.eprintln s!"round {round}: {count} special-q, q < {coll.nextQ} gained {gained} total {coll.rels.size} ({(b - a) / 1000000} ms)"
     if gained > 0 then
       let growth := if coll.rels.size ≥ pipeUntil then 25 else 10
