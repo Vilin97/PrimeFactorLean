@@ -252,7 +252,7 @@ def lpClass (u lpb mfb lim : Nat) : Nat :=
   else if u >>> mfb != 0 then 0
   else if u >>> lpb == 0 then 1
   else if u < lim * lim then 0
-  else if u >>> 52 == 0 && u % 2 == 1 && SIQS.sprp2 u.toUInt64 then 0
+  else if u >>> 51 == 0 && u % 2 == 1 && SIQS.sprp2 u.toUInt64 then 0
   else 2
 
 /-- Survivor statistics of one special-`q` (`processQ5` with counters): scan,
@@ -1130,7 +1130,7 @@ stage at which each of CADO-NFS's relations is lost — outside the region, the
 rational byte, the (relaxed) algebraic byte, the gcd filter, the exact tiny-prime
 test, the prefilter, the gate, the exact factoring — with the large-prime counts
 (rational, algebraic, from CADO's factorizations) of each loss. -/
-def lasMiss3 (polyPath cadoPath : String) (tinyT : Nat) : IO Unit := do
+def lasMiss3 (polyPath cadoPath : String) (tinyT : Nat) (tinyTR : Nat := 0) : IO Unit := do
   let (n, sel) ← readCadoPoly polyPath
   let params := chooseParams (GNFS.decimalDigits n)
   let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
@@ -1138,7 +1138,7 @@ def lasMiss3 (polyPath cadoPath : String) (tinyT : Nat) : IO Unit := do
   let ctx := mkCtx n sel params
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
-      mfbA := params.mfbA, fudge := params.lasFudge, tinyT := tinyT }
+      mfbA := params.mfbA, fudge := params.lasFudge, tinyT := tinyT, tinyTR := tinyTR }
   let ctx' := Las.mkLasCtx ctx lasParams
   let las := ctx'
   let blocks ← readCadoRels cadoPath
@@ -1164,15 +1164,19 @@ def lasMiss3 (polyPath cadoPath : String) (tinyT : Nat) : IO Unit := do
     let ⟨b1, b2, bits⟩ := sc
     let Pr := Las.powerRoots las.rat ua ub va vb
     let Pa := Las.powerRoots las.alg ua ub va vb
-    let (fR, biasR) := Las.fillSegments las b1 false q ua ub va vb las.params.mfbR (Las.rowExtras las las.rat Rr0)
+    let mfbR := if tinyTR == 0 then las.params.mfbR else las.params.mfbR + tinyTR - las.params.fudge
+    let (fR, biasR) := Las.fillSegments las b1 false q ua ub va vb mfbR (Las.rowExtras las las.rat Rr0)
     let mfbA := if tinyT == 0 then las.params.mfbA else las.params.mfbA + tinyT - (las.params.fudge + las.params.fudgeA)
     let (fA, biasA) := Las.fillSegments las b2 true q ua ub va vb mfbA (Las.rowExtras las las.alg Ra0)
-    let (bufR, Rr) := Las.sieveLargePaired las las.rat Rr0 (Las.sievePowers las las.rat Pr (Las.lineSieveSide las las.rat Rr0 fR))
+    let (bufR0, Rr) := Las.sieveLargePaired las las.rat Rr0 (Las.sievePowers las las.rat Pr (Las.lineSieveSide las las.rat Rr0 fR))
     let (bufA0, Ra) := Las.sieveLargePaired las las.alg Ra0 (Las.sievePowers las las.alg Pa (Las.lineSieveSide las las.alg Ra0 fA))
-    let s0 := Las.survivors bufR bufA0 len
+    let ratByte := bufR0.extract 0 bufR0.size
+    let s0 := Las.survivors bufR0 bufA0 len
     let c1 := Las.dropSmallGcd las s0
-    let (bufA, c2) := if tinyT == 0 then (bufA0, c1) else Las.tinyFilter las (Las.mkTinyF las ua ub va vb) bufA0 c1
-    let surv := Las.prefilterGap4 las q ua ub va vb bufR bufA biasR biasA (Las.tinyPrimes las las.rat Rr)
+    let (bufR, bufA, c2) := if tinyT == 0 && tinyTR == 0 then (bufR0, bufA0, c1)
+      else Las.tinyFilter2 las (Las.mkTinyF las ua ub va vb) c1 0 bufR0 bufA0 (Array.mkEmpty c1.size) (c1.size + 1)
+    let surv := Las.prefilterGap4 las q ua ub va vb bufR bufA biasR biasA
+      (if tinyTR == 0 then Las.tinyPrimes las las.rat Rr else #[])
       (if tinyT == 0 then Las.tinyPrimes las las.alg Ra else #[]) slack c2
     let (lab, rowStart) := Las.labelSurvivors las (Las.zeroRows las bufA) surv
     let bits := Las.markBits bits surv true
@@ -1202,7 +1206,7 @@ def lasMiss3 (polyPath cadoPath : String) (tinyT : Nat) : IO Unit := do
         let (i, j) := if nj / det < 0 then (-(ni / det), -(nj / det)) else (ni / det, nj / det)
         if i < -(I / 2 : Nat) || i ≥ (I / 2 : Nat) || j ≤ 0 || j ≥ (las.J : Int) then return 0
         let pos := j.toNat * I + (i + (I / 2 : Nat)).toNat
-        if bufR.get! pos < 128 then return 1
+        if ratByte.get! pos < 128 then return 1
         if !s0set.contains pos then return 2
         if !c1set.contains pos then return 3
         if !c2set.contains pos then return 4
@@ -1350,3 +1354,148 @@ def lasMiss (polyPath cadoPath : String) : IO Unit := do
   IO.println s!"CADO's relations: found by us {cnt[7]!}; missed: outside our region {cnt[0]!}, rational byte below threshold {cnt[1]!}, algebraic byte {cnt[2]!}, gcd filter {cnt[3]!}, prefilter {cnt[4]!}, gate {cnt[5]!} (codes {gateCodes.extract 0 4}), exact factoring {cnt[6]!}"
   IO.println s!"algebraic misses: segment threshold above the point's own (bits, 0..15+): {algHist}"
   IO.println s!"algebraic misses: tiny-prime bits (0..15+): {tinyHist}"
+
+/-- The production siever (`processQs14` with `tinyT`, `tinyTR`) one stage at a
+time, single-threaded: the time of each stage per special-q and the candidate
+counts between them. -/
+def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let get (key : String) (d : Nat) : Nat := (kvs.findSome? fun kv => match kv.splitOn "=" with
+    | [k, v] => if k == key then v.toNat? else none
+    | _ => none).getD d
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := get "logI" params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA,
+      mfbR := params.mfbR, mfbA := params.mfbA, fudge := get "fudge" params.lasFudge,
+      jDiv := get "jDiv" 2, sieveFrom := get "from" 30, tinyT := get "tinyT" params.lasTinyT,
+      tinyF := get "tinyF" 0, tinyTR := get "tinyTR" params.lasTinyTR }
+  let ctx' := Las.mkLasCtx ctx lasParams
+  let slack := get "slack" 3
+  let qs := specialQs sel q0 count
+  let names := #["bases+roots4", "powerRoots", "fill R", "fill A", "line R", "line A", "powers R",
+    "powers A", "large R", "large A", "survivors", "gcd", "tiny", "prefilter", "label+bits",
+    "resieve R", "resieve A", "group", "bounds", "gate scan R", "gate pass R", "gate scan A",
+    "gate pass A", "factor"]
+  let mut tm : Array Nat := Array.replicate names.size 0
+  let mut cnt : Array Nat := Array.replicate 7 0
+  let mut sc := Las.Scratch.new ctx'
+  let las := ctx'
+  let len := las.I * las.J
+  let mut i := 0
+  while i < qs.size do
+    let grp := qs.extract i (i + 4)
+    let t0 ← IO.monoNanosNow
+    let bases ← IO.lazyPure fun _ => grp.map fun (q, ρ) =>
+      let (u, v) := reduceLattice q ρ las.skew
+      (u.1, u.2, v.1, v.2)
+    let Rrs ← IO.lazyPure fun _ => Las.latticeRoots4 las.rat bases
+    let Ras ← IO.lazyPure fun _ => Las.latticeRoots4 las.alg bases
+    let t1 ← IO.monoNanosNow
+    tm := tm.modify 0 (· + (t1 - t0))
+    for jx in [0:grp.size] do
+      let (q, ρ) := grp[jx]!
+      let (ua, ub, va, vb) := bases[jx]!
+      let Rr := Rrs[jx]!
+      let Ra := Ras[jx]!
+      let ⟨b1, b2, bits⟩ := sc
+      let mut ts : Array Nat := #[← IO.monoNanosNow]
+      let Pr ← IO.lazyPure fun _ => Las.powerRoots las.rat ua ub va vb
+      let Pa ← IO.lazyPure fun _ => Las.powerRoots las.alg ua ub va vb
+      let exR ← IO.lazyPure fun _ => Las.rowExtras las las.rat Rr
+      let exA ← IO.lazyPure fun _ => Las.rowExtras las las.alg Ra
+      ts := ts.push (← IO.monoNanosNow)
+      let mfbR := if las.params.tinyTR == 0 then las.params.mfbR
+        else las.params.mfbR + las.params.tinyTR - las.params.fudge
+      let tinyT := las.params.tinyT
+      let mfbA := if tinyT == 0 then las.params.mfbA
+        else las.params.mfbA + tinyT - (las.params.fudge + las.params.fudgeA)
+      let (fR, biasR) ← IO.lazyPure fun _ => Las.fillSegments las b1 false q ua ub va vb mfbR exR
+      ts := ts.push (← IO.monoNanosNow)
+      let (fA, biasA) ← IO.lazyPure fun _ => Las.fillSegments las b2 true q ua ub va vb mfbA exA
+      ts := ts.push (← IO.monoNanosNow)
+      let lR ← IO.lazyPure fun _ => Las.lineSieveSide las las.rat Rr fR
+      ts := ts.push (← IO.monoNanosNow)
+      let lA ← IO.lazyPure fun _ => Las.lineSieveSide las las.alg Ra fA
+      ts := ts.push (← IO.monoNanosNow)
+      let pR ← IO.lazyPure fun _ => Las.sievePowers las las.rat Pr lR
+      ts := ts.push (← IO.monoNanosNow)
+      let pA ← IO.lazyPure fun _ => Las.sievePowers las las.alg Pa lA
+      ts := ts.push (← IO.monoNanosNow)
+      let (bufR, Rr) ← IO.lazyPure fun _ => Las.sieveLargePaired las las.rat Rr pR
+      ts := ts.push (← IO.monoNanosNow)
+      let (bufA, Ra) ← IO.lazyPure fun _ => Las.sieveLargePaired las las.alg Ra pA
+      ts := ts.push (← IO.monoNanosNow)
+      let c0 ← IO.lazyPure fun _ => Las.survivors bufR bufA len
+      ts := ts.push (← IO.monoNanosNow)
+      let c1 ← IO.lazyPure fun _ => Las.dropSmallGcd las c0
+      ts := ts.push (← IO.monoNanosNow)
+      let (bufR, bufA, c2) ← IO.lazyPure fun _ =>
+        if tinyT == 0 && las.params.tinyTR == 0 then (bufR, bufA, c1)
+        else Las.tinyFilter2 las (Las.mkTinyF las ua ub va vb) c1 0 bufR bufA (Array.mkEmpty c1.size)
+          (c1.size + 1)
+      ts := ts.push (← IO.monoNanosNow)
+      let surv ← IO.lazyPure fun _ => Las.prefilterGap4 las q ua ub va vb bufR bufA biasR biasA
+        (if las.params.tinyTR == 0 then Las.tinyPrimes las las.rat Rr else #[])
+        (if tinyT == 0 then Las.tinyPrimes las las.alg Ra else #[]) slack c2
+      ts := ts.push (← IO.monoNanosNow)
+      cnt := cnt.modify 0 (· + c0.size)
+      cnt := cnt.modify 1 (· + c1.size)
+      cnt := cnt.modify 2 (· + c2.size)
+      cnt := cnt.modify 3 (· + surv.size)
+      if surv.isEmpty then
+        for k in [0:ts.size - 1] do
+          tm := tm.modify (k + 1) (· + (ts[k + 1]! - ts[k]!))
+        sc := ⟨bufR, bufA, bits⟩
+        continue
+      let (lab, rowStart) ← IO.lazyPure fun _ => Las.labelSurvivors las (Las.zeroRows las bufA) surv
+      let bits ← IO.lazyPure fun _ => Las.markBits bits surv true
+      ts := ts.push (← IO.monoNanosNow)
+      let recsR ← IO.lazyPure fun _ => Las.resievePaired las las.rat Rr bits #[]
+      ts := ts.push (← IO.monoNanosNow)
+      let recsA ← IO.lazyPure fun _ => Las.resievePaired las las.alg Ra bits #[]
+      ts := ts.push (← IO.monoNanosNow)
+      let (offR, ksR) ← IO.lazyPure fun _ => Las.groupFlat las surv lab rowStart recsR
+      let (offA, ksA) ← IO.lazyPure fun _ => Las.groupFlat las surv lab rowStart recsA
+      let bits ← IO.lazyPure fun _ => Las.markBits bits surv false
+      ts := ts.push (← IO.monoNanosNow)
+      let bd ← IO.lazyPure fun _ => Las.mkBounds las q ua ub va vb Rr Ra
+      ts := ts.push (← IO.monoNanosNow)
+      let IU := las.I.toUInt64
+      let logI := las.params.logI.toUInt64
+      let (lgR, prR) ← IO.lazyPure fun _ =>
+        Las.smallScanAll bd.tabR las.rat.pinvLim las.rat.lg2 las.rat.sieveStart surv IU logI
+      ts := ts.push (← IO.monoNanosNow)
+      let idx ← IO.lazyPure fun _ => (Array.range surv.size).filter fun s =>
+        Las.ratPass las bd ksR offR[s]! offR[s + 1]! surv[s]! (lgR.get! s) prR[s]!
+      ts := ts.push (← IO.monoNanosNow)
+      let (lgA, prA) ← IO.lazyPure fun _ =>
+        Las.smallScanAll bd.tabA las.alg.pinvLim las.alg.lg2 las.alg.sieveStart (idx.map (surv[·]!)) IU logI
+      ts := ts.push (← IO.monoNanosNow)
+      let pass ← IO.lazyPure fun _ => (idx.size.fold (init := #[]) fun t _ acc =>
+        let s := idx[t]!
+        if Las.algPass las bd ksA offA[s]! offA[s + 1]! surv[s]! (lgA.get! t) prA[t]! then acc.push s else acc)
+      ts := ts.push (← IO.monoNanosNow)
+      cnt := cnt.modify 6 (· + idx.size)
+      let nrel ← IO.lazyPure fun _ => Id.run do
+        let mut r := 0
+        for k in pass do
+          if (Las.factorSurvivor2 las q ρ ua ub va vb Rr Ra (Las.idealsOf offR ksR k)
+              (Las.idealsOf offA ksA k) surv[k]!).isSome then
+            r := r + 1
+        return r
+      ts := ts.push (← IO.monoNanosNow)
+      cnt := cnt.modify 4 (· + pass.size)
+      cnt := cnt.modify 5 (· + nrel)
+      for k in [0:ts.size - 1] do
+        tm := tm.modify (k + 1) (· + (ts[k + 1]! - ts[k]!))
+      sc := ⟨bufR, lab, bits⟩
+    i := i + 4
+  let nq := max 1 qs.size
+  let total := tm.foldl (· + ·) 0
+  IO.println s!"{qs.size} special-q from {q0}: {total / nq / 1000} us per q, {cnt[5]!} rels"
+  for k in [0:names.size] do
+    IO.println s!"  {names[k]!}: {tm[k]! / nq / 1000} us ({tm[k]! * 1000 / max 1 total / 10}.{tm[k]! * 1000 / max 1 total % 10}%)"
+  IO.println s!"  per q: candidates {cnt[0]! / nq}, after gcd {cnt[1]! / nq}, after tiny {cnt[2]! / nq}, after prefilter {cnt[3]! / nq}, after rational gate {cnt[6]! / nq}, after gate {cnt[4]! / nq}, rels {cnt[5]! * 10 / nq / 10}.{cnt[5]! * 10 / nq % 10}"

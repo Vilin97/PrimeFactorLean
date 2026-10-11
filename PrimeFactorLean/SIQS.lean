@@ -660,26 +660,26 @@ def mkAPoly (ctx : Ctx) (seed : Nat) : Option APoly := Id.run do
   logp := logp.set! 0 0
   return some { A := A, qs := qs, Bl := Bl, delta := delta, roots := roots, logp := logp }
 
-/-! ## Cofactors below `2^50`
+/-! ## Cofactors below `2^51`
 
-Double-large-prime cofactors fit in 50 bits, where `a · b mod m` can be computed
+Double-large-prime cofactors fit in 51 bits, where `a · b mod m` can be computed
 with machine words: the quotient is estimated in floating point (53-bit
 mantissa, so it is off by at most one) and the remainder is corrected in
 wrapping 64-bit arithmetic. -/
 
-/-- `a · b mod m` for `a, b < m < 2^52`, with `minv ≈ 1/m`: `a`, `b` are exact
-doubles, the product and the quotient carry relative errors of a few `2^-53`,
-so the estimated quotient is off by at most two, which the corrections absorb
-(the true remainder lies in `(-2m, 3m)`, well inside 64 bits). -/
+/-- `a · b mod m` for `a, b < m ≤ 2^51`, with `minv ≈ 1/m`: `a`, `b` are exact
+doubles, and the three roundings of the estimated quotient (product, `1/m`,
+quotient), of relative error `2^-53` each, leave it within `3 · 2^-53 · ab/m < 1`
+of `ab/m < 2^51`. So it is off by at most one, and the true remainder lies in
+`[-m, 2m)`: one correction each way, by masks rather than branches (they are
+taken at random; the branches cost a third of `uecm`'s time). -/
 @[inline] def mulmod50 (a b m : UInt64) (minv : Float) : UInt64 :=
   let q := ((a.toFloat * b.toFloat) * minv).toUInt64
   let r := a * b - q * m
-  -- the true remainder lies in (-2m, 3m); the sign is the top bit. (A repeated
-  -- 64-bit literal here would trigger a Lean 4.24 code-generation bug.)
-  let r := if r >>> 63 != 0 then r + m else r
-  let r := if r >>> 63 != 0 then r + m else r
-  let r := if r ≥ m then r - m else r
-  if r ≥ m then r - m else r
+  -- the sign is the top bit
+  let r := r + (m &&& -(r >>> 63))
+  let t := r - m
+  t + (m &&& -(t >>> 63))
 
 /-- `b^e mod m` for `b < m < 2^50`. -/
 def powmod50 (b e m : UInt64) (mf : Float) : UInt64 := go b e 1 64
@@ -943,7 +943,7 @@ def uecmGiants (m : UInt64) (mf : Float) (bb : Babies) (sch : ByteArray)
       let (Xn, Zn) := uecmAdd m mf Xc Zc X1 Z1 Xp Zp
       uecmGiants m mf bb sch X1 Z1 mmax fuel Xc Zc Xn Zn acc (k + 1)
 
-/-- One curve (Suyama parameter `σ`) on `m < 2^52`: the gcd of `m` with the
+/-- One curve (Suyama parameter `σ`) on `m < 2^51`: the gcd of `m` with the
 product of the stage-1 `Z` and the stage-2 factors (`1` or `m` when it found
 nothing; one gcd per curve). -/
 def uecmCurveP (plan : ByteArray × Nat × ByteArray) (m σ : UInt64) (mf : Float) : UInt64 :=
@@ -1152,7 +1152,7 @@ def uecmCurve2P (plan : ByteArray × Nat × ByteArray) (m σ : UInt64) (mf : Flo
 /-- One curve with the standard plan. -/
 def uecmCurve (m σ : UInt64) (mf : Float) : UInt64 := uecmCurveP uecmPlan.get m σ mf
 
-/-- A factor of a composite `u < 2^52` from up to `curves` curves of `plan` (`0` if none). -/
+/-- A factor of a composite `u < 2^51` from up to `curves` curves of `plan` (`0` if none). -/
 def uecmP (plan : ByteArray × Nat × ByteArray) (u : UInt64) (curves : Nat) : UInt64 := go 6 curves
 where
   go (σ : UInt64) : Nat → UInt64
@@ -1181,15 +1181,17 @@ evaluated when needed). -/
 @[noinline] def squfofFactor (u : Nat) : Nat := ((SQUFOF.race u).map (·.val)).getD 0
 
 /-- A factor of a composite `u` (`0` if none was found): ECM with tiny bounds
-(`uecm`, up to 32 curves) for `u < 2^52`, then rho; on 2000 products of two
-primes of 19 to 26 bits, 25 µs against 55 µs for rho alone. -/
+(`uecm`, up to 32 curves) for `u < 2^51`, then rho; on 2000 products of two
+primes of 19 to 26 bits, 25 µs against 55 µs for rho alone (14 µs and 14 µs
+since the corrections of `mulmod50` are branch-free, on 2000 cofactors of the
+100-digit number field sieve: two primes of `[lim, 2^lpb)`, 39 to 51 bits). -/
 def cofactorFactor (u : Nat) : Nat :=
   -- Brent's rho finds a factor `p ≤ u^(1/2)` after about `1.25 √p ≤ 1.25 u^(1/4)`
   -- steps: a budget of `8 u^(1/4)` (and at least 2000) rarely gives up early
   let iters := (max 2000 (8 * iroot u 4)).toUInt64
-  -- `u >>> 52 == 0` rather than `u < 2 ^ 52`: `Nat` literals above `2^32` are
+  -- `u >>> 51 == 0` rather than `u < 2 ^ 51`: `Nat` literals above `2^32` are
   -- parsed from their digits at every use
-  let g := if u >>> 52 == 0 then
+  let g := if u >>> 51 == 0 then
       let g := uecm u.toUInt64 32
       if g != 0 then g else
       let g := rho50 u.toUInt64 1 iters
@@ -1200,7 +1202,7 @@ def cofactorFactor (u : Nat) : Nat :=
 /-- Split a double-large-prime cofactor `u` into two primes below `lp` (a base-2
 probable-prime screen first). -/
 def splitCofactor (u lp : Nat) : Option (Nat × Nat) :=
-  if u >>> 52 == 0 && u % 2 == 1 && sprp2 u.toUInt64 then none
+  if u >>> 51 == 0 && u % 2 == 1 && sprp2 u.toUInt64 then none
   else
     let d := cofactorFactor u
     if d ≤ 1 then none else

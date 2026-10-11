@@ -1065,24 +1065,40 @@ def scanBoth (a r : ByteArray) (j e : Nat) (acc : Array Nat) : Array Nat :=
   else acc
 termination_by e - j
 
+/-- The positions `b + k` of the bytes `k` of `m` (`m` has only bit 7 of its
+bytes) that are set, in increasing order: the lowest set bit `2^(8k+7)`, shifted
+to `2^(8k)`, times `0x0001020304050607` has `k` in its top byte. -/
+def pushBytes (m : UInt64) (b : Nat) (acc : Array Nat) : Nat → Array Nat
+  | 0 => acc
+  | fuel + 1 =>
+    if m == 0 then acc
+    else pushBytes (m &&& (m - 1)) b
+      (acc.push (b + ((((m &&& -m) >>> 7) * 0x0001020304050607) >>> 56).toNat)) fuel
+
 /-- Positions where both sides reached `128` (in increasing order): blocks of
 4096 bytes are skipped unless both sides' `OR` folds (vectorized) have bit 7
-set, then 16-byte groups unless the algebraic side's has (its threshold is
-reached far less often than the rational side's). -/
+set, then the machine words of both sides are tested together (one 64-bit load
+per side and word). -/
 def survivors (bufR bufA : ByteArray) (len : Nat) : Array Nat :=
   let size := min len (min bufR.size bufA.size)
   survBlocks bufR bufA 0 size #[] (size / 4096 + 1)
 where
   fold (s : ByteArray) (a b : Nat) : UInt8 := s.foldl (fun acc x => acc ||| x) 0 a b
-  /-- The 16-byte groups of `[c, e)` (tail recursive, no loop state). -/
-  survGroups (bufR bufA : ByteArray) (c e : Nat) (acc : Array Nat) : Nat → Array Nat
+  /-- The words of `[i, e)` (tail recursive, no loop state; the bytes after the
+  last whole word byte by byte). -/
+  survWords (bufR bufA : ByteArray) (i e : Nat) (acc : Array Nat) : Nat → Array Nat
     | 0 => acc
     | fuel + 1 =>
-      if c < e then
-        let ce := min e (c + 16)
-        let acc := if fold bufA c ce ≥ 128 then scanBoth bufA bufR c ce acc else acc
-        survGroups bufR bufA ce e acc fuel
-      else acc
+      if i + 8 ≤ e then
+        if h : i + 8 ≤ bufA.size ∧ i + 8 ≤ bufR.size then
+          let iu := i.toUSize
+          have hi : iu.toNat ≤ i := Lanczos.nat_toUSize_le i
+          have hA : iu.toNat + 8 ≤ bufA.size := by omega
+          have hR : iu.toNat + 8 ≤ bufR.size := by omega
+          let m := Lanczos.bget64U bufA iu hA &&& Lanczos.bget64U bufR iu hR &&& 0x8080808080808080
+          survWords bufR bufA (i + 8) e (if m == 0 then acc else pushBytes m i acc 8) fuel
+        else scanBoth bufA bufR i e acc
+      else scanBoth bufA bufR i e acc
   /-- The blocks of 4096 bytes of `[b, size)`. -/
   survBlocks (bufR bufA : ByteArray) (b size : Nat) (acc : Array Nat) : Nat → Array Nat
     | 0 => acc
@@ -1090,7 +1106,7 @@ where
       if b < size then
         let e := min size (b + 4096)
         let acc := if fold bufA b e ≥ 128 && fold bufR b e ≥ 128 then
-            survGroups bufR bufA b e acc 257 else acc
+            survWords bufR bufA b e acc 513 else acc
         survBlocks bufR bufA e size acc fuel
       else acc
 
@@ -1214,7 +1230,7 @@ def cofactorClass (u lpb mfb lim : Nat) : Nat :=
   else if u >>> mfb != 0 then 0
   else if u >>> lpb == 0 then 1
   else if u < lim * lim then 0
-  else if u >>> 52 == 0 && u % 2 == 1 && sprp2 u.toUInt64 then 0
+  else if u >>> 51 == 0 && u % 2 == 1 && sprp2 u.toUInt64 then 0
   else 2
 
 /-- The admissible large primes of a cofactor of class `c` (`cofactorClass`). -/
@@ -2672,7 +2688,7 @@ def hornerU (cs : Array UInt64) (a b : UInt64) : Nat → UInt64 → UInt64 → U
   else if u >>> mfb != 0 then 0
   else if u >>> lpb == 0 then 1
   else if u < lim2 then 0
-  else if u >>> 52 == 0 && u &&& 1 == 1 && sprp2 u then 0
+  else if u >>> 51 == 0 && u &&& 1 == 1 && sprp2 u then 0
   else 2
 
 /-- The class of a side's cofactor from the norm modulo `2^64` (`n64`, absolute
