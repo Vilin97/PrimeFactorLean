@@ -1117,8 +1117,12 @@ def collect (ctx : Ctx) (needed threads maxRounds : Nat) : Array (Relation ctx.n
     let before := fulls.size + edges.size
     for task in tasks do
       for f in task.get do
-        if seen.contains f.rel.x then continue
-        seen := seen.insert f.rel.x
+        -- `X` and `n - X` give the same row (the same polynomial reached
+        -- again with `B` negated): such a pair is a dependency whose square
+        -- roots are always `X ≡ -Y`, so keep one relation per `±X`
+        let key := min f.rel.x (ctx.n - f.rel.x)
+        if seen.contains key then continue
+        seen := seen.insert key
         if f.l1 == 1 && f.l2 == 1 then
           fulls := fulls.push f.rel
         else
@@ -1172,8 +1176,12 @@ def splitCore (n : Nat) (cfg : Config := {}) : Option (ProperFactor n) :=
   | .inr p => checkFactor n p
   | .inl ctx =>
     let needed := ctx.fb.size + 1 + params.extra
-    let rels := collect ctx needed (max 1 cfg.threads) cfg.maxRounds
-    if h : ctx.n = n then h ▸ extract ctx rels (max 1 cfg.threads) else none
+    let attempt (k : Nat) : Option (ProperFactor n) :=
+      let rels := collect ctx (k * needed) (max 1 cfg.threads) cfg.maxRounds
+      if h : ctx.n = n then h ▸ extract ctx rels (max 1 cfg.threads) else none
+    -- every dependency failing is unlikely, but the caller's fallback is trial
+    -- division: once more with twice the relations
+    (attempt 1).orElse fun _ => attempt 2
 
 /-- The threads worth using on `digits` digits: below 44 digits a sieving round
 of many tasks costs more than it gains (wall time, best of three: 22 digits 7.4

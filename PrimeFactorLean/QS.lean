@@ -687,8 +687,12 @@ def collect (ctx : Context) (variant : Variant) (needed threads maxRounds : Nat)
         | .siqs => siqsBatch ctx (base + t) perTask
     for task in tasks do
       for f in task.get do
-        if seen.contains f.rel.x then continue
-        seen := seen.insert f.rel.x
+        -- `X` and `n - X` give the same row (the same polynomial reached
+        -- again with `B` negated): such a pair is a dependency whose square
+        -- roots are always `X ≡ -Y`, so keep one relation per `±X`
+        let key := min f.rel.x (ctx.n - f.rel.x)
+        if seen.contains key then continue
+        seen := seen.insert key
         if f.l1 == 1 && f.l2 == 1 then
           fulls := fulls.push f.rel
         else

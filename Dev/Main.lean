@@ -115,6 +115,7 @@ def devMain (args : List String) : IO Unit := do
   | ["taskscaling", n] => taskScaling [1, 2, 4, 8, 16, 32, 4, 8] n.toNat!
   | ["taskscaling", n, ts] => taskScaling ((ts.splitOn ",").map String.toNat!) n.toNat!
   | ["autotrace", ns, ts] => Trace.main ns.toNat! ts.toNat!
+  | ["siqsdiag", ns, ts] => Trace.siqsDiag ns.toNat! ts.toNat!
   | ["paircheck", path, q0, c] => Trace.pairCheck path q0.toNat! c.toNat!
   | ["paircheck2", path, q0] => Trace.pairCheck2 path q0.toNat!
   | ["paircheck3", w0, w, p0, p] => Trace.pairCheck3 (2048 * 1024) 2047 2048 w0.toNat!.toUInt64 w.toNat!.toUInt64 p0.toNat! p.toNat!

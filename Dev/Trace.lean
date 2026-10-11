@@ -218,3 +218,38 @@ def pairCheck3 (len mask : USize) (I : UInt64) (w0 w : UInt64) (p0 p : Nat) : IO
   IO.println s!"b contains 695635: {pb.contains 695635}; a contains: {pa.contains 695635}"
 
 end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+/-- `SIQS.splitCore` step by step: relations collected, distinct `x`, the
+dependencies and what each gives. -/
+def siqsDiag (n threads : Nat) : IO Unit := do
+  let params := SIQS.chooseParams (QS.decimalDigits n)
+  match SIQS.mkCtx n params with
+  | .inr p => IO.println s!"small factor {p}"
+  | .inl ctx =>
+    let needed := ctx.fb.size + 1 + params.extra
+    let rels := SIQS.collect ctx needed threads 1000000
+    let xs := (rels.map (·.x)).toList.eraseDups
+    IO.println s!"fb {ctx.fb.size} k {ctx.k}, needed {needed}, collected {rels.size}, distinct x {xs.length}, large≠1 {(rels.filter (·.large != 1)).size}"
+    let rows := rels.map Squares.parityColumns
+    let deps := Lanczos.dependencies (ctx.fb.size + 1) rows 64 threads
+    let gdeps := GF2.dependencies (ctx.fb.size + 1) rows 64
+    IO.println s!"lanczos deps {deps.size}, gf2 deps {gdeps.size}"
+    let mut shown := 0
+    for (label, ds) in [("lanczos", deps), ("gf2", gdeps)] do
+      let mut outcomes : Array String := #[]
+      for dep in ds do
+        if dep.isEmpty then outcomes := outcomes.push "empty"; continue
+        let rs := dep.map fun i => rels[i]!
+        match (Squares.Relation.prodTree rs 0 rs.size).toSquares with
+        | none => outcomes := outcomes.push "notsq"
+        | some sc =>
+          match sc.factor with
+          | some d => outcomes := outcomes.push s!"F{d.val}"
+          | none => outcomes := outcomes.push "triv"
+      let cnt (s : String) := (outcomes.filter (· == s)).size
+      IO.println s!"{label}: empty {cnt "empty"}, not a square {cnt "notsq"}, trivial {cnt "triv"}, factor {outcomes.size - cnt "empty" - cnt "notsq" - cnt "triv"}"
+      shown := shown + 1
+
+end PrimeFactorLean.Trace
