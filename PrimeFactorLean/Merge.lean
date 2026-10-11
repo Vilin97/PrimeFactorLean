@@ -350,7 +350,7 @@ the other columns only. Columns are merged in passes with a growing weight cap
 merges of any weight before expensive ones, instead of every column of weight
 `k` before any of weight `k + 1`. -/
 def mergeLog2 (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : Nat)
-    (mstMax : Nat := 6) : Array (Array Nat) × Log × Nat := Id.run do
+    (mstMax : Nat := 3) : Array (Array Nat) × Log × Nat := Id.run do
   let mut rows : Array (Array Nat) := Array.mkEmpty rows0.size
   let mut dmask : Array Nat := Array.mkEmpty rows0.size
   for r0 in rows0 do

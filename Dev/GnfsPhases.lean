@@ -236,7 +236,7 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     -- the round may reach the extrapolated count (`syncend`: the older rule)
     let nearReady := prev.isSome && (syncEnd || (predicted > 0 &&
       (before + lastGain * count / lastCount) * 100 ≥ predicted * 97))
-    let due := coll.rels.size ≥ base &&
+    let due := coll.rels.size ≥ base && coll.rels.size * 100 ≥ pipeUntil * 90 &&
       (prev.isSome || coll.rels.size * 10 ≥ lastCheck * 11)
     let mut bg : Option (Task (Rows × Option (Int × Bool × Nat))) := none
     if !nearReady then

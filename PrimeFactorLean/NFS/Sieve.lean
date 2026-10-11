@@ -157,7 +157,7 @@ def paramTable : List (Nat × Params) :=
    (100, { degree := 5, ratBound := 650000, algBound := 800000, halfWidth := 262144,
            lasLogI := 11, lpbR := 25, lpbA := 26, mfbR := 48, mfbA := 51, qmin := 180000,
            qPerTask := 2, psP := 7000, psNq := 15625, psIncr := 30, psAdMax := 1680,
-           psKeep := 24, lasVariant := 14, lasTinyT := 16 })]
+           psKeep := 24, lasVariant := 14, lasTinyT := 16, mergeDensity := 95 })]
 
 def chooseParams (digits : Nat) : Params :=
   if digits ≥ 58 then

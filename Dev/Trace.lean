@@ -516,11 +516,12 @@ def singletonParts (numCols : Nat) (rows : Array (Array Nat)) : IO Unit := do
 
 /-- `mergeStats` printed, with its time. -/
 def mergeStatsIO (nc : Nat) (rows : Array (Array Nat)) : IO Unit := do
-  for _ in [0:3] do
+  for mst in [3, 4, 6, 8] do
     let a ← IO.monoNanosNow
-    let (m, _, c) ← IO.lazyPure fun _ => Merge.mergeLog2 nc 0 rows 75 32
+    let (m, _, c) ← IO.lazyPure fun _ => Merge.mergeLog2 nc 0 rows 95 32 mst
     let b ← IO.monoNanosNow
-    IO.println s!"  mergeLog2 {(b - a) / 1000000} ms -> {m.size} x {c}"
+    let w := m.foldl (fun acc r => acc + r.size) 0
+    IO.println s!"  mstMax {mst}: mergeLog2 {(b - a) / 1000000} ms -> {m.size} x {c}, weight {w / max 1 m.size}"
 
 open NFS.PolySelect in
 /-- Our `logNorm` (and the golden-section search it replaces) against CADO-NFS's
