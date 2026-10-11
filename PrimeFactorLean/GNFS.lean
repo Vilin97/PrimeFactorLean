@@ -233,6 +233,12 @@ def rationalRootMod (n : Nat) (rels : List Rel) : Option Nat := Id.run do
     y := y * powMod p (e / 2) n % n
   return some y
 
+/-- `NFS.prodTreePar` once the task `t` exists (an argument the compiler must
+evaluate first, returned for its result: see `congruence`). -/
+@[noinline] def prodTreeParAfter {α : Type} (t : Task α) (g : List Int) (depth : Nat)
+    (xs : List (List Int)) : List Int × Task α :=
+  (prodTreePar g depth xs, t)
+
 /-- The congruence of squares of a dependency `rels` (`|S| = 2k` pairs `(a, b)`):
 `X = φ(β) Y₁^k` for a candidate square root `β` of `γ = f'(ω)² ∏ (c_d a - b ω)`
 (`NFS.sqrtFind`) and `Y = φ(f') c_d^k Z` for the rational square root `Z`
@@ -245,13 +251,19 @@ def congruence {n : Nat} (st : Setup n) (rels : List Rel) (p : Nat) :
   let S : List (Int × Int) := rels.map fun r => (r.a, (r.b : Int))
   let k := S.length / 2
   if S.length % 2 == 1 then none else
-  match rationalRootMod n rels with
+  -- the rational root (a sequential pass over the factorizations) alongside the
+  -- product `γ`: the task is an argument of `prodTreeParAfter`, so the compiler
+  -- cannot move its creation past the product, and the test on `γ` keeps the
+  -- product from moving into the branch after `zt.get` (`γ = 0` has no root)
+  let (γ, zt) := prodTreeParAfter (Task.spawn fun _ => rationalRootMod n rels) st.g 3
+    (st.fp :: st.fp :: S.map fun ab => [(st.cd : Int) * ab.1, -ab.2])
+  if γ.isEmpty then none else
+  match zt.get with
   | none => none
   | some z =>
     let y := evalMod n st.r st.fp * powMod st.cd k n % n * z % n
     let yk := powMod st.sel.y1 k n
     let xOf (β : List Int) : Nat := evalMod n st.r β * yk % n
-    let γ := prodTreePar st.g 3 (st.fp :: st.fp :: S.map fun ab => [(st.cd : Int) * ab.1, -ab.2])
     match sqrtFind st.g γ p (fun β => xOf β * xOf β % n == y * y % n) with
     | some β => SquareCongruence.ofCheck n (xOf β) y
     | none => none
