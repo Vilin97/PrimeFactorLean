@@ -429,6 +429,82 @@ def fkGoBU (bits : ByteArray) (bsz : USize) (hb : bsz.toNat ≤ bits.size) (len 
 termination_by fuel.toNat
 decreasing_by all_goals exact usize_pred_lt fuel hf
 
+/-! ### Two walks at once
+
+Each step of a walk depends on the previous one (a few cycles of latency), and
+a walk of a large ideal ends after a few steps with a mispredicted exit. Two
+independent walks in one loop overlap their dependency chains; the longer one
+then finishes alone.
+
+Every walk is bounded by `2 len / p + 4` steps, twice the expected number of
+lattice points of `p` in the region. A walk exceeds it only when the lattice
+has a short vector `(s, t)`, `|s| < t`, along which the hits line up (one in
+every row when `t = 1`): then every hit of the region is a multiple `k (s, t)`,
+whose pair `(a, b)` has `gcd ≥ k` — the hits past the bound are never coprime
+pairs, and the bound saves walking them. -/
+
+/-- `fkSieveU` on two ideals at once (positions `pa`, `pb`, logarithms `lga`,
+`lgb`): the same updates as two `fkSieveU` walks with budgets `fm + ra` and
+`fm + rb` (`fm` the smaller budget, counted down by the pairs; one of `ra`, `rb`
+is zero). -/
+def fkSieve2U (s : ByteArray) (len : USize) (h : len.toNat < s.size) (mask : USize)
+    (xa ya a0 a1 : USize) (lga : UInt8) (pa : USize)
+    (xb yb b0 b1 : USize) (lgb : UInt8) (pb : USize) (fm ra rb : USize) : ByteArray :=
+  if hf : fm = 0 then
+    if ra = 0 then fkSieveU s len h mask xb yb b0 b1 lgb pb rb
+    else fkSieveU s len h mask xa ya a0 a1 lga pa ra
+  else
+    let pa := fkNext mask xa ya a0 a1 pa
+    let pb := fkNext mask xb yb b0 b1 pb
+    if pa < len then
+      if pb < len then
+        fkSieve2U (addAt (addAt s len pa lga h) len pb lgb (by simp [addAt, size_hitClamp]; exact h))
+          len (by simp [addAt, size_hitClamp]; exact h) mask xa ya a0 a1 lga pa xb yb b0 b1 lgb pb
+          (fm - 1) ra rb
+      else
+        fkSieveU (addAt s len pa lga h) len (by simp [addAt, size_hitClamp]; exact h) mask xa ya a0 a1
+          lga pa (fm - 1 + ra)
+    else if pb < len then
+      fkSieveU (addAt s len pb lgb h) len (by simp [addAt, size_hitClamp]; exact h) mask xb yb b0 b1
+        lgb pb (fm - 1 + rb)
+    else s
+termination_by fm.toNat
+decreasing_by exact usize_pred_lt fm hf
+
+/-- Record `pos <<< 24 ||| k` when the bit of `pos` is set (the step of `fkWalkBU`). -/
+@[inline] def markHit (bits : ByteArray) (bsz : USize) (hb : bsz.toNat ≤ bits.size) (pos : USize)
+    (k : UInt64) (acc : Array Nat) : Array Nat :=
+  let i := pos >>> 3
+  if h : i < bsz then
+    if ((bits.uget i (by rw [USize.lt_iff_toNat_lt] at h; omega)).toUInt64 >>>
+        (pos &&& 7).toUInt64) &&& 1 != 0 then
+      acc.push ((pos.toUInt64 <<< 24) ||| k).toNat
+    else acc
+  else acc
+
+/-- `fkWalkBU` on two ideals at once (`ka`, `kb` their indices; budgets as for
+`fkSieve2U`): the same records as two `fkWalkBU` walks. -/
+def fkWalkB2U (bits : ByteArray) (bsz : USize) (hb : bsz.toNat ≤ bits.size) (len mask : USize)
+    (xa ya a0 a1 : USize) (ka : UInt64) (pa : USize)
+    (xb yb b0 b1 : USize) (kb : UInt64) (pb : USize) (acc : Array Nat) (fm ra rb : USize) :
+    Array Nat :=
+  if hf : fm = 0 then
+    if ra = 0 then fkWalkBU bits bsz hb len mask xb yb b0 b1 kb pb acc rb
+    else fkWalkBU bits bsz hb len mask xa ya a0 a1 ka pa acc ra
+  else
+    let pa := fkNext mask xa ya a0 a1 pa
+    let pb := fkNext mask xb yb b0 b1 pb
+    if pa < len then
+      if pb < len then
+        fkWalkB2U bits bsz hb len mask xa ya a0 a1 ka pa xb yb b0 b1 kb pb
+          (markHit bits bsz hb pb kb (markHit bits bsz hb pa ka acc)) (fm - 1) ra rb
+      else fkWalkBU bits bsz hb len mask xa ya a0 a1 ka pa (markHit bits bsz hb pa ka acc) (fm - 1 + ra)
+    else if pb < len then
+      fkWalkBU bits bsz hb len mask xb yb b0 b1 kb pb (markHit bits bsz hb pb kb acc) (fm - 1 + rb)
+    else acc
+termination_by fm.toNat
+decreasing_by exact usize_pred_lt fm hf
+
 /-! ### Reduced bases cached between the sieve and the resieve
 
 The reduction of each large ideal (about five Euclid steps with divisions) cost
@@ -768,7 +844,8 @@ projective root `r = p`). -/
 
 /-- The lattice roots of the ideals `[k, …)` for four special-`q` bases at once:
 the four inverses modulo each prime come from one extended Euclid and nine
-products (Montgomery's trick) instead of four extended Euclids. -/
+products (Montgomery's trick) instead of four extended Euclids. (Reductions by
+a floating-point reciprocal of `p` instead of the divisions measured slower.) -/
 def roots4Go (primes roots : Array Nat)
     (a0 b0 c0 d0 a1 b1 c1 d1 a2 b2 c2 d2 a3 b3 c3 d3 : Int64) (k : Nat)
     (o0 o1 o2 o3 : Array Nat) : Array Nat × Array Nat × Array Nat × Array Nat :=
@@ -1361,6 +1438,90 @@ def resieveCached (ctx : LasCtx) (side : Side) (RB : Array Nat) (bits : ByteArra
           (b1 * I + y).toUSize k.toUInt64 (I / 2).toUSize acc (2 * len / p.toUSize + 4)
     return acc
   else return acc
+
+/-- `sieveLargeCached` from the ideal `k` on, tail recursive (a `for` loop with
+two mutable variables allocates its state at every ideal) and with the walks of
+consecutive ideals paired (`fkSieve2U`): `hasP` and the `p…` arguments hold a
+walk waiting for its partner. -/
+def largeGo (side : Side) (I32 : UInt32) (IU : UInt64) (len : USize) (k : Nat) (R : Array Nat)
+    (b : ByteArray) (hasP : Bool) (px py pd0 pd1 : USize) (plg : UInt8) (pfuel : USize) :
+    ByteArray × Array Nat :=
+  if hk : k < side.primes.size then
+    if h : len.toNat < b.size then
+      let p := side.primes[k]
+      let r := R[k]!
+      if r ≥ p then largeGo side I32 IU len (k + 1) (R.set! k 0) b hasP px py pd0 pd1 plg pfuel
+      else
+        let w := fkBasis I32 p.toUInt32 0 r.toUInt32 1 128
+        -- `1` from `fkBasis`: the basis does not fit, keep the root behind a flag
+        let R := R.set! k (if w == 1 then 4611686018427387904 + r else w.toNat)
+        let lg := side.logs.get! k
+        if w == 0 then largeGo side I32 IU len (k + 1) R b hasP px py pd0 pd1 plg pfuel
+        else if w == 1 then
+          largeGo side I32 IU len (k + 1) R (fkGoU b len h IU p.toUInt64 lg p.toUInt64 0 r.toUInt64 1 128)
+            hasP px py pd0 pd1 plg pfuel
+        else
+          let x := (w &&& 8191).toUSize
+          let y := ((w >>> 13) &&& 8191).toUSize
+          let d0 := (((w >>> 26) &&& 262143) * IU).toUSize - x
+          let d1 := (((w >>> 44) &&& 262143) * IU).toUSize + y
+          let fuel := 2 * len / p.toUSize + 4
+          if hasP then
+            largeGo side I32 IU len (k + 1) R
+              (fkSieve2U b len h (IU - 1).toUSize px py pd0 pd1 plg (IU / 2).toUSize x y d0 d1 lg
+                (IU / 2).toUSize (min pfuel fuel) (pfuel - min pfuel fuel) (fuel - min pfuel fuel))
+              false 0 0 0 0 0 0
+          else largeGo side I32 IU len (k + 1) R b true x y d0 d1 lg fuel
+    else (b, R)
+  else if h : hasP ∧ len.toNat < b.size then
+    (fkSieveU b len h.2 (IU - 1).toUSize px py pd0 pd1 plg (IU / 2).toUSize pfuel, R)
+  else (b, R)
+termination_by side.primes.size - k
+
+/-- `sieveLargeCached` by `largeGo`. -/
+def sieveLargePaired (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray) :
+    ByteArray × Array Nat :=
+  largeGo side ctx.I.toUInt32 ctx.I.toUInt64 (ctx.I * ctx.J).toUSize side.largeStart R buf
+    false 0 0 0 0 0 0
+
+/-- `resieveCached` with the walks of consecutive ideals paired (`fkWalkB2U`). -/
+def resieveGo (side : Side) (RB : Array Nat) (bits : ByteArray) (bsz : USize)
+    (hb : bsz.toNat ≤ bits.size) (I : UInt64) (len : USize) (k : Nat) (acc : Array Nat)
+    (hasP : Bool) (px py pd0 pd1 : USize) (pk : UInt64) (pfuel : USize) : Array Nat :=
+  if hk : k < side.primes.size then
+    let w := RB[k]!.toUInt64
+    if w == 0 then resieveGo side RB bits bsz hb I len (k + 1) acc hasP px py pd0 pd1 pk pfuel
+    else
+      let p := side.primes[k]
+      if w ≥ 4611686018427387904 then
+        resieveGo side RB bits bsz hb I len (k + 1)
+          (fkGoBU bits bsz hb len I p.toUInt64 k.toUInt64 acc p.toUInt64 0 (w - 4611686018427387904) 1 128)
+          hasP px py pd0 pd1 pk pfuel
+      else
+        let x := (w &&& 8191).toUSize
+        let y := ((w >>> 13) &&& 8191).toUSize
+        let d0 := (((w >>> 26) &&& 262143) * I).toUSize - x
+        let d1 := (((w >>> 44) &&& 262143) * I).toUSize + y
+        let fuel := 2 * len / p.toUSize + 4
+        if hasP then
+          resieveGo side RB bits bsz hb I len (k + 1)
+            (fkWalkB2U bits bsz hb len (I - 1).toUSize px py pd0 pd1 pk (I / 2).toUSize x y d0 d1
+              k.toUInt64 (I / 2).toUSize acc (min pfuel fuel) (pfuel - min pfuel fuel)
+              (fuel - min pfuel fuel))
+            false 0 0 0 0 0 0
+        else resieveGo side RB bits bsz hb I len (k + 1) acc true x y d0 d1 k.toUInt64 fuel
+  else if hasP then fkWalkBU bits bsz hb len (I - 1).toUSize px py pd0 pd1 pk (I / 2).toUSize acc pfuel
+  else acc
+termination_by side.primes.size - k
+
+/-- `resieveCached` by `resieveGo`. -/
+def resievePaired (ctx : LasCtx) (side : Side) (RB : Array Nat) (bits : ByteArray)
+    (acc : Array Nat) : Array Nat :=
+  let bsz := bits.size.toUSize
+  if hb : bsz.toNat ≤ bits.size then
+    resieveGo side RB bits bsz hb ctx.I.toUInt64 (ctx.I * ctx.J).toUSize side.largeStart acc
+      false 0 0 0 0 0 0
+  else acc
 
 /-- Records `pos <<< 24 ||| k` grouped by survivor (`survs` increasing). -/
 def groupRecords (survs : Array Nat) (recs : Array Nat) : Array (List Nat) := Id.run do
@@ -2709,15 +2870,15 @@ def processQ12 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch
   let Ra := latticeRoots ctx.alg ua ub va vb
   let thrR := rowThresholds ctx q ua ub va vb ctx.params.mfbR false
   let thrA := rowThresholds ctx q ua ub va vb ctx.params.mfbA true
-  let (bufR, Rr) := sieveLargeCached ctx ctx.rat Rr (lineSieveSide ctx ctx.rat Rr (fillRows ctx b1 thrR))
-  let (bufA, Ra) := sieveLargeCached ctx ctx.alg Ra (lineSieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA))
+  let (bufR, Rr) := sieveLargePaired ctx ctx.rat Rr (lineSieveSide ctx ctx.rat Rr (fillRows ctx b1 thrR))
+  let (bufA, Ra) := sieveLargePaired ctx ctx.alg Ra (lineSieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA))
   let surv := prefilterRows ctx q ua ub va vb thrR thrA bufR bufA
     (dropSmallGcd ctx (survivors bufR bufA len))
   if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
   let bits := markBits bits surv true
-  let listsR := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.rat Rr bits #[])
-  let listsA := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.alg Ra bits #[])
+  let listsR := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
+  let listsA := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
   let bits := markBits bits surv false
   let bd := mkBounds ctx q ua ub va vb Rr Ra
   let mut rels : Array Rel := #[]
@@ -2743,9 +2904,9 @@ def processQ13 (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (sc : Scratch) : Array 
   let Pa := powerRoots ctx.alg ua ub va vb
   let (fR, biasR) := fillSegments ctx b1 false q ua ub va vb ctx.params.mfbR (rowExtras ctx ctx.rat Rr)
   let (fA, biasA) := fillSegments ctx b2 true q ua ub va vb ctx.params.mfbA (rowExtras ctx ctx.alg Ra)
-  let (bufR, Rr) := sieveLargeCached ctx ctx.rat Rr
+  let (bufR, Rr) := sieveLargePaired ctx ctx.rat Rr
     (sievePowers ctx ctx.rat Pr (lineSieveSide ctx ctx.rat Rr fR))
-  let (bufA, Ra) := sieveLargeCached ctx ctx.alg Ra
+  let (bufA, Ra) := sieveLargePaired ctx ctx.alg Ra
     (sievePowers ctx ctx.alg Pa (lineSieveSide ctx ctx.alg Ra fA))
   let surv := prefilterGap4 ctx q ua ub va vb bufR bufA biasR biasA (tinyPrimes ctx ctx.rat Rr)
     (tinyPrimes ctx ctx.alg Ra) slack
@@ -2753,8 +2914,8 @@ def processQ13 (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (sc : Scratch) : Array 
   if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
   let bits := markBits bits surv true
-  let listsR := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.rat Rr bits #[])
-  let listsA := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.alg Ra bits #[])
+  let listsR := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
+  let listsA := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
   let bits := markBits bits surv false
   let bd := mkBounds ctx q ua ub va vb Rr Ra
   let mut rels : Array Rel := #[]
@@ -2773,9 +2934,9 @@ def processQ13R (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (ua ub va vb : Int) (R
   let Pa := powerRoots ctx.alg ua ub va vb
   let (fR, biasR) := fillSegments ctx b1 false q ua ub va vb ctx.params.mfbR (rowExtras ctx ctx.rat Rr)
   let (fA, biasA) := fillSegments ctx b2 true q ua ub va vb ctx.params.mfbA (rowExtras ctx ctx.alg Ra)
-  let (bufR, Rr) := sieveLargeCached ctx ctx.rat Rr
+  let (bufR, Rr) := sieveLargePaired ctx ctx.rat Rr
     (sievePowers ctx ctx.rat Pr (lineSieveSide ctx ctx.rat Rr fR))
-  let (bufA, Ra) := sieveLargeCached ctx ctx.alg Ra
+  let (bufA, Ra) := sieveLargePaired ctx ctx.alg Ra
     (sievePowers ctx ctx.alg Pa (lineSieveSide ctx ctx.alg Ra fA))
   let surv := prefilterGap4 ctx q ua ub va vb bufR bufA biasR biasA (tinyPrimes ctx ctx.rat Rr)
     (tinyPrimes ctx ctx.alg Ra) slack
@@ -2783,8 +2944,8 @@ def processQ13R (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (ua ub va vb : Int) (R
   if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
   let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
   let bits := markBits bits surv true
-  let listsR := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.rat Rr bits #[])
-  let listsA := groupLabelled ctx surv lab rowStart (resieveCached ctx ctx.alg Ra bits #[])
+  let listsR := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
+  let listsA := groupLabelled ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
   let bits := markBits bits surv false
   let bd := mkBounds ctx q ua ub va vb Rr Ra
   let mut rels : Array Rel := #[]

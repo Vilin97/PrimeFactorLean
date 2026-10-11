@@ -526,6 +526,7 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       fudge := get "fudge" params.lasFudge, jDiv := get "jDiv" 2, sieveFrom := get "from" 30,
       fudgeA := get "fudgeA" 0, powMin := get "powMin" 0 }
   let slack := get "slack" 3
+  let pair := get "pair" 1 == 1
   let fs := get "fs" 2
   let fs3 := fs == 3
   let las := Las.mkLasCtx ctx lasParams
@@ -574,8 +575,10 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       let pR ← IO.lazyPure fun _ => Las.sievePowers las las.rat Pr lR
       let pA ← IO.lazyPure fun _ => Las.sievePowers las las.alg Pa lA
       let a4 ← IO.monoNanosNow
-      let (bufR, RrB) ← IO.lazyPure fun _ => Las.sieveLargeCached las las.rat Rr pR
-      let (bufA, RaB) ← IO.lazyPure fun _ => Las.sieveLargeCached las las.alg Ra pA
+      let (bufR, RrB) ← IO.lazyPure fun _ => if pair then Las.sieveLargePaired las las.rat Rr pR
+        else Las.sieveLargeCached las las.rat Rr pR
+      let (bufA, RaB) ← IO.lazyPure fun _ => if pair then Las.sieveLargePaired las las.alg Ra pA
+        else Las.sieveLargeCached las las.alg Ra pA
       let a5 ← IO.monoNanosNow
       let s0 ← IO.lazyPure fun _ => Las.survivors bufR bufA len
       let s1 ← IO.lazyPure fun _ => Las.dropSmallGcd las s0
@@ -599,8 +602,10 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       let (lab, rowStart) ← IO.lazyPure fun _ => Las.labelSurvivors las (Las.zeroRows las bufA) surv
       let bits ← IO.lazyPure fun _ => Las.markBits bits surv true
       let a8 ← IO.monoNanosNow
-      let listsR ← IO.lazyPure fun _ => Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.rat RrB bits #[])
-      let listsA ← IO.lazyPure fun _ => Las.groupLabelled las surv lab rowStart (Las.resieveCached las las.alg RaB bits #[])
+      let listsR ← IO.lazyPure fun _ => Las.groupLabelled las surv lab rowStart
+        (if pair then Las.resievePaired las las.rat RrB bits #[] else Las.resieveCached las las.rat RrB bits #[])
+      let listsA ← IO.lazyPure fun _ => Las.groupLabelled las surv lab rowStart
+        (if pair then Las.resievePaired las las.alg RaB bits #[] else Las.resieveCached las las.alg RaB bits #[])
       let bits ← IO.lazyPure fun _ => Las.markBits bits surv false
       let a9 ← IO.monoNanosNow
       let mut rels := 0
