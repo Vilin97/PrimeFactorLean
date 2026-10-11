@@ -12,12 +12,19 @@ field sieve, with kernel-checked proofs of correctness.
 - **Tested** on all 609 fully factored Cunningham numbers `bⁿ − 1` up to 100
   digits, on balanced semiprimes up to 80 digits and more: 831 cases in total.
   Every algorithm passed every case in its domain. The two hardest numbers
-  needed dedicated runs longer than the 30-minute benchmark limit (27.6 and
-  11.4 minutes). No algorithm ever returned a wrong answer.
-- **Optimized** with measured speedups. On 16 cores, SIQS splits a 71-digit
-  balanced semiprime in 12 s and an 80-digit one in 3 minutes. It factored
-  **RSA-100** in 6 h 35 min. GNFS, with a special-q lattice sieve, splits a
-  60-digit balanced semiprime in 2.5 minutes.
+  first needed dedicated runs (27.6 and 11.4 minutes); the current `auto`
+  factors them in 12.7 s and 28 ms. No algorithm ever returned a wrong answer.
+- **Optimized** with measured speedups. On 16 cores, SIQS splits an 80-digit
+  balanced semiprime in 13 s, and the general number field sieve factors
+  **RSA-100** in 6.1 minutes.
+- **Compared** with [YAFU](https://github.com/bbuhrow/yafu) and
+  [CADO-NFS](https://cado-nfs.gitlabpages.inria.fr/) on the same machine and
+  inputs ([details](#comparison-with-yafu-and-cado-nfs)). The `auto` portfolio
+  is faster than YAFU in total time on the core, medium and large tiers. It is
+  slower in total on the 60–100-digit tier (179 s vs 137 s), although it wins
+  171 of the 253 cases there. The number field sieve beats CADO-NFS on all 12
+  balanced semiprimes of 60–80 digits. On RSA-100 it is still 2.2× slower than
+  CADO-NFS and 2.1× slower than YAFU.
 
 ```text
 $ lake exe factor --threads 16 auto 3533694129556768659166595001485837031654967793751237916243212402585239551
@@ -97,6 +104,94 @@ depends on an axiom other than `propext`, `Classical.choice` and `Quot.sound`.
 proved and what is checked at run time, including what is *not* proved
 (running times, success probabilities, the elliptic-curve group law).
 
+## Comparison with YAFU and CADO-NFS
+
+The CLI was timed against two mature native factoring programs on the same
+machine (AMD Ryzen 9 9955HX, 16 cores), with the same inputs and thread budget:
+
+- **YAFU** 3.1.9 (commit `8110dfbd8c6f`): AVX-512 and IFMA SIQS, GMP-ECM 7.0.6,
+  GMP 6.3.0, run as `yafu -threads 16` on `factor(n)`;
+- **CADO-NFS** (commit `692ecb7e62f0`): the reference GNFS implementation, run as
+  `cado-nfs.py n -t 16`.
+
+`scripts/baselines/build.sh` builds both from pinned sources: YAFU with its
+AVX-512, IFMA and BMI2 code paths, CADO-NFS with `-O3 -march=native`. The C that
+Lean generates is also compiled with `-march=native`.
+
+`scripts/compare.py` times complete process runs of every tool on every case of
+a tier, three times each, interleaved. A machine-wide lock serializes all timed
+runs, these and every other benchmark job on the machine, so no two runs
+overlap. A run counts only if it returns the exact reference factorization. The
+tables use the median of the three runs. `factor` certifies every prime factor
+(Pocklington); YAFU reports probable primes, and CADO-NFS reports the split.
+
+Raw records are in `results/compare/109e943-*.jsonl`. Summaries:
+`python3 scripts/compare_report.py FILE --ours TOOL --base TOOL [--cases]`.
+These runs are at commit `109e943`.
+
+**`factor auto` against YAFU `factor()`**, on every case of each tier:
+
+| Tier | Cases | Both solved | `factor auto` total | YAFU total | Geometric mean of time ratios | `auto` faster on |
+|---|---:|---:|---:|---:|---:|---:|
+| core (≤ 8 digits and special values) | 204 | 204 | 0.54 s | 2.12 s | 0.25 | 204 |
+| medium (< 2⁶⁴) | 102 | 102 | 0.31 s | 1.15 s | 0.26 | 101 |
+| large (20–59 digits) | 271 | 271 | 7.84 s | 15.48 s | 0.47 | 225 |
+| huge (60–100 digits) | 253 | 253 | 179 s | 137 s | 0.66 | 171 |
+
+On the core and medium tiers both tools spend most of their time starting up:
+a `factor` run takes about 3 ms, a YAFU run about 10 ms.
+
+On the huge tier `auto` is faster on two thirds of the cases and in geometric
+mean, but slower in total, for two reasons:
+
+- **Balanced semiprimes (SIQS).** YAFU's AVX-512 SIQS is 1.3–2.6× faster: at 80
+  digits, 5.0–5.3 s against 12.9 s.
+- **Factors found by ECM.** On some Cunningham numbers YAFU's ECM pretest finds a
+  factor at once, and `auto` needs more curves or a sieve. Examples: `2²⁹³ − 1`
+  takes 8.15 s against 0.33 s, `3¹⁹⁹ − 1` 11.5 s against 2.6 s, and `2³¹⁷ − 1`
+  6.5 s against 0.7 s.
+
+**Number field sieve: `factor gnfs` against CADO-NFS**, on the balanced
+semiprimes from 60 digits (median wall time):
+
+| Case | Digits | `factor gnfs` | CADO-NFS |
+|---|---:|---:|---:|
+| balanced-60-0 | 60 | 2.35 s | 9.75 s |
+| balanced-60-1 | 60 | 2.28 s | 9.78 s |
+| balanced-64-0 | 64 | 4.16 s | 10.50 s |
+| balanced-64-1 | 64 | 3.93 s | 10.50 s |
+| balanced-68-0 | 68 | 5.80 s | 11.17 s |
+| balanced-68-1 | 68 | 6.81 s | 11.21 s |
+| balanced-72-0 | 71 | 7.51 s | 12.83 s |
+| balanced-72-1 | 72 | 8.58 s | 12.94 s |
+| balanced-76-0 | 76 | 16.09 s | 20.49 s |
+| balanced-76-1 | 76 | 15.47 s | 21.61 s |
+| balanced-80-0 | 80 | 25.80 s | 30.24 s |
+| balanced-80-1 | 80 | 27.55 s | 30.23 s |
+
+**RSA-100** (three runs each):
+
+| Tool | Median | Runs |
+|---|---:|---|
+| `factor gnfs` | 366 s | 366, 370, 363 s |
+| CADO-NFS | 166 s | 166, 166, 169 s |
+| YAFU `factor()` | 175 s | 175, 174, 175 s |
+
+**The goal is not met yet.** On RSA-100 the Lean number field sieve is 2.2×
+slower than CADO-NFS and 2.1× slower than YAFU. Most of the gap is lattice
+sieving:
+
+| | Lean | CADO-NFS |
+|---|---|---|
+| Sieving (wall time) | about 300 s | 120 s, filtering included |
+| Relations collected | 3.21M unique, special-q up to 1.32M | 3.13M unique (4.18M raw), special-q up to 0.87M |
+| Time per special-q (one thread, q = 180000) | 37 ms | 21 ms |
+| Relations per special-q (same q) | 77 | 86 |
+| Linear algebra | 206K-row matrix, 34 s | 175K-row matrix, 21 s |
+
+The work continues on the siever's per-q cost and yield, on linear algebra, and
+on SIQS.
+
 ## Algorithms and dataset results
 
 Every implementation was run on the slice of the dataset it is designed for,
@@ -123,25 +218,31 @@ factorization. Reports: `results/dataset-core-medium-large.json.gz`,
 | `qs` | quadratic sieve, single polynomial | ≤ 45 | 478 / 478 | 0 |
 | `mpqs` | multiple-polynomial QS (`A = q²`) | ≤ 55 | 542 / 542 | 0 |
 | `siqs` | self-initializing QS, Gray-code polynomials, large primes, parallel | ≤ 80 | 707 / 707 | 0 |
-| `gnfs` | general number field sieve: lattice sieve, `p`-adic square root | ≤ 50 (scaling runs to 61) | 509 / 509 | 0 |
-| `auto` | portfolio: small primes, SQUFOF, rho, `p − 1`, ECM, SIQS | ≤ 100 | 828 / 830 | 0 |
+| `gnfs` | general number field sieve: Kleinjung polynomial selection, Franke–Kleinjung lattice sieve, block Lanczos, `p`-adic square root | ≤ 50 (scaling runs to 61) | 509 / 509 | 0 |
+| `auto` | portfolio: small primes, perfect powers, algebraic factors of `bⁿ ± 1`, SQUFOF, rho, `p − 1`, ECM, special number field sieve, SIQS | ≤ 100 | 828 / 830 | 0 |
 
-`auto` finished 828 of the 830 cases up to 100 digits within the benchmark's
-30-minute limit. The other two are the hardest numbers in the dataset, and
-dedicated runs without a time limit factored both completely
+In that run `auto` finished 828 of the 830 cases up to 100 digits within the
+30-minute limit. The other two are the hardest numbers in the dataset.
+Dedicated runs without a time limit then factored both completely
 (`results/hard-cases.json`):
 
-- `10⁹⁷ − 1` = `3² · 12004721 · P36 · P54` took 27.6 minutes with `auto` on 16
-  threads; SIQS split the 90-digit `P36 · P54`.
+- `10⁹⁷ − 1` = `3² · 12004721 · P36 · P54` took 27.6 minutes; SIQS split the
+  90-digit `P36 · P54`.
 - `5¹⁴¹ − 1` = `2² · 31 · P33 · P65` took 11.4 minutes with `ecm` at
-  `B1 = 3·10⁶` on 16 threads; ECM found the 33-digit factor of the 98-digit
-  `P33 · P65`.
+  `B1 = 3·10⁶`.
+
+The current `auto` factors both within the comparison runs' limits
+([Comparison](#comparison-with-yafu-and-cado-nfs)): `10⁹⁷ − 1` in 12.7 s with the
+special number field sieve, and `5¹⁴¹ − 1` in 28 ms from its algebraic factors.
+Since then every number field sieve run has also passed: the 60–80-digit balanced
+semiprimes and RSA-100.
 
 **Every case in the dataset has been factored correctly.** That covers:
 
 - 828 cases within the benchmark limits;
-- the two cases above, in dedicated runs;
-- the RSA-100 challenge, in a 6 h 35 min SIQS run (see [Dataset](#dataset)).
+- the two cases above, in dedicated runs and in the comparison runs;
+- the RSA-100 challenge, by SIQS in 6 h 35 min and by GNFS in 6.1 minutes (see
+  [Dataset](#dataset)).
 
 Plain `siqs` passed every case up to 80 digits: 577 up to 59 digits and 130
 of 60–80 digits. The `p ± 1` methods are special-purpose: they succeed only
@@ -191,7 +292,9 @@ giving `gcd = n`. Without backtracking, 43 inputs of 6–9 digits were missed.
 
 Raw splitters on the dataset's balanced semiprimes, the hardest inputs of their
 size for these methods, using 16 threads (`results/scaling.json`;
-`scripts/scaling.py`):
+`scripts/scaling.py`). This table predates the current SIQS and number field
+sieve; for those, see the comparison below: 80 digits in 13 s (SIQS) and in 26–28 s
+(GNFS).
 
 | Digits | `cfrac` | `qs` | `mpqs` | `siqs` | `gnfs` |
 |---:|---:|---:|---:|---:|---:|
@@ -212,10 +315,8 @@ size for these methods, using 16 threads (`results/scaling.json`;
 | 76 |  |  |  | 32 s |  |
 | 80 |  |  |  | 181 s |  |
 
-SIQS is the fastest method below ~100 digits, as in every mature implementation.
-The GNFS–SIQS crossover is near 100 digits even for state-of-the-art tools.
-GNFS shows the expected subexponential growth and splits a 60-digit balanced
-semiprime in 2.5 minutes with special-`q` lattice sieving.
+SIQS is the fastest method below ~90 digits, as in every mature implementation.
+GNFS shows the expected subexponential growth.
 
 ## Dataset
 
@@ -242,10 +343,11 @@ exact multiplication. The hardest is `2²⁷⁷ − 1 = 1121297 · P38 · P40`.
 
 **RSA-100**, the smallest number of the RSA Factoring Challenge (factored
 in 1991), is the challenge tier. It is not part of the timed benchmark tiers.
-A dedicated run of the verified pipeline (`factor --threads 16 siqs`) factored
-it in **6 h 35 min** on 16 cores with 1.3 GB of memory. The run used a
-64,000-prime factor base, and both 50-digit prime factors carry Pocklington
-certificates (`results/hard-cases.json`).
+The general number field sieve (`factor --threads 16 gnfs`) factors it in
+**6.1 minutes** on 16 cores: 366 s, the median of three runs in the comparison
+below. Both 50-digit prime factors carry Pocklington certificates. An earlier
+dedicated SIQS run (`factor --threads 16 siqs`, a 64,000-prime factor base)
+took 6 h 35 min with 1.3 GB of memory (`results/hard-cases.json`).
 
 Seeded balanced semiprimes of 20 to 80 digits (seed `20261007`) are included as
 well. They are the hardest inputs of their size for the general-purpose methods.
@@ -294,6 +396,17 @@ isolation (`Dev/` harnesses).
 | *Rejected:* double-large-prime variation at 80 digits | 249 s vs 196 s without it, so it is off by default and available as `dlpFactor` |
 | *Rejected:* replacing `%` by a conditional subtraction in the Gray-code root update | 13% slower (boxed `Nat` comparisons cost more than one division), so it was reverted |
 | *Neutral:* fusing root updates with sieving for primes beyond the interval | within measurement noise |
+
+**Later rewrites**, each measured in isolation as above (details in the commit
+messages):
+
+| Change | Effect |
+|---|---|
+| SIQS: new sieve and candidate kernels, block Lanczos, retuned parameters; fixed-width Montgomery arithmetic (generated per limb count) for ECM, `p − 1` and rho | SIQS at 80 digits: 181 s → 12.9 s |
+| GNFS: Kleinjung collision polynomial selection, Franke–Kleinjung lattice siever, singleton and clique removal, merge, block Lanczos, square root checked modulo `n` | 60 digits: 150 s → 2.3 s; RSA-100 in 6.1 minutes instead of 6 h 35 min with SIQS |
+| Special number field sieve for divisors of `bⁿ ± 1`, chosen by measured cost | `10⁹⁷ − 1`: 27.6 minutes → 12.7 s |
+| ECM stage 2 with normalized baby and giant steps and a prime-pair schedule shared by all curves | 80 digits, `B1 = 50000`: stage 2 29.1 → 14.6 ms per curve |
+| Plans and tables built lazily instead of at program start | startup 20 ms → 4 ms |
 
 ## Running
 
