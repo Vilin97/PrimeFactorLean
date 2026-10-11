@@ -2699,6 +2699,21 @@ def sideClass (est : Float) (n64 odd v2 lpb mfb lim2 : UInt64) : Nat :=
   let u := if v2 == 0 then u else u &&& ((1 <<< (64 - v2)) - 1)
   if (Float.log2 u.toFloat - est).abs < fc 1 / fc 4 then cofactorClassU u lpb mfb lim2 else 3
 
+/-- `sideClass` with the probable-prime test left to the caller: `0` (class 0),
+`1` (class 1, 2 or undecided), or the cofactor `u ≥ lim² ≥ 2` itself when only
+`sprp2 u` decides (class 0 if it holds, 2 otherwise). -/
+def sideClassP (est : Float) (n64 odd v2 lpb mfb lim2 : UInt64) : UInt64 :=
+  let u := (n64 >>> v2) * inv64 odd
+  let u := if v2 == 0 then u else u &&& ((1 <<< (64 - v2)) - 1)
+  if (Float.log2 u.toFloat - est).abs < fc 1 / fc 4 then
+    if u == 1 then 1
+    else if u >>> mfb != 0 then 0
+    else if u >>> lpb == 0 then 1
+    else if u < lim2 then 0
+    else if u >>> 51 == 0 && u &&& 1 == 1 then (if u < 2 then 1 else u)
+    else 1
+  else 1
+
 /-- Where the word checks leave a survivor: `0`/`1` rejected by the rational
 bound or class, `2`/`3` by the algebraic ones, `4 + 2 cr' + ca'` passed (`cr'`,
 `ca'` whether the class was decided, `1`, or undecided, `0`). -/
@@ -2862,9 +2877,10 @@ def rangeProd (primes : Array Nat) (ks : Array Nat) (lo hi : Nat) (acc : UInt64)
 termination_by hi - lo
 
 /-- The rational half of `survivorGate` with the small ideals' part given
-(`sLg`, `sPr` from `smallScanAll`): whether the survivor passes. -/
-def ratPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
-    (sPr : UInt64) : Bool :=
+(`sLg`, `sPr` from `smallScanAll`), the probable-prime test left to the caller
+(`sideClassP`): `0` fails, `1` passes, `u ≥ 2` passes unless `sprp2 u`. -/
+def ratPre (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
+    (sPr : UInt64) : UInt64 :=
   let I := ctx.I
   let j := pos / I
   let c := pos % I
@@ -2881,16 +2897,24 @@ def ratPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : N
   let tR := tinyRatP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
   let lR := rangeLog side.lg2 ks lo hi (fc 0)
   let estR := Float.log2 (nF.abs + fc 1) - tR.lg - sLg - lR
-  if hopeless estR bd.hiR bd.loR bd.gapR then false
+  if hopeless estR bd.hiR bd.loR bd.gapR then 0
   else
     let n64 := bd.y1U * a64 - bd.mU * b64
     let pR := rangeProd side.primes ks lo hi 1
-    sideClass estR (if nF < fc 0 then -n64 else n64) (tR.prod * sPr * pR) tR.v2
-      bd.lpbR bd.mfbR bd.lim2R != 0
+    sideClassP estR (if nF < fc 0 then -n64 else n64) (tR.prod * sPr * pR) tR.v2
+      bd.lpbR bd.mfbR bd.lim2R
 
-/-- The algebraic half of `survivorGate` (as `ratPass`). -/
-def algPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
+/-- Whether a gate code (`ratPre`, `algPre`) passes, the probable-prime test done. -/
+@[inline] def codePasses (c : UInt64) : Bool := c == 1 || (c ≥ 2 && !SIQS.sprp2 c)
+
+/-- The rational half of `survivorGate` (`ratPre` with its probable-prime test). -/
+def ratPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
     (sPr : UInt64) : Bool :=
+  codePasses (ratPre ctx bd ks lo hi pos sLg sPr)
+
+/-- The algebraic half of `survivorGate` (as `ratPre`). -/
+def algPre (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
+    (sPr : UInt64) : UInt64 :=
   let I := ctx.I
   let j := pos / I
   let c := pos % I
@@ -2908,12 +2932,17 @@ def algPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : N
   let tA := tinyAlgP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
   let lA := rangeLog sideA.lg2 ks lo hi (fc 0)
   let estA := Float.log2 (fF.abs / bd.qF + fc 1) - tA.lg - sLg - lA
-  if hopeless estA bd.hiA bd.loA bd.gapA then false
+  if hopeless estA bd.hiA bd.loA bd.gapA then 0
   else
     let f64 := hornerU bd.cs64 a64 b64 d (bd.cs64[d]!) 1
     let pA := rangeProd sideA.primes ks lo hi 1
-    sideClass estA (if fF < fc 0 then -f64 else f64) (bd.qU * tA.prod * sPr * pA) tA.v2
-      bd.lpbA bd.mfbA bd.lim2A != 0
+    sideClassP estA (if fF < fc 0 then -f64 else f64) (bd.qU * tA.prod * sPr * pA) tA.v2
+      bd.lpbA bd.mfbA bd.lim2A
+
+/-- The algebraic half of `survivorGate` (`algPre` with its probable-prime test). -/
+def algPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
+    (sPr : UInt64) : Bool :=
+  codePasses (algPre ctx bd ks lo hi pos sLg sPr)
 
 /-- The indices of the survivors that pass `survivorGate` (the same decisions),
 each side's small ideals scanned over all its survivors at once: the rational
@@ -2925,19 +2954,44 @@ def gateAll (ctx : LasCtx) (bd : Bounds) (survs : Array Nat) (offR ksR offA ksA 
   let logI := ctx.params.logI.toUInt64
   let side := ctx.rat
   let (lgR, prR) := smallScanAll bd.tabR side.pinvLim side.lg2 side.sieveStart survs IU logI
-  let mut idx : Array Nat := #[]
+  let mut codes : Array Nat := Array.mkEmpty survs.size
   for s in [0:survs.size] do
-    if ratPass ctx bd ksR offR[s]! offR[s + 1]! survs[s]! (lgR.get! s) prR[s]! then
-      idx := idx.push s
+    codes := codes.push (ratPre ctx bd ksR offR[s]! offR[s + 1]! survs[s]! (lgR.get! s) prR[s]!).toNat
+  let idx := passing codes
   let sideA := ctx.alg
   let (lgA, prA) := smallScanAll bd.tabA sideA.pinvLim sideA.lg2 sideA.sieveStart
     (idx.map (survs[·]!)) IU logI
-  let mut out : Array Nat := #[]
+  let mut codesA : Array Nat := Array.mkEmpty idx.size
   for t in [0:idx.size] do
     let s := idx[t]!
-    if algPass ctx bd ksA offA[s]! offA[s + 1]! survs[s]! (lgA.get! t) prA[t]! then
-      out := out.push s
-  return out
+    codesA := codesA.push (algPre ctx bd ksA offA[s]! offA[s + 1]! survs[s]! (lgA.get! t) prA[t]!).toNat
+  return (passing codesA).map (idx[·]!)
+where
+  /-- The indices whose gate code passes (`codePasses`), in increasing order:
+  the pending probable-prime tests four at a time (`SIQS.sprp2x4`). -/
+  passing (codes : Array Nat) : Array Nat := Id.run do
+    let pend := (Array.range codes.size).filter (codes[·]! ≥ 2)
+    let mut ok : ByteArray := ByteArray.emptyWithCapacity pend.size
+    let mut i := 0
+    while i + 4 ≤ pend.size do
+      let m := SIQS.sprp2x4 codes[pend[i]!]!.toUInt64 codes[pend[i + 1]!]!.toUInt64
+        codes[pend[i + 2]!]!.toUInt64 codes[pend[i + 3]!]!.toUInt64
+      ok := ((ok.push (m &&& 1).toUInt8).push ((m >>> 1) &&& 1).toUInt8).push
+        ((m >>> 2) &&& 1).toUInt8 |>.push ((m >>> 3) &&& 1).toUInt8
+      i := i + 4
+    while i < pend.size do
+      ok := ok.push (if SIQS.sprp2 codes[pend[i]!]!.toUInt64 then 1 else 0)
+      i := i + 1
+    -- merge: the passes and the composite pending ones, by index
+    let mut out : Array Nat := Array.mkEmpty codes.size
+    let mut t := 0
+    for s in [0:codes.size] do
+      let c := codes[s]!
+      if c == 1 then out := out.push s
+      else if c ≥ 2 then
+        if ok.get! t == 0 then out := out.push s
+        t := t + 1
+    return out
 
 /-- The resieved ideals of survivor `s` as a list (for `factorSurvivor2`). -/
 @[inline] def idealsOf (off ks : Array Nat) (s : Nat) : List Nat :=

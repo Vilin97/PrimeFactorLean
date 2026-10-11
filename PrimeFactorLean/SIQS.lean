@@ -806,6 +806,48 @@ form of `uecmLadder` at `-march=native`). -/
   let t := a - b
   t + (m &&& -(t >>> 63))
 
+/-- `2^dᵢ mod mᵢ` for four lanes at once, left to right over the bits `k - 1, …, 0`
+of the exponents (a squaring, then a branch-free doubling where the bit is set):
+the four chains of squarings overlap. -/
+def pow2x4 (m0 m1 m2 m3 d0 d1 d2 d3 : UInt64) (f0 f1 f2 f3 : Float) :
+    Nat → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 × UInt64 × UInt64 × UInt64
+  | 0, x0, x1, x2, x3 => (x0, x1, x2, x3)
+  | k + 1, x0, x1, x2, x3 =>
+    let s := k.toUInt64
+    let y0 := mulmod50 x0 x0 m0 f0
+    let y1 := mulmod50 x1 x1 m1 f1
+    let y2 := mulmod50 x2 x2 m2 f2
+    let y3 := mulmod50 x3 x3 m3 f3
+    let b0 := -((d0 >>> s) &&& 1)
+    let b1 := -((d1 >>> s) &&& 1)
+    let b2 := -((d2 >>> s) &&& 1)
+    let b3 := -((d3 >>> s) &&& 1)
+    pow2x4 m0 m1 m2 m3 d0 d1 d2 d3 f0 f1 f2 f3 k
+      (y0 ^^^ ((y0 ^^^ addM y0 y0 m0) &&& b0)) (y1 ^^^ ((y1 ^^^ addM y1 y1 m1) &&& b1))
+      (y2 ^^^ ((y2 ^^^ addM y2 y2 m2) &&& b2)) (y3 ^^^ ((y3 ^^^ addM y3 y3 m3) &&& b3))
+
+/-- `sprp2` of four odd moduli `3 < mᵢ < 2^51` at once (`pow2x4`): bit `i` of the
+result is set when `mᵢ` is a strong probable prime to base 2. -/
+def sprp2x4 (m0 m1 m2 m3 : UInt64) : UInt64 :=
+  let f0 := 1.0 / m0.toFloat
+  let f1 := 1.0 / m1.toFloat
+  let f2 := 1.0 / m2.toFloat
+  let f3 := 1.0 / m3.toFloat
+  -- mᵢ - 1 = 2^tᵢ · dᵢ with dᵢ odd
+  let t0 := ((m0 - 1) &&& (-(m0 - 1))).toNat.log2
+  let t1 := ((m1 - 1) &&& (-(m1 - 1))).toNat.log2
+  let t2 := ((m2 - 1) &&& (-(m2 - 1))).toNat.log2
+  let t3 := ((m3 - 1) &&& (-(m3 - 1))).toNat.log2
+  let d0 := (m0 - 1) >>> t0.toUInt64
+  let d1 := (m1 - 1) >>> t1.toUInt64
+  let d2 := (m2 - 1) >>> t2.toUInt64
+  let d3 := (m3 - 1) >>> t3.toUInt64
+  let (x0, x1, x2, x3) := pow2x4 m0 m1 m2 m3 d0 d1 d2 d3 f0 f1 f2 f3
+    ((d0 ||| d1 ||| d2 ||| d3).toNat.log2 + 1) 1 1 1 1
+  let ok (m x : UInt64) (f : Float) (t : Nat) : UInt64 :=
+    if x == 1 || x == m - 1 || sprp2.squares m x f t then 1 else 0
+  ok m0 x0 f0 t0 ||| (ok m1 x1 f1 t1 <<< 1) ||| (ok m2 x2 f2 t2 <<< 2) ||| (ok m3 x3 f3 t3 <<< 3)
+
 /-- The Montgomery ladder over `bits[i-1], …, bits[0]` (stage 1 of `uecmCurve`)
 from `(X0 : Z0) = [k]P`, `(X1 : Z1) = [k+1]P` for `P = (x0 : 1)` on the curve
 `a24`; the bit selects (without branching) which point is doubled. -/

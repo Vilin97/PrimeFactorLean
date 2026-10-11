@@ -1381,6 +1381,8 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
     "gate pass A", "factor"]
   let mut tm : Array Nat := Array.replicate names.size 0
   let mut cnt : Array Nat := Array.replicate 7 0
+  let mut tmB := 0
+  let mut chk : UInt64 := 0
   let mut sc := Las.Scratch.new ctx'
   let las := ctx'
   let len := las.I * las.J
@@ -1395,6 +1397,21 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
     let Ras ← IO.lazyPure fun _ => Las.latticeRoots4 las.alg bases
     let t1 ← IO.monoNanosNow
     tm := tm.modify 0 (· + (t1 - t0))
+    if get "basis" 0 == 1 then
+      -- the Franke–Kleinjung bases alone (both sides, the four special-q)
+      let tb0 ← IO.monoNanosNow
+      let x ← IO.lazyPure fun _ => Id.run do
+        let mut acc : UInt64 := 0
+        for jx in [0:grp.size] do
+          for (side, R) in [(las.rat, Rrs[jx]!), (las.alg, Ras[jx]!)] do
+            for k in [side.largeStart:side.primes.size] do
+              let p := side.primes[k]!
+              let r := R[k]!
+              if r < p then acc := acc ^^^ Las.fkBasis las.I.toUInt32 p.toUInt32 0 r.toUInt32 1 128
+        return acc
+      let tb1 ← IO.monoNanosNow
+      tmB := tmB + (tb1 - tb0)
+      chk := chk ^^^ x
     for jx in [0:grp.size] do
       let (q, ρ) := grp[jx]!
       let (ua, ub, va, vb) := bases[jx]!
@@ -1468,15 +1485,15 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       let (lgR, prR) ← IO.lazyPure fun _ =>
         Las.smallScanAll bd.tabR las.rat.pinvLim las.rat.lg2 las.rat.sieveStart surv IU logI
       ts := ts.push (← IO.monoNanosNow)
-      let idx ← IO.lazyPure fun _ => (Array.range surv.size).filter fun s =>
-        Las.ratPass las bd ksR offR[s]! offR[s + 1]! surv[s]! (lgR.get! s) prR[s]!
+      let idx ← IO.lazyPure fun _ => Las.gateAll.passing ((Array.range surv.size).map fun s =>
+        (Las.ratPre las bd ksR offR[s]! offR[s + 1]! surv[s]! (lgR.get! s) prR[s]!).toNat)
       ts := ts.push (← IO.monoNanosNow)
       let (lgA, prA) ← IO.lazyPure fun _ =>
         Las.smallScanAll bd.tabA las.alg.pinvLim las.alg.lg2 las.alg.sieveStart (idx.map (surv[·]!)) IU logI
       ts := ts.push (← IO.monoNanosNow)
-      let pass ← IO.lazyPure fun _ => (idx.size.fold (init := #[]) fun t _ acc =>
+      let pass ← IO.lazyPure fun _ => (Las.gateAll.passing ((Array.range idx.size).map fun t =>
         let s := idx[t]!
-        if Las.algPass las bd ksA offA[s]! offA[s + 1]! surv[s]! (lgA.get! t) prA[t]! then acc.push s else acc)
+        (Las.algPre las bd ksA offA[s]! offA[s + 1]! surv[s]! (lgA.get! t) prA[t]!).toNat)).map (idx[·]!)
       ts := ts.push (← IO.monoNanosNow)
       cnt := cnt.modify 6 (· + idx.size)
       let nrel ← IO.lazyPure fun _ => Id.run do
@@ -1496,6 +1513,94 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   let nq := max 1 qs.size
   let total := tm.foldl (· + ·) 0
   IO.println s!"{qs.size} special-q from {q0}: {total / nq / 1000} us per q, {cnt[5]!} rels"
+  if get "basis" 0 == 1 then
+    IO.println s!"  (Franke–Kleinjung bases alone, both sides: {tmB / nq / 1000} us per q; {chk})"
   for k in [0:names.size] do
     IO.println s!"  {names[k]!}: {tm[k]! / nq / 1000} us ({tm[k]! * 1000 / max 1 total / 10}.{tm[k]! * 1000 / max 1 total % 10}%)"
   IO.println s!"  per q: candidates {cnt[0]! / nq}, after gcd {cnt[1]! / nq}, after tiny {cnt[2]! / nq}, after prefilter {cnt[3]! / nq}, after rational gate {cnt[6]! / nq}, after gate {cnt[4]! / nq}, rels {cnt[5]! * 10 / nq / 10}.{cnt[5]! * 10 / nq % 10}"
+
+/-- Where `Las.ratPass` decides (same steps): `0` hopeless estimate, `1` word
+mismatch, `2` class 0 without the probable-prime test, `3` probable prime,
+`4` composite (class 2), `5` class 1. -/
+def ratPassCode (ctx : Las.LasCtx) (bd : Las.Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat)
+    (sLg : Float) (sPr : UInt64) : Nat :=
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let iF := Arith.nf c - Arith.nf (I / 2)
+  let jF := Arith.nf j
+  let aF := iF * bd.uaf + jF * bd.vaf
+  let bF := iF * bd.ubf + jF * bd.vbf
+  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
+  let x0 := cU - IU / 2
+  let a64 := x0 * bd.ua64 + jU * bd.va64
+  let b64 := x0 * bd.ub64 + jU * bd.vb64
+  let side := ctx.rat
+  let nF := bd.y1F * aF - bd.mF * bF
+  let tR := Las.tinyRatP bd.tq cU jU (IU / 2) 0 (Arith.fc 0) 1 0
+  let lR := Las.rangeLog side.lg2 ks lo hi (Arith.fc 0)
+  let estR := Float.log2 (nF.abs + Arith.fc 1) - tR.lg - sLg - lR
+  if Las.hopeless estR bd.hiR bd.loR bd.gapR then 0
+  else
+    let n64 := bd.y1U * a64 - bd.mU * b64
+    let pR := Las.rangeProd side.primes ks lo hi 1
+    let n64 := if nF < Arith.fc 0 then -n64 else n64
+    let odd := tR.prod * sPr * pR
+    let v2 := tR.v2
+    let u := (n64 >>> v2) * Las.inv64 odd
+    let u := if v2 == 0 then u else u &&& ((1 <<< (64 - v2)) - 1)
+    if (Float.log2 u.toFloat - estR).abs ≥ Arith.fc 1 / Arith.fc 4 then 1
+    else if u == 1 then 5
+    else if u >>> bd.mfbR != 0 then 2
+    else if u >>> bd.lpbR == 0 then 5
+    else if u < bd.lim2R then 2
+    else if u >>> 51 == 0 && u &&& 1 == 1 then (if SIQS.sprp2 u then 3 else 4)
+    else 4
+
+/-- The decisions of the rational gate over the special-q of `lasStages`. -/
+def ratGateStats (path : String) (q0 count : Nat) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA,
+      mfbR := params.mfbR, mfbA := params.mfbA, fudge := params.lasFudge,
+      tinyT := params.lasTinyT, tinyTR := params.lasTinyTR }
+  let las := Las.mkLasCtx ctx lasParams
+  let qs := specialQs sel q0 count
+  let mut codes : Array Nat := Array.replicate 6 0
+  let mut sc := Las.Scratch.new las
+  let len := las.I * las.J
+  let slack := 3
+  for (q, ρ) in qs do
+    let (u, v) := reduceLattice q ρ las.skew
+    let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
+    let Rr0 := Las.latticeRoots las.rat ua ub va vb
+    let Ra0 := Las.latticeRoots las.alg ua ub va vb
+    let ⟨b1, b2, bits⟩ := sc
+    let Pr := Las.powerRoots las.rat ua ub va vb
+    let Pa := Las.powerRoots las.alg ua ub va vb
+    let mfbR := las.params.mfbR + las.params.tinyTR - las.params.fudge
+    let (fR, biasR) := Las.fillSegments las b1 false q ua ub va vb mfbR (Las.rowExtras las las.rat Rr0)
+    let mfbA := las.params.mfbA + las.params.tinyT - (las.params.fudge + las.params.fudgeA)
+    let (fA, biasA) := Las.fillSegments las b2 true q ua ub va vb mfbA (Las.rowExtras las las.alg Ra0)
+    let (bufR, Rr) := Las.sieveLargePaired las las.rat Rr0 (Las.sievePowers las las.rat Pr (Las.lineSieveSide las las.rat Rr0 fR))
+    let (bufA, Ra) := Las.sieveLargePaired las las.alg Ra0 (Las.sievePowers las las.alg Pa (Las.lineSieveSide las las.alg Ra0 fA))
+    let c1 := Las.dropSmallGcd las (Las.survivors bufR bufA len)
+    let (bufR, bufA, c2) := Las.tinyFilter2 las (Las.mkTinyF las ua ub va vb) c1 0 bufR bufA (Array.mkEmpty c1.size) (c1.size + 1)
+    let surv := Las.prefilterGap4 las q ua ub va vb bufR bufA biasR biasA #[] #[] slack c2
+    let (lab, rowStart) := Las.labelSurvivors las (Las.zeroRows las bufA) surv
+    let bits := Las.markBits bits surv true
+    let (offR, ksR) := Las.groupFlat las surv lab rowStart (Las.resievePaired las las.rat Rr bits #[])
+    let bits := Las.markBits bits surv false
+    let bd := Las.mkBounds las q ua ub va vb Rr Ra
+    let (lgR, prR) := Las.smallScanAll bd.tabR las.rat.pinvLim las.rat.lg2 las.rat.sieveStart surv
+      las.I.toUInt64 las.params.logI.toUInt64
+    for s in [0:surv.size] do
+      let k := ratPassCode las bd ksR offR[s]! offR[s + 1]! surv[s]! (lgR.get! s) prR[s]!
+      codes := codes.modify k (· + 1)
+    sc := ⟨bufR, lab, bits⟩
+  let nq := max 1 qs.size
+  IO.println s!"rational gate per special-q: hopeless {codes[0]! / nq}, word mismatch {codes[1]! / nq}, class 0 (bounds) {codes[2]! / nq}, probable prime {codes[3]! / nq}, composite {codes[4]! / nq}, one large prime {codes[5]! / nq}"

@@ -699,3 +699,50 @@ def sqList (n ad : Nat) : IO Unit := do
       IO.println s!"proot {p} {liftedRoots d ntilde m0 p}"
 
 end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+/-- The parts of one `uecm` curve on the composites of a file: the stage-1 ladder
+alone, the whole curve, the final gcd and the curve setup's inversion. -/
+def uecmParts (path : String) : IO Unit := do
+  let ns := (← IO.FS.lines path).filterMap (·.trim.toNat?)
+  let plan := SIQS.uecmPlan.get
+  let bits := plan.1
+  let reps := 5
+  let t0 ← IO.monoNanosNow
+  let a ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc r => ns.foldl (fun acc u =>
+    let m : UInt64 := u.toUInt64
+    let mf := 1.0 / m.toFloat
+    let x0 := (7 + r.toUInt64) % m
+    let (X, Z) := SIQS.uecmLadder m 12345 x0 mf bits (bits.size - 1) x0 1 (x0 + 1) 1
+    acc ^^^ X ^^^ Z) acc) (0 : UInt64)
+  let t1 ← IO.monoNanosNow
+  let b ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc r => ns.foldl (fun acc u =>
+    let m : UInt64 := u.toUInt64
+    acc ^^^ SIQS.uecmCurveP plan m (6 + r.toUInt64) (1.0 / m.toFloat)) acc) (0 : UInt64)
+  let t2 ← IO.monoNanosNow
+  let c ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc r => ns.foldl (fun acc u =>
+    let m : UInt64 := u.toUInt64
+    acc ^^^ SIQS.gcd64 ((m >>> 3) * (2654435761 : UInt64) + r.toUInt64 + 1) m) acc) (0 : UInt64)
+  let t3 ← IO.monoNanosNow
+  let d ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc r => ns.foldl (fun acc u =>
+    let m : UInt64 := u.toUInt64
+    acc ^^^ (SIQS.invLoop m ((m >>> 5) + r.toUInt64 + (3 : UInt64)) 0 1 100).toUInt64) acc) (0 : UInt64)
+  let t4 ← IO.monoNanosNow
+  let e ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc r => ns.foldl (fun acc u =>
+    let m : UInt64 := u.toUInt64
+    let mf := 1.0 / m.toFloat
+    let x0 := (7 + r.toUInt64) % m
+    let y0 := (11 + r.toUInt64) % m
+    let (X, Z, Y, W) := SIQS.uecmLadder2 m 12345 x0 54321 y0 mf bits (bits.size - 1) x0 1 (x0 + 1) 1
+      y0 1 (y0 + 1) 1
+    acc ^^^ X ^^^ Z ^^^ Y ^^^ W) acc) (0 : UInt64)
+  let t5 ← IO.monoNanosNow
+  let f ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc r => ns.foldl (fun acc u =>
+    let m : UInt64 := u.toUInt64
+    acc ^^^ SIQS.uecmCurve2P plan m (6 + 2 * r.toUInt64) (1.0 / m.toFloat)) acc) (0 : UInt64)
+  let t6 ← IO.monoNanosNow
+  let k := ns.size * reps
+  IO.println s!"per call: ladder {(t1 - t0) / k} ns, curve {(t2 - t1) / k} ns, gcd64 {(t3 - t2) / k} ns, invLoop {(t4 - t3) / k} ns, ladder2 {(t5 - t4) / k} ns, curve2 {(t6 - t5) / k} ns ({a ^^^ b ^^^ c ^^^ d ^^^ e ^^^ f})"
+
+end PrimeFactorLean.Trace
