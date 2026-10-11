@@ -213,7 +213,7 @@ def lasFile (path : String) (q0 count : Nat) (out : String) (kvs : List String) 
       mfbR := get "mfbR" params.mfbR, mfbA := get "mfbA" params.mfbA,
       fudge := get "fudge" params.lasFudge, jDiv := get "jDiv" 2,
       preSlack := get "pre" 6, sieveFrom := get "from" 30, tinyT := get "tinyT" params.lasTinyT,
-      tinyF := get "tinyF" 0 }
+      tinyF := get "tinyF" 0, tinyTR := get "tinyTR" params.lasTinyTR }
   let v := get "v" 0
   let las := Las.mkLasCtx ctx lasParams
   IO.println s!"FB rat {las.rat.primes.size} alg {las.alg.primes.size} (powers {las.rat.pw.size}, {las.alg.pw.size}); I={las.I} J={las.J} skew {las.skew}"
@@ -375,7 +375,7 @@ def lasParFile (path : String) (q0 per : Nat) (ts : List Nat) (kvs : List String
     { logI := get "logI" params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA,
       mfbR := params.mfbR, mfbA := params.mfbA, fudge := get "fudge" params.lasFudge,
       jDiv := get "jDiv" 2, sieveFrom := get "from" 30, tinyT := get "tinyT" 0,
-      tinyF := get "tinyF" 0 }
+      tinyF := get "tinyF" 0, tinyTR := get "tinyTR" 0 }
   let las := Las.mkLasCtx ctx lasParams
   let v := get "v" 0
   let slack := get "slack" 3

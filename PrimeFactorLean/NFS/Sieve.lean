@@ -65,6 +65,8 @@ below 30, which are not sieved). -/
   /-- The lattice siever's `tinyT` (`Las.LasParams.tinyT`): the algebraic tiny
   primes counted exactly at the candidates, thresholds `tinyT` bits lower. -/
   lasTinyT : Nat := 0
+  /-- `lasTinyT` for the rational side (`Las.LasParams.tinyTR`). -/
+  lasTinyTR : Nat := 0
   /-- Target average row weight of the merged matrix, not counting the dense
   (sign and character) columns. -/
   mergeDensity : Nat := 75
@@ -154,10 +156,14 @@ def paramTable : List (Nat × Params) :=
    (95, { degree := 4, ratBound := 450000, algBound := 550000, halfWidth := 262144,
           lasLogI := 11, lpbR := 24, lpbA := 25, mfbR := 47, mfbA := 48, qmin := 100000,
           qPerTask := 2, psP := 11000, psNq := 65536, psIncr := 12, psAdMax := 288, lasVariant := 14 }),
+   -- At 100 digits the primes below 30 are not sieved but counted exactly at the
+   -- candidates, on both sides (`lasTinyT`, `lasTinyTR`): at q = 180000 the same
+   -- relations as the rational `lasFudge` slack in 4.3% less time.
    (100, { degree := 5, ratBound := 650000, algBound := 800000, halfWidth := 262144,
            lasLogI := 11, lpbR := 25, lpbA := 26, mfbR := 48, mfbA := 51, qmin := 180000,
            qPerTask := 2, psP := 7000, psNq := 15625, psIncr := 30, psAdMax := 1680,
-           psKeep := 24, lasVariant := 14, lasTinyT := 16, mergeDensity := 95 })]
+           psKeep := 24, lasVariant := 14, lasTinyT := 16, lasTinyTR := 9,
+           mergeDensity := 95 })]
 
 def chooseParams (digits : Nat) : Params :=
   if digits ≥ 58 then

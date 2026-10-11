@@ -641,7 +641,7 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
       mfbA := params.mfbA, fudge := params.lasFudge, fudgeA := params.lasFudgeA,
-      variant := params.lasVariant, tinyT := params.lasTinyT }
+      variant := params.lasVariant, tinyT := params.lasTinyT, tinyTR := params.lasTinyTR }
   let las := Las.mkLasCtx ctx lasParams
   -- special-q per round: at least six per task, and about a tenth of the
   -- relations collected so far once the yield is known

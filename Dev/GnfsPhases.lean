@@ -24,6 +24,7 @@ def applyOverrides (p : Params) (kvs : List String) : Params :=
       | "fudge" => { p with lasFudge := x }
       | "fudgeA" => { p with lasFudgeA := x }
       | "tinyT" => { p with lasTinyT := x }
+      | "tinyTR" => { p with lasTinyTR := x }
       | "qmin" => { p with qmin := x }
       | "logI" => { p with lasLogI := x }
       | "psP" => { p with psP := x }
@@ -190,7 +191,7 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   let lasParams : Las.LasParams :=
     { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA, mfbR := params.mfbR,
       mfbA := params.mfbA, fudge := params.lasFudge, fudgeA := params.lasFudgeA,
-      tinyT := params.lasTinyT,
+      tinyT := params.lasTinyT, tinyTR := params.lasTinyTR,
       variant := (overrides.findSome? fun kv => match kv.splitOn "=" with
         | ["variant", v] => v.toNat?
         | _ => none).getD params.lasVariant,
