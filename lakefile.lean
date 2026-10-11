@@ -3,9 +3,12 @@ open Lake DSL
 
 /-- `-march=native` for the generated C (as for the native baselines), except on
 continuous integration (`CI` set): its build cache moves between runners with
-different instruction sets. -/
+different instruction sets. Without the SLP vectorizer: it paired the
+independent modular products of an ECM curve into 2-wide vectors whose
+scalar-vector moves lengthened the dependency chains (`SIQS.uecm` 25 -> 20 µs
+per split; the sieves, ECM and SIQS unchanged, loop vectorization kept). -/
 def nativeArgs : Array String :=
-  run_io do return if (← IO.getEnv "CI").isSome then #[] else #["-march=native"]
+  run_io do return if (← IO.getEnv "CI").isSome then #[] else #["-march=native", "-fno-slp-vectorize"]
 
 package primeFactorLean where
   version := v!"0.1.0"

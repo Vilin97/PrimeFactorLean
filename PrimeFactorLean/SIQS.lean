@@ -995,6 +995,160 @@ def uecmCurveP (plan : ByteArray × Nat × ByteArray) (m σ : UInt64) (mf : Floa
     let acc := uecmGiants m mf bb sch X60 Z60 mmax (mmax + 1) X60 Z60 X120 Z120 acc 2
     gcd64 acc m
 
+/-! #### Two curves at once
+
+A curve is latency-bound (each ladder step waits for three products in a row),
+so two curves of the same `m` in one loop overlap their chains: about the cost
+of one and a half curves for two. -/
+
+/-- `uecmLadder` on two curves (`a24 = a`, base `x` and `a24 = b`, base `y`). -/
+def uecmLadder2 (m a x b y : UInt64) (mf : Float) (bits : ByteArray) :
+    Nat → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 →
+      UInt64 × UInt64 × UInt64 × UInt64
+  | 0, X0, Z0, _, _, Y0, W0, _, _ => (X0, Z0, Y0, W0)
+  | i + 1, X0, Z0, X1, Z1, Y0, W0, Y1, W1 =>
+    let sel := -(bits.get! i).toUInt64
+    -- lane a: (X0 : Z0), (X1 : Z1)
+    let Ax := X0 ^^^ ((X0 ^^^ X1) &&& sel)
+    let Az := Z0 ^^^ ((Z0 ^^^ Z1) &&& sel)
+    -- lane b: (Y0 : W0), (Y1 : W1)
+    let By := Y0 ^^^ ((Y0 ^^^ Y1) &&& sel)
+    let Bw := W0 ^^^ ((W0 ^^^ W1) &&& sel)
+    let p := addM Ax Az m
+    let q := subM Ax Az m
+    let p' := addM By Bw m
+    let q' := subM By Bw m
+    let sp := mulmod50 p p m mf
+    let sp' := mulmod50 p' p' m mf
+    let sq := mulmod50 q q m mf
+    let sq' := mulmod50 q' q' m mf
+    let t := subM sp sq m
+    let t' := subM sp' sq' m
+    let DX := mulmod50 sp sq m mf
+    let DX' := mulmod50 sp' sq' m mf
+    let DZ := mulmod50 t (addM sq (mulmod50 a t m mf) m) m mf
+    let DZ' := mulmod50 t' (addM sq' (mulmod50 b t' m mf) m) m mf
+    let u := mulmod50 (subM X1 Z1 m) (addM X0 Z0 m) m mf
+    let u' := mulmod50 (subM Y1 W1 m) (addM Y0 W0 m) m mf
+    let w := mulmod50 (addM X1 Z1 m) (subM X0 Z0 m) m mf
+    let w' := mulmod50 (addM Y1 W1 m) (subM Y0 W0 m) m mf
+    let e := addM u w m
+    let e' := addM u' w' m
+    let f := subM u w m
+    let f' := subM u' w' m
+    let SX := mulmod50 e e m mf
+    let SX' := mulmod50 e' e' m mf
+    let SZ := mulmod50 x (mulmod50 f f m mf) m mf
+    let SZ' := mulmod50 y (mulmod50 f' f' m mf) m mf
+    uecmLadder2 m a x b y mf bits i
+      (DX ^^^ ((DX ^^^ SX) &&& sel)) (DZ ^^^ ((DZ ^^^ SZ) &&& sel))
+      (SX ^^^ ((SX ^^^ DX) &&& sel)) (SZ ^^^ ((SZ ^^^ DZ) &&& sel))
+      (DX' ^^^ ((DX' ^^^ SX') &&& sel)) (DZ' ^^^ ((DZ' ^^^ SZ') &&& sel))
+      (SX' ^^^ ((SX' ^^^ DX') &&& sel)) (SZ' ^^^ ((SZ' ^^^ DZ') &&& sel))
+
+/-- The baby points `[j]Q`, `j ∈ uecmBabies`, of one curve. -/
+@[inline] def uecmBabyPts (m a24 : UInt64) (mf : Float) (QX QZ : UInt64) : Babies :=
+  let (X2, Z2) := uecmDbl m a24 mf QX QZ
+  let ad (xa za xb zb : UInt64) := uecmAdd m mf xa za X2 Z2 xb zb
+  let (X3, Z3) := uecmAdd m mf X2 Z2 QX QZ QX QZ
+  let (X5, Z5) := ad X3 Z3 QX QZ
+  let (X7, Z7) := ad X5 Z5 X3 Z3
+  let (X9, Z9) := ad X7 Z7 X5 Z5
+  let (X11, Z11) := ad X9 Z9 X7 Z7
+  let (X13, Z13) := ad X11 Z11 X9 Z9
+  let (X15, Z15) := ad X13 Z13 X11 Z11
+  let (X17, Z17) := ad X15 Z15 X13 Z13
+  let (X19, Z19) := ad X17 Z17 X15 Z15
+  let (X21, Z21) := ad X19 Z19 X17 Z17
+  let (X23, Z23) := ad X21 Z21 X19 Z19
+  let (X25, Z25) := ad X23 Z23 X21 Z21
+  let (X27, Z27) := ad X25 Z25 X23 Z23
+  let (X29, Z29) := ad X27 Z27 X25 Z25
+  ⟨QX, QZ, X7, Z7, X11, Z11, X13, Z13, X17, Z17, X19, Z19, X23, Z23, X29, Z29⟩
+
+/-- `[15]Q` by the chain of odd multiples (`(X2 : Z2) = [2]Q`). -/
+@[inline] def uecmOdd15 (m : UInt64) (mf : Float) (QX QZ X2 Z2 : UInt64) : UInt64 × UInt64 :=
+  let ad (xa za xb zb : UInt64) := uecmAdd m mf xa za X2 Z2 xb zb
+  let (X3, Z3) := uecmAdd m mf X2 Z2 QX QZ QX QZ
+  let (X5, Z5) := ad X3 Z3 QX QZ
+  let (X7, Z7) := ad X5 Z5 X3 Z3
+  let (X9, Z9) := ad X7 Z7 X5 Z5
+  let (X11, Z11) := ad X9 Z9 X7 Z7
+  let (X13, Z13) := ad X11 Z11 X9 Z9
+  ad X13 Z13 X11 Z11
+
+/-- `uecmGiants` on two curves (`acc`, `acc'` their products). -/
+def uecmGiants2 (m : UInt64) (mf : Float) (bb bb' : Babies) (sch : ByteArray)
+    (X1 Z1 Y1 W1 : UInt64) (mmax : Nat) :
+    Nat → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 → UInt64 →
+      UInt64 → UInt64 → Nat → UInt64 × UInt64
+  | 0, _, _, _, _, _, _, _, _, acc, acc', _ => (acc, acc')
+  | fuel + 1, Xp, Zp, Xc, Zc, Yp, Wp, Yc, Wc, acc, acc', k =>
+    if k > mmax then (acc, acc')
+    else
+      let acc := uecmPairs m mf bb sch (8 * (k - 1)) Xc Zc acc
+      let acc' := uecmPairs m mf bb' sch (8 * (k - 1)) Yc Wc acc'
+      let (Xn, Zn) := uecmAdd m mf Xc Zc X1 Z1 Xp Zp
+      let (Yn, Wn) := uecmAdd m mf Yc Wc Y1 W1 Yp Wp
+      uecmGiants2 m mf bb bb' sch X1 Z1 Y1 W1 mmax fuel Xc Zc Xn Zn Yc Wc Yn Wn acc acc' (k + 1)
+
+/-- Suyama's curve `σ` on `m`: `(a24, x₀)` from `(u³, v³, 16 u³ v⁴)` and the
+inverse `inv` of the last. -/
+@[inline] def uecmSuyama (m : UInt64) (mf : Float) (u v u3 v3 inv : UInt64) : UInt64 × UInt64 :=
+  let vmu := subM v u m
+  let a24 := mulmod50 (mulmod50 (mulmod50 (mulmod50 vmu vmu m mf) vmu m mf)
+    (addM (mulmod50 3 u m mf) v m) m mf) (mulmod50 v3 inv m mf) m mf
+  let x0 := mulmod50 (mulmod50 (mulmod50 16 (mulmod50 u3 u3 m mf) m mf) v m mf) inv m mf
+  (a24, x0)
+
+/-- The curves `σ` and `σ + 1` at once (one inversion for both): a gcd of `m`
+with one curve's product (`1` or `m` when neither found a proper factor). -/
+def uecmCurve2P (plan : ByteArray × Nat × ByteArray) (m σ : UInt64) (mf : Float) : UInt64 :=
+  let (bits, mmax, sch) := plan
+  let σ' := σ + 1
+  let u := subM (mulmod50 σ σ m mf) 5 m
+  let v := mulmod50 4 σ m mf
+  let u' := subM (mulmod50 σ' σ' m mf) 5 m
+  let v' := mulmod50 4 σ' m mf
+  let u3 := mulmod50 (mulmod50 u u m mf) u m mf
+  let v3 := mulmod50 (mulmod50 v v m mf) v m mf
+  let u3' := mulmod50 (mulmod50 u' u' m mf) u' m mf
+  let v3' := mulmod50 (mulmod50 v' v' m mf) v' m mf
+  let c := mulmod50 (mulmod50 16 u3 m mf) (mulmod50 v3 v m mf) m mf
+  let c' := mulmod50 (mulmod50 16 u3' m mf) (mulmod50 v3' v' m mf) m mf
+  -- one inversion of c c' gives both inverses
+  let s := invLoop m (mulmod50 c c' m mf) 0 1 100
+  if s == 0 then
+    let g := gcd64 c m
+    if g != 1 then g else gcd64 c' m
+  else
+    let inv := if s < 0 then (s + m.toInt64).toUInt64 else s.toUInt64
+    let (a, x) := uecmSuyama m mf u v u3 v3 (mulmod50 c' inv m mf)
+    let (b, y) := uecmSuyama m mf u' v' u3' v3' (mulmod50 c inv m mf)
+    let (D2X, D2Z) := uecmDbl m a mf x 1
+    let (D2Y, D2W) := uecmDbl m b mf y 1
+    let (QX, QZ, RX, RZ) :=
+      uecmLadder2 m a x b y mf bits (bits.size - 1) x 1 D2X D2Z y 1 D2Y D2W
+    let bb := uecmBabyPts m a mf QX QZ
+    let bb' := uecmBabyPts m b mf RX RZ
+    -- [60]Q from [15]Q (the eighth odd multiple is not a baby: recompute it)
+    let (X2, Z2) := uecmDbl m a mf QX QZ
+    let (Y2, W2) := uecmDbl m b mf RX RZ
+    let (X15, Z15) := uecmOdd15 m mf QX QZ X2 Z2
+    let (Y15, W15) := uecmOdd15 m mf RX RZ Y2 W2
+    let (X30, Z30) := uecmDbl m a mf X15 Z15
+    let (Y30, W30) := uecmDbl m b mf Y15 W15
+    let (X60, Z60) := uecmDbl m a mf X30 Z30
+    let (Y60, W60) := uecmDbl m b mf Y30 W30
+    let (X120, Z120) := uecmDbl m a mf X60 Z60
+    let (Y120, W120) := uecmDbl m b mf Y60 W60
+    let acc := uecmPairs m mf bb sch 0 X60 Z60 QZ
+    let acc' := uecmPairs m mf bb' sch 0 Y60 W60 RZ
+    let (acc, acc') := uecmGiants2 m mf bb bb' sch X60 Z60 Y60 W60 mmax (mmax + 1)
+      X60 Z60 X120 Z120 Y60 W60 Y120 W120 acc acc' 2
+    let g := gcd64 acc m
+    if g != 1 && g != m then g else gcd64 acc' m
+
 /-- One curve with the standard plan. -/
 def uecmCurve (m σ : UInt64) (mf : Float) : UInt64 := uecmCurveP uecmPlan.get m σ mf
 
@@ -1009,6 +1163,18 @@ where
 
 /-- `uecmP` with the standard plan. -/
 def uecm (u : UInt64) (curves : Nat) : UInt64 := uecmP uecmPlan.get u curves
+
+/-- `uecmP` two curves at a time (`pairs` pairs). -/
+def uecm2P (plan : ByteArray × Nat × ByteArray) (u : UInt64) (pairs : Nat) : UInt64 := go 6 pairs
+where
+  go (σ : UInt64) : Nat → UInt64
+    | 0 => 0
+    | k + 1 =>
+      let g := uecmCurve2P plan u σ (1.0 / u.toFloat)
+      if g != 1 && g != u then g else go (σ + 2) k
+
+/-- `uecm2P` with the standard plan. -/
+def uecm2 (u : UInt64) (pairs : Nat) : UInt64 := uecm2P uecmPlan.get u pairs
 
 /-- SQUFOF as a last resort (kept in a single call site so that it is only
 evaluated when needed). -/
