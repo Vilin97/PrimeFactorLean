@@ -14,6 +14,7 @@ import Dev.Stages
 import Dev.MontTest
 import Dev.GnfsPhases
 import Dev.PolyDebug
+import Dev.Trace
 open PrimeFactorLean
 
 def timed (label : String) (f : Unit → Option Nat) : IO Unit := do
@@ -113,6 +114,7 @@ def devMain (args : List String) : IO Unit := do
     for t in [1, 2, 4, 8, 16, 32] do taskOverhead t 2000
   | ["taskscaling", n] => taskScaling [1, 2, 4, 8, 16, 32, 4, 8] n.toNat!
   | ["taskscaling", n, ts] => taskScaling ((ts.splitOn ",").map String.toNat!) n.toNat!
+  | ["autotrace", ns, ts] => Trace.main ns.toNat! ts.toNat!
   | "lasparfile" :: path :: q0 :: per :: kvs =>
     let ts := (kvs.findSome? fun kv => match kv.splitOn "=" with
       | ["ts", v] => some ((v.splitOn ",").map String.toNat!)

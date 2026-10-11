@@ -742,10 +742,19 @@ def snfsSelection (b k d : Nat) (plus : Bool) : Selection :=
 with `digits` decimal digits: degree 4 below 70 digits, 5 below 125, 6 beyond
 (degree 5 measured faster from 78 digits: 2^257 - 1 3.9 s -> 3.5 s,
 2^293 - 1 20.2 s -> 8.2 s), with the parameters of the general number field
-sieve at `7/10` of the digits plus two (at least 60). -/
+sieve at `7/10` of the digits plus two (at least 60). Where those have a single
+rational large prime, the sides trade bounds, since here the rational norms
+(about `m ≈ N^(1/d)`) are the larger ones: the rational side takes the
+algebraic factor base and two large primes, with one more large-prime bit on
+each side (six Cunningham composites of 69 to 89 digits: 43.0 s -> 36.9 s in
+all, the sieve 31.9 s -> 24.1 s). -/
 def snfsParams (digits : Nat) : Params :=
   let d := if digits < 70 then 4 else if digits < 125 then 5 else 6
-  { chooseParams (max 60 (7 * digits / 10 + 2)) with degree := d }
+  let p := { chooseParams (max 60 (7 * digits / 10 + 2)) with degree := d }
+  if p.lasLogI > 0 && p.mfbR ≤ p.lpbR + 1 then
+    { p with ratBound := p.algBound, algBound := p.ratBound, lpbR := p.lpbA + 1,
+             mfbR := p.mfbA + 2, lpbA := p.lpbR + 1, mfbA := p.mfbR + 1 }
+  else p
 
 /-- The special number field sieve for a divisor `n` of `b^k ± 1`. -/
 def splitSNFS (n b k : Nat) (plus : Bool) (cfg : Config := {}) : Option (ProperFactor n) :=

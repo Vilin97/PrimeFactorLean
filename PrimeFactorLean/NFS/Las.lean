@@ -526,6 +526,8 @@ special-q at once). -/
   /-- Tasks per thread in a sieving round (a round waits for its slowest task;
   smaller tasks balance better but each keeps its own buffers). -/
   taskMul : Nat := 2
+  /-- Prime powers below this are not sieved (`sievePowers`). -/
+  powMin : Nat := 0
   deriving Repr, Inhabited
 
 /-- One side's factor base: ideals `(p, r)` (`r = p` projective) with logarithms. -/
@@ -882,7 +884,8 @@ def rowExtras (ctx : LasCtx) (side : Side) (R : Array Nat) : Array Nat := Id.run
       j := j + p
   return ex
 
-/-- Line sieve the prime-power ideals (lattice roots `Rp`) of a side. -/
+/-- Line sieve the prime-power ideals (lattice roots `Rp`) of a side (the
+machine-word kernels of `lineSieveSide`). -/
 def sievePowers (ctx : LasCtx) (side : Side) (Rp : Array Nat) (buf : ByteArray) : ByteArray :=
   Id.run do
   let I := ctx.I
@@ -892,13 +895,11 @@ def sievePowers (ctx : LasCtx) (side : Side) (Rp : Array Nat) (buf : ByteArray) 
   for k in [0:side.pw.size] do
     let p := side.pw[k]!
     let r := Rp[k]!
-    if r ≥ p then continue
+    if r ≥ p || p < ctx.params.powMin then continue
     let lg := side.pwLogs.get! k
-    let start := (r + I / 2) % p
-    let count := (I + p - 1) / p
     if hb' : lenU.toNat < b.size then
-      b := lineSieve b lenU hb' p.toUSize r.toUSize I.toUSize ctx.J.toUSize lg count 1 start.toUSize
-        ctx.J
+      b := lineSieveU b lenU hb' p.toUSize r.toUSize I.toUSize ctx.J.toUSize lg
+        ((I + p - 1) / p).toUSize 1 ((r + I / 2) % p).toUSize ctx.J.toUSize
   return b
 
 /-- `F(a, b)` in floating point (only its logarithm is needed). -/
@@ -2558,7 +2559,145 @@ def factorSurvivor4 (ctx : LasCtx) (bd : Bounds) (q ρ : Nat) (ua ub va vb : Int
   else factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listR listA pos
 
 
-/-! ## The production sievers (with `factorSurvivor4`) -/
+/-! ### The gate over all survivors at once
+
+`survivorGate` scans the small ideals once per survivor (some 560 ideals per
+side at 100 digits, 2.6 ns each: 5.4 ms per special-`q` on the rational side).
+`gateAll` turns the loops around: each small ideal scans every survivor, with
+its constants in registers and a handful of word operations per survivor. -/
+
+/-- The survivors `[s, …)` (positions `j I + c`) in the progression of the
+small ideal `(p, r)`, `r < p`: `log₂ p` added into `lgs` and `p` multiplied into
+`prs` (twice and `p²` when the root `r2` modulo `p²` matches as well, `r2 < p²`).
+With `K = I p - I/2`, `y = c + K - j r` is the exact positive value
+`x₀ + I p - j r` of `smallScan`, divisible by `p` iff `y p⁻¹ ≤ lim (mod 2^32)`. -/
+def scanIdeal (survs : Array Nat) (mask logI half p r r2 K : UInt64) (pinv lim : UInt32)
+    (lg : Float) (s : Nat) (lgs : FloatArray) (prs : Array UInt64) :
+    FloatArray × Array UInt64 :=
+  if h : s < survs.size then
+    let pos := survs[s].toUInt64
+    let c := pos &&& mask
+    let j := pos >>> logI
+    if (c + K - j * r).toUInt32 * pinv ≤ lim then
+      let M := p * p
+      let sq := r2 < M && (c + (M <<< logI) - half - j * r2) % M == 0
+      scanIdeal survs mask logI half p r r2 K pinv lim lg (s + 1)
+        (lgs.set! s (lgs.get! s + (if sq then lg + lg else lg)))
+        (prs.set! s (prs[s]! * (if sq then M else p)))
+    else scanIdeal survs mask logI half p r r2 K pinv lim lg (s + 1) lgs prs
+  else (lgs, prs)
+termination_by survs.size - s
+
+/-- A degenerate small ideal (`R ≥ p`): it divides the norm exactly on the rows
+`j ≡ 0 (mod p)`. -/
+def scanRows (survs : Array Nat) (logI p : UInt64) (lg : Float) (s : Nat) (lgs : FloatArray)
+    (prs : Array UInt64) : FloatArray × Array UInt64 :=
+  if h : s < survs.size then
+    if (survs[s].toUInt64 >>> logI) % p == 0 then
+      scanRows survs logI p lg (s + 1) (lgs.set! s (lgs.get! s + lg)) (prs.set! s (prs[s]! * p))
+    else scanRows survs logI p lg (s + 1) lgs prs
+  else (lgs, prs)
+termination_by survs.size - s
+
+/-- `smallScan` at every survivor, ideal by ideal (`tab`, `pl`, `lg2`, `off` as
+for `smallScan`): the sums of logarithms and the products modulo `2^64`. -/
+def smallScanAll (tab pl : Array Nat) (lg2 : FloatArray) (off : Nat) (survs : Array Nat)
+    (I logI : UInt64) : FloatArray × Array UInt64 := Id.run do
+  let n := survs.size
+  let mut lgs : FloatArray := FloatArray.emptyWithCapacity n
+  for _ in [0:n] do lgs := lgs.push (fc 0)
+  let mut prs : Array UInt64 := Array.replicate n 1
+  let mask := I - 1
+  let half := I / 2
+  for k in [0:min tab.size pl.size] do
+    let w := tab[k]!.toUInt64
+    let p := w &&& 4095
+    let r := (w >>> 12) &&& 4095
+    let lg := lg2.get! (off + k)
+    if r ≥ p then
+      (lgs, prs) := scanRows survs logI p lg 0 lgs prs
+    else
+      let v := pl[k]!.toUInt64
+      (lgs, prs) := scanIdeal survs mask logI half p r (w >>> 24) (I * p - half) v.toUInt32
+        (v >>> 32).toUInt32 lg 0 lgs prs
+  return (lgs, prs)
+
+/-- The rational half of `survivorGate` with the small ideals' part given
+(`sLg`, `sPr` from `smallScanAll`): whether the survivor passes. -/
+def ratPass (ctx : LasCtx) (bd : Bounds) (listR : List Nat) (pos : Nat) (sLg : Float)
+    (sPr : UInt64) : Bool :=
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let iF := nf c - nf (I / 2)
+  let jF := nf j
+  let aF := iF * bd.uaf + jF * bd.vaf
+  let bF := iF * bd.ubf + jF * bd.vbf
+  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
+  let x0 := cU - IU / 2
+  let a64 := x0 * bd.ua64 + jU * bd.va64
+  let b64 := x0 * bd.ub64 + jU * bd.vb64
+  let side := ctx.rat
+  let nF := bd.y1F * aF - bd.mF * bF
+  let tR := tinyRatP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
+  let lR := listR.foldl (fun acc k => acc + side.lg2.get! k) (fc 0)
+  let estR := Float.log2 (nF.abs + fc 1) - tR.lg - sLg - lR
+  if hopeless estR bd.hiR bd.loR bd.gapR then false
+  else
+    let n64 := bd.y1U * a64 - bd.mU * b64
+    let pR := listR.foldl (fun acc k => acc * side.primes[k]!.toUInt64) 1
+    sideClass estR (if nF < fc 0 then -n64 else n64) (tR.prod * sPr * pR) tR.v2
+      bd.lpbR bd.mfbR bd.lim2R != 0
+
+/-- The algebraic half of `survivorGate` (as `ratPass`). -/
+def algPass (ctx : LasCtx) (bd : Bounds) (listA : List Nat) (pos : Nat) (sLg : Float)
+    (sPr : UInt64) : Bool :=
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let iF := nf c - nf (I / 2)
+  let jF := nf j
+  let aF := iF * bd.uaf + jF * bd.vaf
+  let bF := iF * bd.ubf + jF * bd.vbf
+  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
+  let x0 := cU - IU / 2
+  let a64 := x0 * bd.ua64 + jU * bd.va64
+  let b64 := x0 * bd.ub64 + jU * bd.vb64
+  let d := bd.cs.size - 1
+  let sideA := ctx.alg
+  let fF := homEvalFA bd.cs aF bF d (bd.cs.get! d) (fc 1)
+  let tA := tinyAlgP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
+  let lA := listA.foldl (fun acc k => acc + sideA.lg2.get! k) (fc 0)
+  let estA := Float.log2 (fF.abs / bd.qF + fc 1) - tA.lg - sLg - lA
+  if hopeless estA bd.hiA bd.loA bd.gapA then false
+  else
+    let f64 := hornerU bd.cs64 a64 b64 d (bd.cs64[d]!) 1
+    let pA := listA.foldl (fun acc k => acc * sideA.primes[k]!.toUInt64) 1
+    sideClass estA (if fF < fc 0 then -f64 else f64) (bd.qU * tA.prod * sPr * pA) tA.v2
+      bd.lpbA bd.mfbA bd.lim2A != 0
+
+/-- The indices of the survivors that pass `survivorGate` (the same decisions),
+each side's small ideals scanned over all its survivors at once: the rational
+side over every survivor, the algebraic side over those that passed it. -/
+def gateAll (ctx : LasCtx) (bd : Bounds) (survs : Array Nat) (listsR listsA : Array (List Nat)) :
+    Array Nat := Id.run do
+  let IU := ctx.I.toUInt64
+  let logI := ctx.params.logI.toUInt64
+  let side := ctx.rat
+  let (lgR, prR) := smallScanAll bd.tabR side.pinvLim side.lg2 side.sieveStart survs IU logI
+  let mut idx : Array Nat := #[]
+  for s in [0:survs.size] do
+    if ratPass ctx bd listsR[s]! survs[s]! (lgR.get! s) prR[s]! then idx := idx.push s
+  let sideA := ctx.alg
+  let (lgA, prA) := smallScanAll bd.tabA sideA.pinvLim sideA.lg2 sideA.sieveStart
+    (idx.map (survs[·]!)) IU logI
+  let mut out : Array Nat := #[]
+  for t in [0:idx.size] do
+    let s := idx[t]!
+    if algPass ctx bd listsA[s]! survs[s]! (lgA.get! t) prA[t]! then out := out.push s
+  return out
+
+/-! ## The production sievers (survivors through `gateAll`) -/
 
 /-- `processQ11` with the reduced bases of the large ideals cached for the resieve. -/
 def processQ12 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
@@ -2582,8 +2721,8 @@ def processQ12 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch
   let bits := markBits bits surv false
   let bd := mkBounds ctx q ua ub va vb Rr Ra
   let mut rels : Array Rel := #[]
-  for k in [0:surv.size] do
-    if let some rel := factorSurvivor4 ctx bd q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+  for k in gateAll ctx bd surv listsR listsA do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
       rels := rels.push rel
   return (rels, ⟨bufR, lab, bits⟩)
 
@@ -2619,8 +2758,8 @@ def processQ13 (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (sc : Scratch) : Array 
   let bits := markBits bits surv false
   let bd := mkBounds ctx q ua ub va vb Rr Ra
   let mut rels : Array Rel := #[]
-  for k in [0:surv.size] do
-    if let some rel := factorSurvivor4 ctx bd q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+  for k in gateAll ctx bd surv listsR listsA do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
       rels := rels.push rel
   return (rels, ⟨bufR, lab, bits⟩)
 
@@ -2649,8 +2788,8 @@ def processQ13R (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (ua ub va vb : Int) (R
   let bits := markBits bits surv false
   let bd := mkBounds ctx q ua ub va vb Rr Ra
   let mut rels : Array Rel := #[]
-  for k in [0:surv.size] do
-    if let some rel := factorSurvivor4 ctx bd q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
+  for k in gateAll ctx bd surv listsR listsA do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listsR[k]! listsA[k]! surv[k]! then
       rels := rels.push rel
   return (rels, ⟨bufR, lab, bits⟩)
 

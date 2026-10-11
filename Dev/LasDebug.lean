@@ -524,7 +524,7 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
     { logI := get "logI" params.lasLogI, lpbR := get "lpbR" params.lpbR, lpbA := get "lpbA" params.lpbA,
       mfbR := get "mfbR" params.mfbR, mfbA := get "mfbA" params.mfbA,
       fudge := get "fudge" params.lasFudge, jDiv := get "jDiv" 2, sieveFrom := get "from" 30,
-      fudgeA := get "fudgeA" 0 }
+      fudgeA := get "fudgeA" 0, powMin := get "powMin" 0 }
   let slack := get "slack" 3
   let fs := get "fs" 2
   let fs3 := fs == 3
@@ -539,6 +539,8 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   let mut gates : Array Nat := Array.replicate 8 0
   let mut passB := 0
   let mut tmP : Array Nat := Array.replicate 4 0
+  let mut gateMismatch := 0
+  let mut tmG := 0
   let mut i := 0
   let len := las.I * las.J
   while i < qs.size do
@@ -603,11 +605,20 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       let a9 ← IO.monoNanosNow
       let mut rels := 0
       let bd ← IO.lazyPure fun _ => Las.mkBounds las q ua ub va vb RrB RaB
-      for k in [0:surv.size] do
-        let r := if fs3 then Las.factorSurvivor3 las bd q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
-          else if fs == 4 then Las.factorSurvivor4 las bd q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
-          else Las.factorSurvivor2 las q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
-        if r.isSome then rels := rels + 1
+      if fs == 5 then
+        let tg0 ← IO.monoNanosNow
+        let pass ← IO.lazyPure fun _ => Las.gateAll las bd surv listsR listsA
+        let tg1 ← IO.monoNanosNow
+        tmG := tmG + (tg1 - tg0)
+        for k in pass do
+          if (Las.factorSurvivor2 las q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!).isSome then
+            rels := rels + 1
+      else
+        for k in [0:surv.size] do
+          let r := if fs3 then Las.factorSurvivor3 las bd q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
+            else if fs == 4 then Las.factorSurvivor4 las bd q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
+            else Las.factorSurvivor2 las q ρ ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!
+          if r.isSome then rels := rels + 1
       let a10 ← IO.monoNanosNow
       -- the bounds alone (both sides, every survivor) and the exact path alone
       let nb ← IO.lazyPure fun _ => Id.run do
@@ -628,9 +639,12 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
           if (exactCofactors las q ua ub va vb RrB RaB listsR[k]! listsA[k]! surv[k]!).isSome then n := n + 1
         return n
       let a12 ← IO.monoNanosNow
+      let mut passOld : Array Nat := #[]
       for k in [0:surv.size] do
         let g := Las.survivorGate las bd listsR[k]! listsA[k]! surv[k]!
         gates := gates.modify g (· + 1)
+        if g ≥ 4 then passOld := passOld.push k
+      if passOld != Las.gateAll las bd surv listsR listsA then gateMismatch := gateMismatch + 1
       let I := las.I
       let s1 ← IO.lazyPure fun _ => Id.run do
         let mut acc : Float := 0
@@ -689,6 +703,7 @@ def lasPhases (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   IO.println s!"us/q: both bounds on every survivor {us 11}, exact cofactors (no splits) on every survivor {tmX / 1000 / nq} ({cnt[11]!})"
   IO.println s!"per q: rational bound passed {passR / nq}, both {passB / nq}"
   IO.println s!"gate per q: rat bound {gates[0]! / nq}, rat class {gates[1]! / nq}, alg bound {gates[2]! / nq}, alg class {gates[3]! / nq}, passed (rat?/alg? undecided) {gates[4]! / nq} {gates[5]! / nq} {gates[6]! / nq} {gates[7]! / nq}"
+  IO.println s!"gateAll differs from survivorGate on {gateMismatch} special-q; gateAll {tmG / 1000 / nq} us/q"
   IO.println s!"us/q on every survivor: smallLogs rat {tmP[0]! / 1000 / nq}, tinyRat {tmP[1]! / 1000 / nq}, tinyAlg {tmP[2]! / 1000 / nq}, smallHits rat {tmP[3]! / 1000 / nq}"
 
 /-- The floating-point cofactor bounds against the exact cofactors over the
