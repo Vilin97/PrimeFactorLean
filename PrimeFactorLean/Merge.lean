@@ -341,6 +341,16 @@ def primTree (k : Nat) (wt : Array Nat) : Array Nat × Array Nat := Id.run do
           parent := parent.set! j v
   return (parent, order)
 
+/-- The columns `c ∈ [lo, hi)` with `0 < w[c] ≤ cwmax` (tail recursive). -/
+def passCols (w : Array Nat) (cwmax lo hi : Nat) : Array Nat := go lo #[]
+where
+  go (c : Nat) (acc : Array Nat) : Array Nat :=
+    if h : c < hi ∧ c < w.size then
+      let x := w[c]
+      go (c + 1) (if x != 0 && x ≤ cwmax then acc.push c else acc)
+    else acc
+  termination_by hi - c
+
 /-- `mergeLog` in the manner of CADO-NFS's `merge`. The dense columns (below
 `dense < 63`) do not take part: each row keeps them as a bitmask, XORed along
 every row addition, so the rows being merged are shorter and `density` counts
@@ -381,7 +391,10 @@ def mergeLog2 (numCols dense : Nat) (rows0 : Array (Array Nat)) (density maxW : 
   let mut colCw : Array Nat := Array.replicate numCols 0
   while !done && idle < 3 do
     let mut merges := 0
-    for c in [dense:numCols] do
+    -- this pass's columns, gathered first: most are skipped, and a skip inside
+    -- the loop below (with all its state) cost as much as the merges themselves
+    let cands := passCols colWeight cwmax dense numCols
+    for c in cands do
       if done then break
       let cw := colWeight[c]!
       if cw == 0 || cw > cwmax then continue
