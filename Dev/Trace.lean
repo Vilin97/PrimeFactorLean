@@ -298,6 +298,122 @@ end PrimeFactorLean.Trace
 
 namespace PrimeFactorLean.Trace
 open Lanczos in
+/-- `B x`, `Bᵀ y` and the inner products of a Lanczos step at several task
+counts, on the matrix that `Lanczos.dependencies` would build. -/
+def lanczosScale (numCols : Nat) (rows : Array (Array Nat)) (ts : List Nat) (reps : Nat) :
+    IO Unit := do
+  let kept := GF2.removeSingletons numCols rows
+  let mut index : Array Nat := Array.replicate numCols numCols
+  let mut active := 0
+  for i in kept do
+    for c in rows[i]! do
+      if c < numCols && index[c]! == numCols then
+        index := index.set! c active
+        active := active + 1
+  let take := min kept.size (active + 64)
+  let mut cols : Array (Array Nat) := Array.mkEmpty take
+  for k in [0:take] do
+    cols := cols.push ((rows[kept[k]!]!.filter (· < numCols)).map fun c => index[c]!)
+  let B := Sparse.mk' active cols
+  let n := B.ncols
+  let v := randomBlock n 5
+  let bv := mulB B v 16
+  IO.println s!"B: {B.nrows} x {n}"
+  for t in ts do
+    let t0 ← IO.monoNanosNow
+    let mut acc : UInt64 := 0
+    for _ in [0:reps] do
+      let r ← IO.lazyPure fun _ => mulB B v t
+      acc := acc ^^^ r.get 3
+    let t1 ← IO.monoNanosNow
+    for _ in [0:reps] do
+      let r ← IO.lazyPure fun _ => mulBT B bv t
+      acc := acc ^^^ r.get 3
+    let t2 ← IO.monoNanosNow
+    IO.println s!"tasks {t}: B x {(t1 - t0) / 1000 / reps} us, Bt y {(t2 - t1) / 1000 / reps} us ({acc})"
+
+open Lanczos in
+/-- `steps` iterations of the Lanczos recurrence (as `Lanczos.step`) with the time of
+each phase summed: `A V`, the inner products, the column selection and small
+products, the tables, the updates. -/
+def lanczosSteps (numCols : Nat) (rows : Array (Array Nat)) (threads steps : Nat) : IO Unit := do
+  let kept := GF2.removeSingletons numCols rows
+  let mut index : Array Nat := Array.replicate numCols numCols
+  let mut active := 0
+  for i in kept do
+    for c in rows[i]! do
+      if c < numCols && index[c]! == numCols then
+        index := index.set! c active
+        active := active + 1
+  let take := min kept.size (active + 64)
+  let mut cols : Array (Array Nat) := Array.mkEmpty take
+  for k in [0:take] do
+    cols := cols.push ((rows[kept[k]!]!.filter (· < numCols)).map fun c => index[c]!)
+  let B := Sparse.mk' active cols
+  let n := B.ncols
+  let y := randomBlock n 1
+  let v0 := mulA B y threads
+  let mut st : LState := ⟨v0, Block.zero n, Block.zero n, Block.zero n, Mat.zero, Mat.zero,
+    Mat.zero, Mat.zero, Array.range 64, 0xFFFFFFFFFFFFFFFF⟩
+  let mut tm : Array Nat := Array.replicate 8 0
+  let tasks := threads
+  let tStart ← IO.monoNanosNow
+  let mut tPrev := tStart
+  for _ in [0:steps] do
+    let t0 ← IO.monoNanosNow
+    tm := tm.modify 7 (· + (t0 - tPrev))
+    let bv ← IO.lazyPure fun _ => mulB B st.v threads
+    let t1 ← IO.monoNanosNow
+    let stv := st.v
+    let av ← IO.lazyPure fun _ => mulBT B bv threads
+    let inner : Option (Mat × Mat × Mat) := none
+    let t2 ← IO.monoNanosNow
+    let ip : Mat × Mat × Mat ← IO.lazyPure fun _ =>
+      if let some ms := inner then ms else
+      let parts := (chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
+        let (vb, ab, zb) := (stv.data.b, av.data.b, v0.data.b)
+        if h : 8 * hi ≤ vb.size ∧ 8 * hi ≤ ab.size ∧ 8 * hi ≤ zb.size ∧ vb.size < USize.size ∧
+            ab.size < USize.size ∧ zb.size < USize.size then
+          let a1 := innerGo vb ab hi h.1 h.2.1 ⟨h.2.2.2.1, h.2.2.2.2.1⟩ lo Tab.zero
+          let a2 := innerGo ab ab hi h.2.1 h.2.1 ⟨h.2.2.2.2.1, h.2.2.2.2.1⟩ lo Tab.zero
+          let a3 := innerGo vb zb hi h.1 h.2.2.1 ⟨h.2.2.2.1, h.2.2.2.2.2⟩ lo Tab.zero
+          (tablesMat a1, tablesMat a2, tablesMat a3)
+        else (Mat.zero, Mat.zero, Mat.zero)
+      parts.foldl (fun (x1, x2, x3) tk =>
+        let (y1, y2, y3) := tk.get
+        (x1.xor y1, x2.xor y2, x3.xor y3)) (Mat.zero, Mat.zero, Mat.zero)
+    let (vtav, vta2v, vtv0) := ip
+    let t3 ← IO.monoNanosNow
+    if vtav.isZero then break
+    let some (winv, s, mask0) ← IO.lazyPure fun _ => selectColumns vtav st.s1 | break
+    let d := (winv.mul ((vta2v.andMask mask0).xor vtav)).xor Mat.identity
+    let e := st.winv1.mul (vtav.andMask mask0)
+    let f := ((st.winv2.mul ((st.vtav1.mul st.winv1).xor Mat.identity)).mul
+      (((st.vta2v1.andMask st.mask1).xor st.vtav1).andMask mask0))
+    let wv := winv.mul vtv0
+    let (d, e, f, wv) ← IO.lazyPure fun _ => (d, e, f, wv)
+    let t4 ← IO.monoNanosNow
+    let (tW, tD, tE, tF) ← IO.lazyPure fun _ =>
+      ((tables wv).toB, (tables d).toB, (tables e).toB, (tables f).toB)
+    let t5 ← IO.monoNanosNow
+    let (nd, xd) ← IO.lazyPure fun _ =>
+      let upd := (chunks n tasks).map fun (lo, hi) => Task.spawn fun _ =>
+        (nextRange st.v st.v1 st.v2 av mask0 tD tE tF lo hi, xRange st.x st.v tW lo hi)
+      upd.foldl (fun (a, b) tk =>
+        let (c, e) := tk.get
+        (a ++ c.b, b ++ e.b)) (ByteArray.emptyWithCapacity (8 * n), ByteArray.emptyWithCapacity (8 * n))
+    let t6 ← IO.monoNanosNow
+    st := ⟨⟨⟨nd⟩⟩, st.v, st.v1, ⟨⟨xd⟩⟩, winv, st.winv1, vtav, vta2v, s, mask0⟩
+    let t7 ← IO.monoNanosNow
+    tm := #[tm[0]! + (t1 - t0), tm[1]! + (t2 - t1), tm[2]! + (t3 - t2), tm[3]! + (t4 - t3),
+      tm[4]! + (t5 - t4), tm[5]! + (t6 - t5), tm[6]! + (t7 - t6), tm[7]!]
+    tPrev ← IO.monoNanosNow
+    if (← IO.getEnv "LZMARK").isSome then IO.eprint "|"
+  let tEnd ← IO.monoNanosNow
+  let us (k : Nat) : Nat := tm[k]! / 1000 / steps
+  IO.println s!"{steps} steps, {(tEnd - tStart) / 1000 / steps} us per step: B v {us 0}, Bt {us 1}, inner {us 2}, select+mats {us 3}, tables {us 4}, update {us 5}, state {us 6}, between steps {us 7}"
+
+open Lanczos in
 /-- The parts of a Lanczos step on the matrix that `Lanczos.dependencies` would
 build from `(numCols, rows)`, timed over `reps` repetitions each. -/
 def lanczosParts (numCols : Nat) (rows : Array (Array Nat)) (threads reps : Nat) : IO Unit := do

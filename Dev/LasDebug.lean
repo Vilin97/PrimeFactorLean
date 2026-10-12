@@ -1404,6 +1404,57 @@ def factorNoSplit (ctx : Las.LasCtx) (q : Nat) (ua ub va vb : Int) (Rr Ra : Arra
   let ca := Las.cofactorClass z ctx.params.lpbA ctx.params.mfbA ctx.limA
   return cr * 3 + ca
 
+/-- The steps of `Las.fkBasis` from `(x, b₀), (y, b₁)` (a development aid). -/
+def fkSteps (I : UInt32) (x b0 y b1 : UInt32) : Nat → Nat → Nat
+  | 0, n => n
+  | fuel + 1, n =>
+    if x < I && y < I then n
+    else if x ≥ y then
+      if y == 0 then n
+      else
+        let k := x / y
+        if x - k * y + y ≥ I then fkSteps I (x - k * y) (b0 + k * b1) y b1 fuel (n + 1)
+        else
+          let k' := (x - I) / y + 1
+          fkSteps I (x - k' * y) (b0 + k' * b1) y b1 fuel (n + 1)
+    else
+      if x == 0 then n
+      else
+        let k := y / x
+        if y - k * x + x ≥ I then fkSteps I x b0 (y - k * x) (b1 + k * b0) fuel (n + 1)
+        else
+          let k' := (y - I) / x + 1
+          fkSteps I x b0 (y - k' * x) (b1 + k' * b0) fuel (n + 1)
+
+/-- The histogram of `fkSteps` over the large ideals of `count` special-q. -/
+def fkStepStats (path : String) (q0 count : Nat) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA,
+      mfbR := params.mfbR, mfbA := params.mfbA, fudge := params.lasFudge }
+  let las := Las.mkLasCtx ctx lasParams
+  let qs := specialQs sel q0 count
+  let mut hist : Array Nat := Array.replicate 40 0
+  for (q, ρ) in qs do
+    let (u, v) := reduceLattice q ρ las.skew
+    for side in [las.rat, las.alg] do
+      let R := Las.latticeRoots side u.1 u.2 v.1 v.2
+      for k in [side.largeStart:side.primes.size] do
+        let p := side.primes[k]!
+        let r := R[k]!
+        if r < p then
+          let st := fkSteps las.I.toUInt32 p.toUInt32 0 r.toUInt32 1 128 0
+          hist := hist.modify (min 39 st) (· + 1)
+  let total := hist.foldl (· + ·) 0
+  let mut acc := 0
+  for i in [0:40] do
+    if hist[i]! > 0 then
+      acc := acc + hist[i]!
+      IO.println s!"{i} steps: {hist[i]!} ({acc * 1000 / total} per mille cumulative)"
+
+set_option maxRecDepth 4096 in
 /-- The production siever (`processQs14` with `tinyT`, `tinyTR`) one stage at a
 time, single-threaded: the time of each stage per special-q and the candidate
 counts between them. -/
@@ -1413,6 +1464,13 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
   let get (key : String) (d : Nat) : Nat := (kvs.findSome? fun kv => match kv.splitOn "=" with
     | [k, v] => if k == key then v.toNat? else none
     | _ => none).getD d
+  -- overrides of the factor-base bounds and the large-prime parameters
+  let params := { params with ratBound := get "limR" params.ratBound }
+  let params := { params with algBound := get "limA" params.algBound }
+  let params := { params with lpbR := get "lpbR" params.lpbR }
+  let params := { params with lpbA := get "lpbA" params.lpbA }
+  let params := { params with mfbR := get "mfbR" params.mfbR }
+  let params := { params with mfbA := get "mfbA" params.mfbA }
   let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
       (min params.ratBound params.algBound) + 1 }
   let ctx := mkCtx n sel params
@@ -1483,9 +1541,25 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
       let tinyT := las.params.tinyT
       let mfbA := if tinyT == 0 then las.params.mfbA
         else las.params.mfbA + tinyT - (las.params.fudge + las.params.fudgeA)
-      let (fR, biasR) ← IO.lazyPure fun _ => Las.fillSegments las b1 false q ua ub va vb mfbR exR
+      if get "fillcheck" 0 == 1 then
+        -- the ladder fill against the logarithm fill, byte for byte
+        for (buf, alg, mfb, ex, sd) in [(b1, false, mfbR, exR, 0), (b2, true, mfbA, exA, 1)] do
+          let (f0, s0) := Las.fillSegmentsLog las (buf.extract 0 buf.size) alg q ua ub va vb mfb ex
+          let (f1, s1) := Las.fillSegments las (buf.extract 0 buf.size) alg q ua ub va vb mfb ex
+          let mut bad := 0
+          for x in [0:len] do
+            if f0.get! x != f1.get! x then bad := bad + 1
+          if bad > 0 || s0.data != s1.data then
+            IO.println s!"fillcheck q={q} side {sd}: {bad} bytes differ, biases equal {s0.data == s1.data}"
+      -- `fillp=1`: the logarithm fill (`fillSegmentsLog`) for comparison
+      let fillP := get "fillp" 0 == 1
+      let (fR, biasR) ← IO.lazyPure fun _ =>
+          if fillP then Las.fillSegmentsLog las b1 false q ua ub va vb mfbR exR
+          else Las.fillSegments las b1 false q ua ub va vb mfbR exR
       ts := ts.push (← IO.monoNanosNow)
-      let (fA, biasA) ← IO.lazyPure fun _ => Las.fillSegments las b2 true q ua ub va vb mfbA exA
+      let (fA, biasA) ← IO.lazyPure fun _ =>
+          if fillP then Las.fillSegmentsLog las b2 true q ua ub va vb mfbA exA
+          else Las.fillSegments las b2 true q ua ub va vb mfbA exA
       ts := ts.push (← IO.monoNanosNow)
       if get "lineparts" 0 == 1 then
         -- the line sieve split at p = 512: small primes and the large ones with

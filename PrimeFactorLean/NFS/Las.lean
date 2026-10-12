@@ -1103,6 +1103,36 @@ algebraic coefficients, `d` the degree). -/
   let nrm := if alg then (homEvalFA cs a b d (cs.get! d) (fc 1)).abs / qF else (y1F * a - mF * b).abs
   fastLog2 (nrm + fc 1)
 
+/-- `|norm| + 1` at column offset `iF`, row `jF` (the argument of `fastLog2` in
+`normBits`). -/
+@[inline] def normVal (alg : Bool) (cs : FloatArray) (d : Nat)
+    (uaf ubf vaf vbf mF y1F qF iF jF : Float) : Float :=
+  let a := iF * uaf + jF * vaf
+  let b := iF * ubf + jF * vbf
+  (if alg then (homEvalFA cs a b d (cs.get! d) (fc 1)).abs / qF else (y1F * a - mF * b).abs) + fc 1
+
+/-- `⌊log₂ y⌋ - M` clamped to `[0, 127]`, found from a nearby value `g` by
+comparisons with `pw[t] = 2^(M + t)` (`pw[0] = 0`, `pw[128] = ∞`): along a row
+the norms change by a few bits per segment. (`⌊fastLog2 y⌋` is the exponent of
+`y`, so this is the template index of `fillRowSegs` without a logarithm.) -/
+def ladder (pw : FloatArray) (y : Float) (g : Nat) : Nat → Nat
+  | 0 => g
+  | fuel + 1 =>
+    if y ≥ pw.get! (g + 1) then ladder pw y (g + 1) fuel
+    else if y < pw.get! g then ladder pw y (g - 1) fuel
+    else g
+
+/-- The ladder of `ladder` for `M = mfbF`. -/
+def powLadder (mfbF : Float) : FloatArray := Id.run do
+  let mut x := fc 1
+  for _ in [0:mfbF.toUInt64.toNat] do x := x * fc 2
+  let mut pw := FloatArray.emptyWithCapacity 129
+  pw := pw.push (fc 0)
+  for _ in [0:127] do
+    x := x * fc 2
+    pw := pw.push x
+  return pw.push (fc 1 / fc 0)
+
 /-- The algebraic coefficients as unboxed floats. -/
 def coeffsF (ctx : LasCtx) : FloatArray :=
   ⟨ctx.base.sel.coeffs.map intF⟩
@@ -1852,9 +1882,34 @@ def fillRowSegs (ctx : LasCtx) (alg : Bool) (cs : FloatArray) (d : Nat)
   else (b, bias)
 termination_by segs - s
 
+/-- `fillRowSegs` with the template indices from `ladder` (`gPrev` that of the
+segment's left end), each run of segments with the same template copied at once
+(`run0` its first segment, `v` its template). -/
+def fillRowSegsP (ctx : LasCtx) (alg : Bool) (cs : FloatArray) (d : Nat)
+    (uaf ubf vaf vbf mF y1F qF : Float) (pw : FloatArray) (j : Nat) (jF : Float)
+    (b bias : ByteArray) (gPrev : Nat) (s segs extra run0 v : Nat) : ByteArray × ByteArray :=
+  if s < segs then
+    let iF := nf ((s + 1) * 64) - nf (ctx.I / 2)
+    let gNext := ladder pw (normVal alg cs d uaf ubf vaf vbf mF y1F qF iF jF) gPrev 128
+    let ti := max gPrev gNext
+    let v' := min 255 (128 - ti + extra)
+    let bias := bias.push (128 - ti).toUInt8
+    if v' == v || s == run0 then
+      fillRowSegsP ctx alg cs d uaf ubf vaf vbf mF y1F qF pw j jF b bias gNext (s + 1) segs extra
+        run0 v'
+    else
+      let b := ctx.rowTemplates[v]!.copySlice 0 b (j * ctx.I + run0 * 64) ((s - run0) * 64)
+      fillRowSegsP ctx alg cs d uaf ubf vaf vbf mF y1F qF pw j jF b bias gNext (s + 1) segs extra
+        s v'
+  else if run0 < segs then
+    (ctx.rowTemplates[v]!.copySlice 0 b (j * ctx.I + run0 * 64) ((segs - run0) * 64), bias)
+  else (b, bias)
+termination_by segs - s
+
 /-- The whole region, row by row, and the segment biases (`J · I / 64` bytes);
-row `j` starts `extra[j]` above its biases (`#[]`: none). -/
-def fillSegments (ctx : LasCtx) (buf : ByteArray) (alg : Bool) (q : Nat) (ua ub va vb : Int)
+row `j` starts `extra[j]` above its biases (`#[]`: none). The reference for
+`fillSegments` (logarithms of the norms, one template copy per segment). -/
+def fillSegmentsLog (ctx : LasCtx) (buf : ByteArray) (alg : Bool) (q : Nat) (ua ub va vb : Int)
     (mfb : Nat) (extra : Array Nat := #[]) : ByteArray × ByteArray := Id.run do
   let cs := coeffsF ctx
   let d := cs.size - 1
@@ -1871,6 +1926,34 @@ def fillSegments (ctx : LasCtx) (buf : ByteArray) (alg : Bool) (q : Nat) (ua ub 
     let first := normBits alg cs d uaf ubf vaf vbf mF y1F qF (Float.neg (nf (ctx.I / 2))) jF
     let (b', bias') := fillRowSegs ctx alg cs d uaf ubf vaf vbf mF y1F qF mfbF j jF b bias first 0 segs
       (extra.getD j 0)
+    b := b'
+    bias := bias'
+  return (b.set! (ctx.I * ctx.J) 0, bias)
+
+/-- The whole region, row by row, and the segment biases (`J · I / 64` bytes);
+row `j` starts `extra[j]` above its biases (`#[]`: none). The same bytes and
+biases as `fillSegmentsLog`, by `fillRowSegsP`: the template indices compared
+with powers of two rather than from logarithms (`Float.toBits` is a call into the
+runtime), and one copy per run of equal segments (at 100 digits 1.10 -> 0.82 ms
+per special-q). -/
+def fillSegments (ctx : LasCtx) (buf : ByteArray) (alg : Bool) (q : Nat) (ua ub va vb : Int)
+    (mfb : Nat) (extra : Array Nat := #[]) : ByteArray × ByteArray := Id.run do
+  let cs := coeffsF ctx
+  let d := cs.size - 1
+  let (uaf, ubf, vaf, vbf) := (intF ua, intF ub, intF va, intF vb)
+  let mF := nf ctx.base.sel.m
+  let y1F := nf ctx.base.sel.y1
+  let qF := nf q
+  let pw := powLadder (nf (mfb + ctx.params.fudge + (if alg then ctx.params.fudgeA else 0)))
+  let segs := ctx.I / 64
+  let mut b := buf
+  let mut bias := ByteArray.emptyWithCapacity (ctx.J * segs)
+  let mut g0 := 0
+  for j in [0:ctx.J] do
+    let jF := nf j
+    g0 := ladder pw (normVal alg cs d uaf ubf vaf vbf mF y1F qF (Float.neg (nf (ctx.I / 2))) jF) g0 128
+    let (b', bias') := fillRowSegsP ctx alg cs d uaf ubf vaf vbf mF y1F qF pw j jF b bias g0 0 segs
+      (extra.getD j 0) 0 0
     b := b'
     bias := bias'
   return (b.set! (ctx.I * ctx.J) 0, bias)

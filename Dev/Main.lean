@@ -105,6 +105,7 @@ def devMain (args : List String) : IO Unit := do
   | "lasstats" :: path :: q0 :: cnt :: kvs => lasStats path q0.toNat! cnt.toNat! kvs
   | "lasphases" :: path :: q0 :: cnt :: kvs => lasPhases path q0.toNat! cnt.toNat! kvs
   | "lasstages" :: path :: q0 :: cnt :: kvs => lasStages path q0.toNat! cnt.toNat! kvs
+  | ["fksteps", path, q0, cnt] => fkStepStats path q0.toNat! cnt.toNat!
   | ["ratgate", path, q0, cnt] => ratGateStats path q0.toNat! cnt.toNat!
   | ["tinystats", path, q0, cnt] => tinyStats path q0.toNat! cnt.toNat!
   | ["boundscheck", path, q0, cnt] => boundsCheck path q0.toNat! cnt.toNat!
@@ -200,7 +201,7 @@ def devMain (args : List String) : IO Unit := do
   | ["ecmcurves", ns, b1, c] => ecmCurveBench ns.toNat! b1.toNat! c.toNat!
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
   | "gnfsover" :: ns :: ts :: kvs => gnfsPhases ns.toNat! ts.toNat! 0 0 none kvs
-  | "gnfspost" :: path :: ts :: kvs => gnfsPostFile path ts.toNat! kvs (if kvs.contains "lzparts" then some (fun mc mr => Trace.lanczosParts mc mr ts.toNat! 10) else none) (if kvs.contains "mergestats" then some Trace.mergeStatsIO else none) (if kvs.contains "singparts" then some Trace.singletonParts else none)
+  | "gnfspost" :: path :: ts :: kvs => gnfsPostFile path ts.toNat! kvs (if kvs.contains "lzparts" then some (fun mc mr => Trace.lanczosParts mc mr ts.toNat! 10) else if kvs.contains "lzscale" then some (fun mc mr => Trace.lanczosScale mc mr [1, 2, 4, 8, 16, 32] 10) else if kvs.contains "lzsteps" then some (fun mc mr => Trace.lanczosSteps mc mr ts.toNat! 300) else none) (if kvs.contains "mergestats" then some Trace.mergeStatsIO else none) (if kvs.contains "singparts" then some Trace.singletonParts else none)
   | "polystages" :: ns :: ts :: kvs => polyStages ns.toNat! ts.toNat! kvs
   | ["soptcompare", path] => soptCompare path
   | "snfsover" :: ns :: ts :: b :: k :: sgn :: d :: kvs =>
