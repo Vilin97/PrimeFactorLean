@@ -403,8 +403,13 @@ def paramTable : List (Nat × Nat × Nat × Nat × Nat × Nat) :=
 def chooseParams (digits : Nat) : Params :=
   let e := (paramTable.find? fun e => digits ≤ e.1).getD
     (paramTable.getLast?.getD (110, 70000, 262144, 150, 16, 12))
+  -- from 61 to 80 digits the first 45 factor-base primes are not sieved (one more
+  -- bit of slack): balanced semiprimes of 64, 68, 72, 76 and 80 digits, three
+  -- interleaved pairs each, 4-12% faster than with 30; no gain at 52-60 digits
+  let wide := 61 ≤ digits && digits ≤ 80
   { fbSize := e.2.1, M := e.2.2.1, lpMult := e.2.2.2.1, dlpDiv := e.2.2.2.2.1,
-    slack := e.2.2.2.2.2, spv := 30, filterSlack := 6, preSlack := 6, smallBound := 16384 }
+    slack := e.2.2.2.2.2 + (if wide then 1 else 0), spv := if wide then 45 else 30,
+    filterSlack := 6, preSlack := 6, smallBound := 16384 }
 
 /-- `p⁻¹ mod 2^32` for odd `p` (Newton's iteration; `p = 2` gives garbage, unused). -/
 def inv32 (p : UInt32) : UInt32 := Id.run do
