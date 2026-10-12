@@ -253,22 +253,23 @@ theorem rawSearch_sound {algorithm : Algorithm} {cfg : Config} {n d : Nat}
   exact f.property
 
 /-- Splitters for the partial factorizations of certificates, which give up
-early: rho, `p - 1` and ECM at the given levels (the quadratic sieve only below
-40 digits, where it takes milliseconds). When one gives up on `n - 1` (say a
-product of two 36-digit primes), the generator tries `n + 1`, and the full
-splitter comes last. -/
-def certSplitter (cfg : Config) (levels : List (Nat × Nat)) : Splitter := fun n =>
-  if n < 10 ^ 40 then autoSplitter cfg n else
+early: rho, `p - 1` and ECM at the given levels, the full splitter only below
+`10^full` (where the quadratic sieve takes at most about a tenth of a second).
+When one gives up on `n - 1` (say a product of two 36-digit primes), the
+generator tries `n + 1`, and the full splitter comes last. -/
+def certSplitter (cfg : Config) (levels : List (Nat × Nat)) (full : Nat) : Splitter := fun n =>
+  if n < 10 ^ full then autoSplitter cfg n else
   (smallSplitter 4096 n).orElse fun _ =>
   (powerSplitter n).orElse fun _ =>
   (RhoF.split n 8000 1).orElse fun _ =>
   (PM1F.split n 20000).orElse fun _ =>
   ecmLevels cfg.threads levels n
 
-/-- The cheap splitters of the certificates: ECM at 15, then 20 digits. -/
+/-- The cheap splitters of the certificates: ECM at 15 digits (full below 50
+digits), then at 20 digits (full below 60 digits). -/
 def certSplitters (cfg : Config) : List (Nat → Option Nat) :=
-  [fun m => (certSplitter cfg [(2000, 25)] m).map Subtype.val,
-   fun m => (certSplitter cfg [(11000, 90)] m).map Subtype.val]
+  [fun m => (certSplitter cfg [(2000, 25)] 50 m).map Subtype.val,
+   fun m => (certSplitter cfg [(11000, 90)] 60 m).map Subtype.val]
 
 /-- Prime leaves are certified by Pocklington certificates (on `n - 1` or
 `n + 1`) whose partial factorizations are found with the splitters above, then

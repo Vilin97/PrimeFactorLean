@@ -245,12 +245,10 @@ def generateSteps (splits : List (Nat → Option Nat)) (smallPrimes : Array Nat)
       if smallPrime n then some [] else none
     else if !isProbablePrime n then none
     else
-      -- `n - 1`: prefer the cube-root test (less of `n - 1` to factor); fall
-      -- back to the square-root test if its quadratic check happens to fail.
-      let minus (split : Nat → Option Nat) (k : Nat) : Option (List Step) := do
-        let found ← partialFactor split smallPrimes n k
-        let (chosen, part) := chooseFactors found fun part => part ^ k > n
-        if k == 3 && part ^ 2 ≤ n && !cubeTest n part then none
+      -- `n - 1`: prefer the cube-root test (less of `n - 1` to factor); factor
+      -- on to the square-root test only if its quadratic check happens to fail
+      -- (a splitter that cannot reach `F³ > n` cannot reach `F² > n` either)
+      let minusSteps (chosen : List (Nat × Nat)) : Option (List Step) := do
         let mut steps : List Step := []
         let mut witnesses : List (Nat × Nat × Nat) := []
         for (q, e) in chosen do
@@ -260,6 +258,13 @@ def generateSteps (splits : List (Nat → Option Nat)) (smallPrimes : Array Nat)
           let a ← findWitness n q
           witnesses := witnesses ++ [(q, e, a)]
         return steps ++ [{ n := n, witnesses := witnesses }]
+      let minus (split : Nat → Option Nat) : Option (List Step) := do
+        let found ← partialFactor split smallPrimes n 3
+        let (chosen, part) := chooseFactors found fun part => part ^ 3 > n
+        if n < part ^ 2 || cubeTest n part then minusSteps chosen
+        else
+          let found2 ← partialFactor split smallPrimes n 2
+          minusSteps (chooseFactors found2 fun part => part ^ 2 > n).1
       -- `n + 1`: a factored part with `(F - 1)² > n`
       let plus (split : Nat → Option Nat) : Option (List Step) := do
         let enough := fun part => n < (part - 1) ^ 2
@@ -276,7 +281,7 @@ def generateSteps (splits : List (Nat → Option Nat)) (smallPrimes : Array Nat)
           ws := ws ++ [(q, e, a, 1)]
         return steps ++ [{ n := n, witnesses := [], D := D, plus := ws }]
       let attempts := splits.map fun split => fun (_ : Unit) =>
-        ((minus split 3).orElse fun _ => plus split).orElse fun _ => minus split 2
+        (minus split).orElse fun _ => plus split
       attempts.foldl (fun acc f => acc.orElse f) none
 
 /-- Package steps as a certificate for `n`, accepting it only if it checks. -/
