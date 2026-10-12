@@ -1816,3 +1816,25 @@ def tinyStats (path : String) (q0 count : Nat) : IO Unit := do
     sc := ⟨bufR, bufA, bits⟩
   let nq := max 1 qs.size
   IO.println s!"per special-q: both fail {cnt[0]! / nq}, rational only passes {cnt[1]! / nq}, algebraic only passes {cnt[2]! / nq}, both pass {cnt[3]! / nq}"
+
+/-- The cost of a task's private context copy (`LasCtx.copy`) and of its sieve
+buffers, for the polynomial of a CADO-NFS file. -/
+def lasCopyBench (path : String) (reps : Nat) : IO Unit := do
+  let (n, sel) ← readCadoPoly path
+  let params := chooseParams (GNFS.decimalDigits n)
+  let params := { params with lpMult := 2 ^ (max params.lpbR params.lpbA) /
+      (min params.ratBound params.algBound) + 1 }
+  let ctx := mkCtx n sel params
+  let lasParams : Las.LasParams :=
+    { logI := params.lasLogI, lpbR := params.lpbR, lpbA := params.lpbA,
+      mfbR := params.mfbR, mfbA := params.mfbA, fudge := params.lasFudge }
+  let las ← IO.lazyPure fun _ => Las.mkLasCtx ctx lasParams
+  let t0 ← IO.monoNanosNow
+  -- copies made inside tasks, as in a sieving round (the context is shared)
+  let r ← IO.lazyPure fun _ => ((List.range reps).map fun _ => Task.spawn fun _ =>
+    (las.copy).rat.primes.size).foldl (fun a t => a + t.get) 0
+  let t1 ← IO.monoNanosNow
+  let r2 ← IO.lazyPure fun _ => ((List.range reps).map fun _ => Task.spawn fun _ =>
+    (Las.Scratch.new las).bufR.size).foldl (fun a t => a + t.get) 0
+  let t2 ← IO.monoNanosNow
+  IO.println s!"{reps} tasks: LasCtx.copy {(t1 - t0) / 1000 / reps} us each (wall/reps), Scratch.new {(t2 - t1) / 1000 / reps} us ({r} {r2}; rat {las.rat.primes.size} alg {las.alg.primes.size})"

@@ -125,6 +125,7 @@ def devMain (args : List String) : IO Unit := do
   | ["autotrace", ns, ts] => Trace.main ns.toNat! ts.toNat!
   | ["mtcopy", mb] => Trace.mtCopyTest mb.toNat!
   | ["matbench", r] => Trace.matBench r.toNat!
+  | ["lascopy", path, r] => lasCopyBench path r.toNat!
   | ["siqsrounds", ns, ts] => Trace.siqsRounds ns.toNat! ts.toNat!
   | ["rawpolys", ns, lo, hi] => Trace.rawPolys ns.toNat! lo.toNat! hi.toNat!
   | ["sqlist", ns, ad] => Trace.sqList ns.toNat! ad.toNat!
