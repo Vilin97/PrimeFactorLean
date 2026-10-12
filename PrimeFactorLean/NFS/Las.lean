@@ -1441,6 +1441,52 @@ def smallHits (side : Side) (R : Array Nat) (c j I : UInt64) (k stop : Nat) (acc
   else acc
 termination_by stop - k
 
+theorem usize_succ_of_lt' (i n : USize) (h : i < n) : (i + 1).toNat = i.toNat + 1 := by
+  have h1 := USize.lt_iff_toNat_lt.mp h
+  have h2 : n.toNat < 2 ^ System.Platform.numBits := n.toNat_lt_size
+  rw [USize.toNat_add]
+  have h3 : (1 : USize).toNat = 1 := by
+    show (USize.ofNat 1).toNat = 1
+    have : (USize.ofNat 1).toNat = 1 % 2 ^ System.Platform.numBits := rfl
+    rw [this]
+    apply Nat.mod_eq_of_lt
+    rcases System.Platform.numBits_eq with h | h <;> rw [h] <;> decide
+  rw [h3]
+  exact Nat.mod_eq_of_lt (by omega)
+
+/-- `smallHits` over the ideals `[off, off + n)` (`off = sieveStart`) from the
+packed words of `packSmall` and `Side.pinvLim`, with a machine-word index
+(`smallHits` boxed its index and read four arrays per ideal); `x0 = c - I/2`. -/
+def smallHitsP (tab pl : Array Nat) (n : USize) (hn : n.toNat ≤ tab.size ∧ n.toNat ≤ pl.size)
+    (off : Nat) (x0 j I : UInt64) (i : USize) (acc : List Nat) : List Nat :=
+  if h : i < n then
+    have hi := USize.lt_iff_toNat_lt.mp h
+    let w := (tab.uget i (by omega)).toUInt64
+    let p := w &&& 4095
+    let r := (w >>> 12) &&& 4095
+    let v := (pl.uget i (by omega)).toUInt64
+    let hit := r ≥ p || (x0 + I * p - j * r).toUInt32 * v.toUInt32 ≤ (v >>> 32).toUInt32
+    smallHitsP tab pl n hn off x0 j I (i + 1) (if hit then (off + i.toNat) :: acc else acc)
+  else acc
+termination_by n.toNat - i.toNat
+decreasing_by rw [usize_succ_of_lt' i n h]; omega
+
+/-- `smallHits side R c j I 0 side.largeStart []` (the same list): the tiny ideals
+by `smallHits`, the others by `smallHitsP` when their packed table `tab` is given. -/
+def smallHitsAll (side : Side) (R tab : Array Nat) (c j I : UInt64) : List Nat :=
+  if tab.isEmpty then smallHits side R c j I 0 side.largeStart []
+  else
+    let n := (min tab.size side.pinvLim.size).toUSize
+    have hn : n.toNat ≤ tab.size ∧ n.toNat ≤ side.pinvLim.size := by
+      have : n.toNat ≤ min tab.size side.pinvLim.size := by
+        show (USize.ofNat _).toNat ≤ _
+        have : (USize.ofNat (min tab.size side.pinvLim.size)).toNat =
+          min tab.size side.pinvLim.size % 2 ^ System.Platform.numBits := rfl
+        rw [this]; exact Nat.mod_le _ _
+      omega
+    smallHitsP tab side.pinvLim n hn side.sieveStart (c - I / 2) j I 0
+      (smallHits side R c j I 0 side.sieveStart [])
+
 /-- Divide `u` by `p` as often as possible. -/
 def stripNat (u p : Nat) : Nat × Nat := Id.run do
   let mut u := u
@@ -1558,7 +1604,7 @@ def largePrimesOf (c u lpb : Nat) : Option (List Nat) :=
 split (most survivors fail them), and machine-word inverses for the roots of the
 large algebraic primes. -/
 def factorSurvivor2 (ctx : LasCtx) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat)
-    (listR listA : List Nat) (pos : Nat) : Option Rel := Id.run do
+    (listR listA : List Nat) (pos : Nat) (tabR tabA : Array Nat := #[]) : Option Rel := Id.run do
   let I := ctx.I
   let j := pos / I
   let c := pos % I
@@ -1576,7 +1622,7 @@ def factorSurvivor2 (ctx : LasCtx) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Arr
   let mut u := nr.natAbs
   let mut rat : List (Nat × Nat) := []
   let side := ctx.rat
-  for k in smallHits side Rr c.toUInt64 j.toUInt64 I.toUInt64 0 side.largeStart [] do
+  for k in smallHitsAll side Rr tabR c.toUInt64 j.toUInt64 I.toUInt64 do
     let p := side.primes[k]!
     let (u', e) := stripNat u p
     if e > 0 then
@@ -1598,7 +1644,7 @@ def factorSurvivor2 (ctx : LasCtx) (q ρ : Nat) (ua ub va vb : Int) (Rr Ra : Arr
   let mut z := z0
   let mut alg : List (Nat × Nat × Nat) := [(q, ρ, eq)]
   let sideA := ctx.alg
-  for k in smallHits sideA Ra c.toUInt64 j.toUInt64 I.toUInt64 0 sideA.largeStart [] do
+  for k in smallHitsAll sideA Ra tabA c.toUInt64 j.toUInt64 I.toUInt64 do
     let p := sideA.primes[k]!
     let r := sideA.roots[k]!
     -- degenerate or projective progressions: test the ideal itself
@@ -3785,7 +3831,7 @@ def processQ13R (ctx : LasCtx) (slack : Nat) (q ρ : Nat) (ua ub va vb : Int) (R
   let mut rels : Array Rel := #[]
   for k in gateAll ctx bd surv offR ksR offA ksA do
     if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra (idealsOf offR ksR k)
-        (idealsOf offA ksA k) surv[k]! then
+        (idealsOf offA ksA k) surv[k]! bd.tabR bd.tabA then
       rels := rels.push rel
   return (rels, ⟨bufR, lab, bits⟩)
 

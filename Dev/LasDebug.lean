@@ -1648,11 +1648,13 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
         (Las.algPre las bd ksA offA[s]! offA[s + 1]! surv[s]! (lgA.get! t) prA[t]!).toNat)).map (idx[·]!)
       ts := ts.push (← IO.monoNanosNow)
       cnt := cnt.modify 6 (· + idx.size)
+      -- `tabs=0`: the small ideals of each survivor by `smallHits` (no packed tables)
+      let (tR, tA) := if get "tabs" 1 == 1 then (bd.tabR, bd.tabA) else (#[], #[])
       let nrel ← IO.lazyPure fun _ => Id.run do
         let mut r := 0
         for k in pass do
           if (Las.factorSurvivor2 las q ρ ua ub va vb Rr Ra (Las.idealsOf offR ksR k)
-              (Las.idealsOf offA ksA k) surv[k]!).isSome then
+              (Las.idealsOf offA ksA k) surv[k]! tR tA).isSome then
             r := r + 1
         return r
       ts := ts.push (← IO.monoNanosNow)
