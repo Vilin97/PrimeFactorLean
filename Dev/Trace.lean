@@ -1129,7 +1129,57 @@ def matBench (reps : Nat) : IO Unit := do
   let r5 ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc k =>
     acc ^^^ (mk k).get 7) 0
   let t5 ← IO.monoNanosNow
+  let r6 ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc k =>
+    acc ^^^ (btables (mk k)).b.size.toUInt64) 0
+  let t6 ← IO.monoNanosNow
+  let r7 ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc k =>
+    acc ^^^ ((tables (mk k)).toB).b.size.toUInt64) 0
+  let t7 ← IO.monoNanosNow
+  -- the two constructions agree
+  let same := (List.range 20).all fun k => (btables (mk k)).b.data == ((tables (mk k)).toB).b.data
+  IO.println s!"btables {(t6 - t5) / reps} ns, tables+toB {(t7 - t6) / reps} ns, equal {same} ({r6 ^^^ r7})"
+  let r8 ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc k =>
+    acc ^^^ (Mat.mulB (mk k) b).get 3) 0
+  let t8 ← IO.monoNanosNow
+  let sameMul := (List.range 50).all fun k =>
+    (List.range 64).all fun i => (Mat.mulB (mk k) (mk (k + 7))).get i == (Mat.mul (mk k) (mk (k + 7))).get i
+  IO.println s!"Mat.mulB {(t8 - t7) / reps} ns, equal to Mat.mul {sameMul} ({r8})"
   let per (a b : Nat) : Nat := (b - a) / reps
   IO.println s!"per call (ns): mk {per t4 t5}, Mat.mul {per t0 t1}, selectColumns {per t1 t2}, tables+toB {per t2 t3}, tables+tablesMat {per t3 t4} ({r1 ^^^ r2 ^^^ r3 ^^^ r4 ^^^ r5 ^^^ a.get 0})"
+
+end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+open Lanczos in
+/-- `Lanczos.dependencies` with its phases timed: singleton removal and
+renumbering, the sparse matrix, the iteration, and the final combination. -/
+def lanczosPhases (numCols : Nat) (rows : Array (Array Nat)) (threads : Nat) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let (cols, active) ← IO.lazyPure fun _ => Id.run do
+    let kept := GF2.removeSingletons numCols rows
+    let mut index : Array Nat := Array.replicate numCols numCols
+    let mut active := 0
+    for i in kept do
+      for c in rows[i]! do
+        if c < numCols && index[c]! == numCols then
+          index := index.set! c active
+          active := active + 1
+    let take := min kept.size (active + 64)
+    let mut cols : Array (Array Nat) := Array.mkEmpty take
+    for k in [0:take] do
+      cols := cols.push ((rows[kept[k]!]!.filter (· < numCols)).map fun c => index[c]!)
+    return (cols, active)
+  let t1 ← IO.monoNanosNow
+  let B ← IO.lazyPure fun _ => Sparse.mk' active cols
+  let n := B.ncols
+  let t2 ← IO.monoNanosNow
+  let r ← IO.lazyPure fun _ => iterate B threads 1
+  let t3 ← IO.monoNanosNow
+  let deps ← IO.lazyPure fun _ => match r with
+    | some (x, v) => combine B x v threads 64
+    | none => #[]
+  let t4 ← IO.monoNanosNow
+  IO.println s!"lanczos phases ({n} columns, {active} rows): select+renumber {(t1 - t0) / 1000000} ms, sparse {(t2 - t1) / 1000000} ms, iterate {(t3 - t2) / 1000000} ms ({n / 64} steps expected: {(t3 - t2) / 1000 / max 1 (n / 64)} us/step), combine {(t4 - t3) / 1000000} ms, {deps.size} deps"
 
 end PrimeFactorLean.Trace
