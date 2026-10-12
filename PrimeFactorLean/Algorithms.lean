@@ -179,24 +179,25 @@ def specialForm (n : Nat) : Option (Nat × Nat × Bool) := Id.run do
   return none
 
 /-- The special number field sieve applies when `n` divides `b^k ± 1` and is
-expected to be faster than the quadratic sieve: measured with 16 threads, the
-special sieve on `D` digits takes about `3.5 s · 2^((D - 78)/10.3)` and the
-quadratic sieve on `d` digits about `10.7 s · 2^((d - 80)/3.9)`, which cross at
-`d = 0.38 D + 44.5`. Returns `(b, k, plus, digits of b^k)`. -/
+expected to be faster than the quadratic sieve: measured with 16 threads (the
+huge tier at `4699f07`), the special sieve on `D` digits takes about
+`2.1 s · 2^((D - 83)/10.5)` (83 to 98 digits) and the quadratic sieve on `d`
+digits about `8.7 s · 2^((d - 80)/3.72)` (64 to 80 digits), which cross at
+`d = 0.354 D + 43.0`. Returns `(b, k, plus, digits of b^k)`. -/
 def snfsCandidate (n : Nat) : Option (Nat × Nat × Bool × Nat) :=
   let dn := QS.decimalDigits n
   if dn < 60 then none else
   match specialForm n with
   | some (b, k, plus) =>
     let D := QS.decimalDigits (b ^ k)
-    if 38 * D + 4450 ≤ 100 * dn && D ≤ 140 then some (b, k, plus, D) else none
+    if 354 * D + 43000 ≤ 1000 * dn && D ≤ 140 then some (b, k, plus, D) else none
   | none => none
 
 /-- The automatic portfolio: cheap methods first, then ECM, then the special
 number field sieve for divisors of `b^k ± 1` where it pays off, else SIQS. The
 ECM pretest is sized for the sieve that follows: for the special sieve on `D`
 digits, the size of a quadratic sieve of the same expected time
-(`0.38 D + 44.3` digits, see `snfsCandidate`). -/
+(`0.354 D + 43.0` digits, see `snfsCandidate`). -/
 def autoSplitter (cfg : Config) : Splitter := fun n =>
   if n < 4 then none else
   (smallSplitter 4096 n).orElse fun _ =>
@@ -208,7 +209,7 @@ def autoSplitter (cfg : Config) : Splitter := fun n =>
   (if n < 10 ^ 44 then none else PM1F.split n 20000).orElse fun _ =>
   let snfs := snfsCandidate n
   let pretest := match snfs with
-    | some (_, _, _, D) => min (QS.decimalDigits n) ((38 * D + 4430) / 100)
+    | some (_, _, _, D) => min (QS.decimalDigits n) ((354 * D + 43000) / 1000)
     | none => QS.decimalDigits n
   (ecmLevels cfg.threads (ecmSchedule pretest) n).orElse fun _ =>
   match snfs with

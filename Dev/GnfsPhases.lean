@@ -42,6 +42,18 @@ def applyOverrides (p : Params) (kvs : List String) : Params :=
     | ["SWAP"] => { p with lpbR := p.lpbA, lpbA := p.lpbR, mfbR := p.mfbA, mfbA := p.mfbR,
                            ratBound := p.algBound, algBound := p.ratBound }
     | ["LIMR2"] => { p with ratBound := 2 * p.ratBound }
+    | ["LIM07"] => { p with ratBound := 7 * p.ratBound / 10, algBound := 7 * p.algBound / 10 }
+    | ["LIM14"] => { p with ratBound := 14 * p.ratBound / 10, algBound := 14 * p.algBound / 10 }
+    | ["LIMA07"] => { p with algBound := 7 * p.algBound / 10 }
+    | ["LIMR07"] => { p with ratBound := 7 * p.ratBound / 10 }
+    | ["LPBM1"] => { p with lpbR := p.lpbR - 1, lpbA := p.lpbA - 1,
+                            mfbR := if p.mfbR ≥ 2 * p.lpbR then p.mfbR - 2 else p.mfbR - 1,
+                            mfbA := if p.mfbA ≥ 2 * p.lpbA then p.mfbA - 2 else p.mfbA - 1 }
+    | ["LPBRM1"] => { p with lpbR := p.lpbR - 1,
+                             mfbR := if p.mfbR ≥ 2 * p.lpbR then p.mfbR - 2 else p.mfbR - 1 }
+    | ["MFBA2"] => { p with mfbA := 2 * p.lpbA }
+    | ["QMIN2"] => { p with qmin := 2 * p.qmin }
+    | ["QMINH"] => { p with qmin := p.qmin / 2 }
     | ["LPB1"] => { p with lpbR := p.lpbR + 1, lpbA := p.lpbA + 1,
                            mfbR := if p.mfbR + 2 ≥ 2 * p.lpbR then p.mfbR + 2 else p.mfbR + 1,
                            mfbA := if p.mfbA + 2 ≥ 2 * p.lpbA then p.mfbA + 2 else p.mfbA + 1 }
