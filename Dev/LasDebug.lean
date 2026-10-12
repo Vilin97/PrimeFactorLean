@@ -110,7 +110,7 @@ def lasPipeline (n : Nat) (threads : Nat) (maxRounds : Nat) : IO Unit := do
   let mut ready := false
   while !ready && round < maxRounds do
     round := round + 1
-    coll ← IO.lazyPure fun _ => (GNFS.collectRoundLas las params threads 400 coll []).1
+    coll ← IO.lazyPure fun _ => GNFS.collectRoundLas las params threads 400 coll
     if round % 10 == 0 then
       let rels := coll.rels
       let (rows, numCols) := GNFS.buildRows ctx.fb rels

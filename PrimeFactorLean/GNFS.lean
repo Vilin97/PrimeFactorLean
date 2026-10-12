@@ -534,11 +534,12 @@ def collectRound (ctx : Ctx) (params : Params) (threads : Nat) (st : Collection)
 /-- The tasks of one round of special-`q` lattice sieving over the next `count`
 special-`q` ideals from `lo`, and the end of their range: the ideals are dealt
 round-robin to `taskMul` times as many tasks as threads (so that every task
-gets a similar mix), each task on its own copy of the context and with a sieve
-buffer set from `scratch` (consumed; new ones as needed). -/
-def spawnRoundLas (las : Las.LasCtx) (threads count lo : Nat) (scratch : List Las.Scratch)
-    (taskMul : Nat := las.params.taskMul) :
-    List (Task (Array Rel × Las.Scratch)) × Nat := Id.run do
+gets a similar mix), each task on its own copy of the context and with its own
+sieve buffers. (Buffers handed from task to task would gain nothing: whatever a
+task closure reaches is marked as shared between threads, and the first write
+to a shared array copies it.) -/
+def spawnRoundLas (las : Las.LasCtx) (threads count lo : Nat)
+    (taskMul : Nat := las.params.taskMul) : List (Task (Array Rel)) × Nat := Id.run do
   let mut qs : Array (Nat × Nat) := #[]
   let mut hi := lo
   while qs.size < count do
@@ -547,14 +548,14 @@ def spawnRoundLas (las : Las.LasCtx) (threads count lo : Nat) (scratch : List La
   -- more tasks than threads (`taskMul`): a round waits for its slowest task,
   -- and the pool rebalances smaller tasks
   let T := max 1 (taskMul * threads)
-  let scs := scratch ++ (List.range (T - min T scratch.length)).map fun _ => Las.Scratch.new las
-  let tasks := (scs.zip (List.range T)).map fun (sc0, t) =>
+  let tasks := (List.range T).map fun t =>
     Task.spawn fun _ => Id.run do
       -- a private copy: shared objects count references atomically
       let las := las.copy
+      let sc0 := Las.Scratch.new las
       if las.params.variant == 14 then
         let mine := (Array.range ((qs.size + T - 1 - t) / T)).map fun k => qs[t + k * T]!
-        return Las.processQs14 las las.params.gapSlack mine sc0
+        return (Las.processQs14 las las.params.gapSlack mine sc0).1
       let mut out : Array Rel := #[]
       let mut sc := sc0
       for k in [0:(qs.size + T - 1 - t) / T] do
@@ -566,28 +567,28 @@ def spawnRoundLas (las : Las.LasCtx) (threads count lo : Nat) (scratch : List La
           else Las.processQ10 las las.params.gapSlack q ρ sc
         sc := sc'
         out := out ++ rels
-      return (out, sc)
+      return out
   return (tasks, hi)
 
 /-- Wait for a round's tasks and add their new relations (`hi`: the end of the
-round's range); returns the buffer sets for later rounds. -/
-def finishRoundLas (st : Collection) (tasks : List (Task (Array Rel × Las.Scratch))) (hi : Nat) :
-    Collection × List Las.Scratch := Id.run do
+round's range). -/
+def finishRoundLas (st : Collection) (tasks : List (Task (Array Rel))) (hi : Nat) :
+    Collection := Id.run do
   let results := tasks.map Task.get
   let mut rels := st.rels
   let mut seen := st.seen
-  for (batch, _) in results do
+  for batch in results do
     for rel in batch do
       if !seen.contains (rel.a, rel.b) then
         seen := seen.insert (rel.a, rel.b)
         rels := rels.push rel
-  return ({ rels := rels, seen := seen, nextB := st.nextB, nextQ := hi }, results.map (·.2))
+  return { rels := rels, seen := seen, nextB := st.nextB, nextQ := hi }
 
 /-- One parallel round of special-`q` lattice sieving over the next `count`
 special-`q` ideals from `st.nextQ` (`spawnRoundLas`, then `finishRoundLas`). -/
-def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (st : Collection)
-    (scratch : List Las.Scratch) : Collection × List Las.Scratch :=
-  let (tasks, hi) := spawnRoundLas las threads count (max st.nextQ params.qmin) scratch
+def collectRoundLas (las : Las.LasCtx) (params : Params) (threads count : Nat) (st : Collection) :
+    Collection :=
+  let (tasks, hi) := spawnRoundLas las threads count (max st.nextQ params.qmin)
   finishRoundLas st tasks hi
 
 /-- Whether the matrix has enough excess after singleton removal (on the sparse
@@ -665,8 +666,7 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
   -- special-q per round: at least six per task, and about a tenth of the
   -- relations collected so far once the yield is known
   let mut count := 8 * threads
-  let mut scratch : List Las.Scratch := []
-  let mut pending : Option (List (Task (Array Rel × Las.Scratch)) × Nat) := none
+  let mut pending : Option (List (Task (Array Rel)) × Nat) := none
   let pipeline := params.lasPipeline
   -- The readiness check lags a round behind and a queued round adds another:
   -- queue rounds only while the relations are below 40% of the ideals under
@@ -713,20 +713,16 @@ def splitWith (n : Nat) (sel : Selection) (params : Params) (cfg : Config := {})
       -- copies of the tasks than they gain)
       let (tasks, hi) := match pending with
         | some p => p
-        | none => spawnRoundLas las threads count (max coll.nextQ params.qmin) scratch
+        | none => spawnRoundLas las threads count (max coll.nextQ params.qmin)
             (if prev.isNone && pipeline && coll.rels.size < pipeUntil then las.params.taskMul
              else 4 * las.params.taskMul)
-      if pending.isNone then scratch := []
       -- Far from ready (nothing survives singleton removal yet), the next round
       -- is queued before this one is collected: its tasks start as this round's
       -- last ones finish, instead of the threads idling at the end of a round.
       pending := if prev.isNone && pipeline && coll.rels.size < pipeUntil then
-          some (spawnRoundLas las threads count hi scratch)
+          some (spawnRoundLas las threads count hi)
         else none
-      if pending.isSome then scratch := []
-      let (c, sc) := finishRoundLas coll tasks hi
-      coll := c
-      scratch := sc
+      coll := finishRoundLas coll tasks hi
     else coll := collectRound ctx params threads coll
     let mut target := 0
     if let some t := bg then

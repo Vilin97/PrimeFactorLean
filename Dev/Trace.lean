@@ -1019,3 +1019,88 @@ def gammaBench (count : Nat) (depths : List Nat) : IO Unit := do
   IO.println s!"sqrtFind (not a square: the lift alone): {(t3 - t2) / 1000000} ms ({r})"
 
 end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+/-- Whether a byte array captured by a task closure is copied on its first
+write in the task (objects reachable from a task are marked multi-threaded,
+and those are never exclusive), and what the allocations cost. -/
+@[noinline] def mtWrite (b : ByteArray) (k : Nat) : Nat := (b.set! k 7).size + k
+
+def mtCopyTest (mb : Nat) : IO Unit := do
+  let n := mb * 1024 * 1024
+  let t0 ← IO.monoNanosNow
+  let z ← IO.lazyPure fun _ => NFS.Las.zeroBytes n
+  let t1 ← IO.monoNanosNow
+  IO.println s!"zeroBytes {mb} MB: {(t1 - t0) / 1000} us ({z.size})"
+  let c ← IO.lazyPure fun _ => z.copySlice 0 (ByteArray.emptyWithCapacity n) 0 n
+  let t2 ← IO.monoNanosNow
+  IO.println s!"copySlice {mb} MB: {(t2 - t1) / 1000} us ({c.size})"
+  -- in this thread: the array is exclusive, the write is in place
+  let r1 ← IO.lazyPure fun _ => mtWrite c 5
+  let t3 ← IO.monoNanosNow
+  IO.println s!"write in place: {(t3 - t2) / 1000} us ({r1})"
+  -- captured by a task: marked multi-threaded
+  let r2 ← IO.lazyPure fun _ => (Task.spawn fun _ => mtWrite z 6).get
+  let t4 ← IO.monoNanosNow
+  IO.println s!"write in a task: {(t4 - t3) / 1000} us ({r2})"
+
+end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+open QS in
+/-- `SIQS.collect` with the time of each round, the main thread's share and the
+relations found (full and partial), to measure parallel efficiency. -/
+def siqsRounds (n threads : Nat) : IO Unit := do
+  let params := SIQS.chooseParams (QS.decimalDigits n)
+  let .inl ctx := SIQS.mkCtx n params | IO.println "small factor"
+  let needed := ctx.fb.size + 1 + params.extra
+  let mut fulls := 0
+  let mut edges : Array (Nat × Nat) := #[]
+  let mut uf : UnionFind := {}
+  let mut cycles := 0
+  let mut seen : Std.HashSet Nat := {}
+  let mut round := 0
+  let mut nextSeed := 0
+  let mut perTask := 1
+  let mut processed := 0
+  let mut raw := 0
+  let t0 ← IO.monoNanosNow
+  let mut tMain := 0
+  while fulls + cycles < needed && round < 1000 do
+    let a ← IO.monoNanosNow
+    let base := nextSeed
+    let k := perTask
+    let tasks := (List.range threads).map fun t =>
+      Task.spawn fun _ => SIQS.processAs ctx (base + t * k) k
+    nextSeed := nextSeed + threads * k
+    processed := processed + threads * k
+    let res ← IO.lazyPure fun _ => tasks.map Task.get
+    let b ← IO.monoNanosNow
+    for batch in res do
+      for f in batch do
+        raw := raw + 1
+        let key := min f.rel.x (ctx.n - f.rel.x)
+        if seen.contains key then continue
+        seen := seen.insert key
+        if f.l1 == 1 && f.l2 == 1 then fulls := fulls + 1
+        else
+          edges := edges.push (f.l1, f.l2)
+          let (uf', closed) := uf.union f.l1 f.l2
+          uf := uf'
+          if closed then cycles := cycles + 1
+    round := round + 1
+    let got := fulls + cycles
+    if got > 0 && got < needed then
+      let estA := (needed - got) * processed / got
+      perTask := max 1 (min 32 (estA * 6 / 10 / threads))
+    let c ← IO.monoNanosNow
+    tMain := tMain + (c - b)
+    IO.println s!"round {round}: {threads * k} A ({k}/task) {(b - a) / 1000000} ms + main {(c - b) / 1000000} ms; raw {raw}, fulls {fulls}, cycles {cycles} / {needed}"
+  let t1 ← IO.monoNanosNow
+  let cyc ← IO.lazyPure fun _ => graphCycles edges
+  let t2 ← IO.monoNanosNow
+  IO.println s!"{processed} A in {(t1 - t0) / 1000000} ms (main thread {tMain / 1000000} ms), graphCycles {(t2 - t1) / 1000000} ms ({cyc.size} cycles), raw relations {raw}"
+
+end PrimeFactorLean.Trace

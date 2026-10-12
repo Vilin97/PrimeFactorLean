@@ -86,7 +86,7 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
     (parts : Option (Nat → Array (Array Nat) → IO Unit) := none)
     (preMerge : Option (Nat → Array (Array Nat) → IO Unit) := none)
     (preFilter : Option (Nat → Array (Array Nat) → IO Unit) := none) (tryDeps : Nat := 0)
-    (cliSqrt : Bool := false) (sqrtBatches : List Nat := [4]) : IO Unit := do
+    (cliSqrt : Bool := false) (sqrtBatches : List Nat := [4]) (lzThreads : Nat := 0) : IO Unit := do
   let numCols := rows.next
   if let some f := preFilter then f numCols rows.sparse
   let dense := 2 + ctx.fb.chars.size
@@ -123,7 +123,8 @@ def gnfsPost (n : Nat) (st : Setup n) (ctx : Ctx) (params : Params) (p threads :
   let Bm ← IO.lazyPure fun _ => Lanczos.Sparse.mk' mcols (kept2.map fun i => mrows[i]!)
   let la2 ← IO.monoNanosNow
   IO.println s!"lanczos setup: singletons {ms la0 la1}, sparse {ms la1 la2} ({kept2.size} rows)"
-  let mdeps ← IO.lazyPure fun _ => Lanczos.dependencies mcols mrows 64 threads
+  let mdeps ← IO.lazyPure fun _ => Lanczos.dependencies mcols mrows 64
+    (if lzThreads == 0 then threads else lzThreads)
   let deps0 := Merge.unmergeLog log mdeps
   let deps := (if inMatrix then deps0 else denseCombine words deps0 kept.size).map fun dep =>
     dep.map fun i => kept[i]!
@@ -226,8 +227,7 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
   let mut coll : Collection := {}
   let mut rows := Rows.empty ctx.fb
   let mut count := 8 * threads
-  let mut scratch : List Las.Scratch := []
-  let mut pending : Option (List (Task (Array Rel × Las.Scratch)) × Nat) := none
+  let mut pending : Option (List (Task (Array Rel)) × Nat) := none
   let pipe := (overrides.findSome? fun kv => match kv.splitOn "=" with
     | ["pipe", v] => v.toNat?
     | _ => none).getD 1 == 1
@@ -274,17 +274,14 @@ def gnfsPhases (n threads : Nat) (logI : Nat := 0) (density : Nat := 0)
     -- as `GNFS.splitWith`: far from ready, the next round is queued first
     let (tasks, hi) := match pending with
       | some p => p
-      | none => spawnRoundLas las threads count (max coll.nextQ params.qmin) scratch
+      | none => spawnRoundLas las threads count (max coll.nextQ params.qmin)
           (if prev.isNone && pipe && coll.rels.size < pipeUntil then las.params.taskMul
            else lateMul * las.params.taskMul)
-    if pending.isNone then scratch := []
     pending := if prev.isNone && pipe && coll.rels.size < pipeUntil then
-        some (spawnRoundLas las threads count hi scratch)
+        some (spawnRoundLas las threads count hi)
       else none
-    if pending.isSome then scratch := []
-    let (c, sc) ← IO.lazyPure fun _ => finishRoundLas coll tasks hi
+    let c ← IO.lazyPure fun _ => finishRoundLas coll tasks hi
     coll := c
-    scratch := sc
     let b ← IO.monoNanosNow
     let mut target := 0
     if let some t := bg then
@@ -364,6 +361,9 @@ def gnfsPostFile (path : String) (threads : Nat) (overrides : List String)
       | ["trydeps", v] => v.toNat?
       | _ => none).getD 0) (overrides.contains "clisqrt")
     (if overrides.contains "sqrtbatches" then [4, 2, 1, 4, 2, 1, 4, 2, 1] else [4])
+    ((overrides.findSome? fun kv => match kv.splitOn "=" with
+      | ["lzthreads", v] => v.toNat?
+      | _ => none).getD 0)
 
 open PrimeFactorLean.NFS.PolySelect in
 /-- `PolySelect.selectCollision` with its two stages timed (collision search,
