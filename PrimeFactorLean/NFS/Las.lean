@@ -1454,6 +1454,12 @@ theorem usize_succ_of_lt' (i n : USize) (h : i < n) : (i + 1).toNat = i.toNat + 
   rw [h3]
   exact Nat.mod_eq_of_lt (by omega)
 
+theorem toUSize_toNat_le (n : Nat) : n.toUSize.toNat ≤ n := by
+  show (USize.ofNat n).toNat ≤ n
+  have : (USize.ofNat n).toNat = n % 2 ^ System.Platform.numBits := rfl
+  rw [this]
+  exact Nat.mod_le _ _
+
 /-- `smallHits` over the ideals `[off, off + n)` (`off = sieveStart`) from the
 packed words of `packSmall` and `Side.pinvLim`, with a machine-word index
 (`smallHits` boxed its index and read four arrays per ideal); `x0 = c - I/2`. -/
@@ -1869,11 +1875,69 @@ def largeGo (side : Side) (I32 : UInt32) (IU : UInt64) (len : USize) (k : Nat) (
   else (b, R)
 termination_by side.primes.size - k
 
-/-- `sieveLargeCached` by `largeGo`. -/
+/-- `largeGo` with a machine-word index: the primes, roots and logarithms read by
+`uget`, the root replaced by `uset` (`largeGo` boxed its index for each of them
+and converted `len` for the buffer test of every ideal). -/
+def largeGoU (primes : Array Nat) (logs : ByteArray) (n : USize)
+    (hn : n.toNat ≤ primes.size ∧ n.toNat ≤ logs.size) (I32 : UInt32) (IU : UInt64) (len : USize)
+    (i : USize) (R : Array Nat) (hR : n.toNat ≤ R.size) (b : ByteArray) (hasP : Bool)
+    (px py pd0 pd1 : USize) (plg : UInt8) (pfuel : USize) : ByteArray × Array Nat :=
+  if hi : i < n then
+    have hi' := USize.lt_iff_toNat_lt.mp hi
+    if hl : len < b.size.toUSize then
+      have h : len.toNat < b.size :=
+        Nat.lt_of_lt_of_le (USize.lt_iff_toNat_lt.mp hl) (toUSize_toNat_le _)
+      let p := primes.uget i (by omega)
+      let r := R.uget i (by omega)
+      if r ≥ p then
+        largeGoU primes logs n hn I32 IU len (i + 1) (R.uset i 0 (by omega)) (by simp; omega) b
+          hasP px py pd0 pd1 plg pfuel
+      else
+        let w := fkBasis I32 p.toUInt32 0 r.toUInt32 1 128
+        -- `1` from `fkBasis`: the basis does not fit, keep the root behind a flag
+        let R' := R.uset i (if w == 1 then (4611686018427387904 + r.toUInt64).toNat else w.toNat)
+          (by omega)
+        have hR' : n.toNat ≤ R'.size := by simp [R']; omega
+        let lg := logs.uget i (by omega)
+        if w == 0 then largeGoU primes logs n hn I32 IU len (i + 1) R' hR' b hasP px py pd0 pd1 plg pfuel
+        else if w == 1 then
+          largeGoU primes logs n hn I32 IU len (i + 1) R' hR'
+            (fkGoU b len h IU p.toUInt64 lg p.toUInt64 0 r.toUInt64 1 128) hasP px py pd0 pd1 plg pfuel
+        else
+          let x := (w &&& 8191).toUSize
+          let y := ((w >>> 13) &&& 8191).toUSize
+          let d0 := (((w >>> 26) &&& 262143) * IU).toUSize - x
+          let d1 := (((w >>> 44) &&& 262143) * IU).toUSize + y
+          let fuel := 2 * len / p.toUSize + 4
+          if hasP then
+            largeGoU primes logs n hn I32 IU len (i + 1) R' hR'
+              (fkSieve2U b len h (IU - 1).toUSize px py pd0 pd1 plg (IU / 2).toUSize x y d0 d1 lg
+                (IU / 2).toUSize (min pfuel fuel) (pfuel - min pfuel fuel) (fuel - min pfuel fuel))
+              false 0 0 0 0 0 0
+          else largeGoU primes logs n hn I32 IU len (i + 1) R' hR' b true x y d0 d1 lg fuel
+    else (b, R)
+  else if hl : hasP ∧ len < b.size.toUSize then
+    have h : len.toNat < b.size :=
+      Nat.lt_of_lt_of_le (USize.lt_iff_toNat_lt.mp hl.2) (toUSize_toNat_le _)
+    (fkSieveU b len h (IU - 1).toUSize px py pd0 pd1 plg (IU / 2).toUSize pfuel, R)
+  else (b, R)
+termination_by n.toNat - i.toNat
+decreasing_by all_goals (rw [usize_succ_of_lt' i n hi]; omega)
+
+/-- `sieveLargeCached` by `largeGoU` (as `largeGo`, machine-word index). -/
 def sieveLargePaired (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray) :
     ByteArray × Array Nat :=
-  largeGo side ctx.I.toUInt32 ctx.I.toUInt64 (ctx.I * ctx.J).toUSize side.largeStart R buf
-    false 0 0 0 0 0 0
+  let m := min side.primes.size (min side.logs.size R.size)
+  let n := m.toUSize
+  have hm : n.toNat ≤ m := toUSize_toNat_le m
+  have h1 : m ≤ side.primes.size := Nat.min_le_left _ _
+  have h2 : m ≤ side.logs.size :=
+    Nat.le_trans (Nat.min_le_right _ _) (Nat.min_le_left _ _)
+  have h3 : m ≤ R.size := Nat.le_trans (Nat.min_le_right _ _) (Nat.min_le_right _ _)
+  have hn : n.toNat ≤ side.primes.size ∧ n.toNat ≤ side.logs.size := ⟨by omega, by omega⟩
+  have hR : n.toNat ≤ R.size := by omega
+  largeGoU side.primes side.logs n hn ctx.I.toUInt32 ctx.I.toUInt64 (ctx.I * ctx.J).toUSize
+    side.largeStart.toUSize R hR buf false 0 0 0 0 0 0
 
 /-- `resieveCached` with the walks of consecutive ideals paired (`fkWalkB2U`). -/
 def resieveGo (side : Side) (RB : Array Nat) (bits : ByteArray) (bsz : USize)
@@ -1905,13 +1969,52 @@ def resieveGo (side : Side) (RB : Array Nat) (bits : ByteArray) (bsz : USize)
   else acc
 termination_by side.primes.size - k
 
-/-- `resieveCached` by `resieveGo`. -/
+/-- `resieveGo` with a machine-word index (the primes and bases read by `uget`). -/
+def resieveGoU (primes RB : Array Nat) (n : USize) (hn : n.toNat ≤ primes.size ∧ n.toNat ≤ RB.size)
+    (bits : ByteArray) (bsz : USize) (hb : bsz.toNat ≤ bits.size) (I : UInt64) (len : USize)
+    (i : USize) (acc : Array Nat) (hasP : Bool) (px py pd0 pd1 : USize) (pk : UInt64)
+    (pfuel : USize) : Array Nat :=
+  if hi : i < n then
+    have hi' := USize.lt_iff_toNat_lt.mp hi
+    let w := (RB.uget i (by omega)).toUInt64
+    if w == 0 then resieveGoU primes RB n hn bits bsz hb I len (i + 1) acc hasP px py pd0 pd1 pk pfuel
+    else
+      let p := (primes.uget i (by omega)).toUInt64
+      if w ≥ 4611686018427387904 then
+        resieveGoU primes RB n hn bits bsz hb I len (i + 1)
+          (fkGoBU bits bsz hb len I p i.toUInt64 acc p 0 (w - 4611686018427387904) 1 128)
+          hasP px py pd0 pd1 pk pfuel
+      else
+        let x := (w &&& 8191).toUSize
+        let y := ((w >>> 13) &&& 8191).toUSize
+        let d0 := (((w >>> 26) &&& 262143) * I).toUSize - x
+        let d1 := (((w >>> 44) &&& 262143) * I).toUSize + y
+        let fuel := 2 * len / p.toUSize + 4
+        if hasP then
+          resieveGoU primes RB n hn bits bsz hb I len (i + 1)
+            (fkWalkB2U bits bsz hb len (I - 1).toUSize px py pd0 pd1 pk (I / 2).toUSize x y d0 d1
+              i.toUInt64 (I / 2).toUSize acc (min pfuel fuel) (pfuel - min pfuel fuel)
+              (fuel - min pfuel fuel))
+            false 0 0 0 0 0 0
+        else resieveGoU primes RB n hn bits bsz hb I len (i + 1) acc true x y d0 d1 i.toUInt64 fuel
+  else if hasP then fkWalkBU bits bsz hb len (I - 1).toUSize px py pd0 pd1 pk (I / 2).toUSize acc pfuel
+  else acc
+termination_by n.toNat - i.toNat
+decreasing_by all_goals (rw [usize_succ_of_lt' i n hi]; omega)
+
+/-- `resieveCached` by `resieveGoU` (as `resieveGo`, machine-word index). -/
 def resievePaired (ctx : LasCtx) (side : Side) (RB : Array Nat) (bits : ByteArray)
     (acc : Array Nat) : Array Nat :=
   let bsz := bits.size.toUSize
   if hb : bsz.toNat ≤ bits.size then
-    resieveGo side RB bits bsz hb ctx.I.toUInt64 (ctx.I * ctx.J).toUSize side.largeStart acc
-      false 0 0 0 0 0 0
+    let m := min side.primes.size RB.size
+    let n := m.toUSize
+    have hm : n.toNat ≤ m := toUSize_toNat_le m
+    have h1 : m ≤ side.primes.size := Nat.min_le_left _ _
+    have h2 : m ≤ RB.size := Nat.min_le_right _ _
+    have hn : n.toNat ≤ side.primes.size ∧ n.toNat ≤ RB.size := ⟨by omega, by omega⟩
+    resieveGoU side.primes RB n hn bits bsz hb ctx.I.toUInt64 (ctx.I * ctx.J).toUSize
+      side.largeStart.toUSize acc false 0 0 0 0 0 0
   else acc
 
 /-- Records `pos <<< 24 ||| k` grouped by survivor (`survs` increasing). -/
@@ -3397,26 +3500,6 @@ def scanIdeal (survs : Array Nat) (mask logI half p r r2 K : UInt64) (pinv lim :
   else (lgs, prs)
 termination_by survs.size - s
 
-theorem usize_succ_of_lt (i n : USize) (h : i < n) : (i + 1).toNat = i.toNat + 1 := by
-  have h1 := USize.lt_iff_toNat_lt.mp h
-  have h2 : n.toNat < USize.size := n.toNat_lt_size
-  rw [USize.toNat_add]
-  have h3 : (1 : USize).toNat = 1 := by
-    show (USize.ofNat 1).toNat = 1
-    have : (USize.ofNat 1).toNat = 1 % 2 ^ System.Platform.numBits := rfl
-    rw [this]
-    apply Nat.mod_eq_of_lt
-    rcases System.Platform.numBits_eq with h | h <;> rw [h] <;> decide
-  rw [h3]
-  have h4 : n.toNat < 2 ^ System.Platform.numBits := h2
-  exact Nat.mod_eq_of_lt (by omega)
-
-theorem toUSize_toNat_le (n : Nat) : n.toUSize.toNat ≤ n := by
-  show (USize.ofNat n).toNat ≤ n
-  have : (USize.ofNat n).toNat = n % 2 ^ System.Platform.numBits := rfl
-  rw [this]
-  exact Nat.mod_le _ _
-
 /-- `scanIdeal` over the survivors `[i, n)` as 32-bit positions with a
 machine-word index: the loop of `scanIdeal` boxed and unboxed its `Nat` index
 and each position (27 instructions per survivor against about 12). -/
@@ -3439,7 +3522,7 @@ def scanIdealU (survs : Array UInt32) (n : USize) (hn : n.toNat ≤ survs.size)
     else scanIdealU survs n hn mask logI half p r r2 K pinv lim lg (i + 1) lgs prs
   else (lgs, prs)
 termination_by n.toNat - i.toNat
-decreasing_by all_goals (rw [usize_succ_of_lt i n h]; have := USize.lt_iff_toNat_lt.mp h; omega)
+decreasing_by all_goals (rw [usize_succ_of_lt' i n h]; have := USize.lt_iff_toNat_lt.mp h; omega)
 
 /-- A degenerate small ideal (`R ≥ p`): it divides the norm exactly on the rows
 `j ≡ 0 (mod p)`. -/
