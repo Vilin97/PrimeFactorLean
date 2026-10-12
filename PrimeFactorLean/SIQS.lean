@@ -1541,52 +1541,58 @@ def processAs (ctx : Ctx) (first count : Nat) : Array (Found ctx.n ctx.fb) := Id
 
 /-- Collect relations on parallel tasks until enough full relations and cycles
 exist, then combine every cycle into a full relation (as in `QS.collect`).
-After a pilot round (one `A` per task), each task processes several `A`s, as
-many as the measured yield suggests for most of the remaining need: fewer,
-longer rounds keep the threads busy (a round waits for its slowest task). -/
+Tasks of one `A` each are kept queued, twice as many as threads, and their
+results are taken oldest first: no round waits for its slowest task, and the
+bookkeeping here overlaps the sieving (rounds of equal tasks with the
+bookkeeping in between idled the threads 12% of the time at 64 digits, 9% at
+72 and 4% at 80, besides their slowest tasks). Near the end, no task is queued
+while the queued ones should bring the rest at the yield of the last `threads`
+tasks; tasks still running at the end are abandoned. -/
 def collect (ctx : Ctx) (needed threads maxRounds : Nat) : Array (Relation ctx.n ctx.fb) := Id.run do
   let mut fulls : Array (Relation ctx.n ctx.fb) := #[]
   let mut edges : Array (Found ctx.n ctx.fb) := #[]
   let mut uf : UnionFind := {}
   let mut cycles := 0
   let mut seen : Std.HashSet Nat := {}
-  let mut round := 0
-  let mut nextSeed := 0
-  let mut perTask := 1
-  let mut processed := 0
-  -- give up after many rounds without a single relation (e.g. no usable `A`)
+  -- the queue: tasks `[head, queue.size)` are running or waiting
+  let mut queue : Array (Task (Array (Found ctx.n ctx.fb))) := #[]
+  let mut head := 0
+  -- `got` (full relations and cycles) after each task taken, for the recent yield
+  let mut gots : Array Nat := #[]
+  -- give up after many tasks without a single relation (e.g. no usable `A`)
   let mut idle := 0
-  while fulls.size + cycles < needed && round < maxRounds && idle < 50 do
-    let base := nextSeed
-    let k := perTask
-    let tasks := (List.range threads).map fun t =>
-      Task.spawn fun _ => processAs ctx (base + t * k) k
-    nextSeed := nextSeed + threads * k
-    processed := processed + threads * k
-    let before := fulls.size + edges.size
-    for task in tasks do
-      for f in task.get do
-        -- `X` and `n - X` give the same row (the same polynomial reached
-        -- again with `B` negated): such a pair is a dependency whose square
-        -- roots are always `X ≡ -Y`, so keep one relation per `±X`
-        let key := min f.rel.x (ctx.n - f.rel.x)
-        if seen.contains key then continue
-        seen := seen.insert key
-        if f.l1 == 1 && f.l2 == 1 then
-          fulls := fulls.push f.rel
-        else
-          edges := edges.push f
-          let (uf', closed) := uf.union f.l1 f.l2
-          uf := uf'
-          if closed then cycles := cycles + 1
-    idle := if fulls.size + edges.size == before then idle + 1 else 0
-    round := round + 1
-    -- the yield per `A` so far underestimates the future rate (cycles grow
-    -- faster than linearly), so aiming at 60% of the estimate rarely overshoots
+  let depth := 2 * threads
+  while fulls.size + cycles < needed && idle < 50 * threads && queue.size < maxRounds * threads do
     let got := fulls.size + cycles
-    if got > 0 && got < needed then
-      let estA := (needed - got) * processed / got
-      perTask := max 1 (min 32 (estA * 6 / 10 / threads))
+    let recent := if gots.size > threads then got - gots[gots.size - 1 - threads]! else 0
+    -- queue more unless the queued tasks should suffice (`recent / threads` per task)
+    let mut q := queue
+    while q.size - head < depth && q.size < maxRounds * threads &&
+        (recent == 0 || got + (q.size - head) * recent / threads < needed) do
+      let seed := q.size
+      q := q.push (Task.spawn fun _ => processA ctx seed)
+    queue := q
+    if head == queue.size then break
+    let batch := queue[head]!.get
+    queue := queue.set! head (.pure #[])
+    head := head + 1
+    let before := fulls.size + edges.size
+    for f in batch do
+      -- `X` and `n - X` give the same row (the same polynomial reached
+      -- again with `B` negated): such a pair is a dependency whose square
+      -- roots are always `X ≡ -Y`, so keep one relation per `±X`
+      let key := min f.rel.x (ctx.n - f.rel.x)
+      if seen.contains key then continue
+      seen := seen.insert key
+      if f.l1 == 1 && f.l2 == 1 then
+        fulls := fulls.push f.rel
+      else
+        edges := edges.push f
+        let (uf', closed) := uf.union f.l1 f.l2
+        uf := uf'
+        if closed then cycles := cycles + 1
+    idle := if fulls.size + edges.size == before then idle + 1 else 0
+    gots := gots.push (fulls.size + cycles)
   for ids in graphCycles (edges.map fun f => (f.l1, f.l2)) do
     if let some r := combineCycle edges ids then fulls := fulls.push r
   return fulls
