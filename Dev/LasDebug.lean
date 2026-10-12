@@ -1583,9 +1583,11 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
         tmLbig := tmLbig + (l2 - l1)
         lineChk := lineChk + x1.size + x2.size
       ts := ts.push (← IO.monoNanosNow)
-      let lR ← IO.lazyPure fun _ => Las.lineSieveSide las las.rat Rr fR
+      -- `line2=0`: the ideals with at most two hits per row by `lineSieveV`
+      let line2 := get "line2" 1 == 1
+      let lR ← IO.lazyPure fun _ => Las.lineSieveSide las las.rat Rr fR line2
       ts := ts.push (← IO.monoNanosNow)
-      let lA ← IO.lazyPure fun _ => Las.lineSieveSide las las.alg Ra fA
+      let lA ← IO.lazyPure fun _ => Las.lineSieveSide las las.alg Ra fA line2
       ts := ts.push (← IO.monoNanosNow)
       let pR ← IO.lazyPure fun _ => Las.sievePowers las las.rat Pr lR
       ts := ts.push (← IO.monoNanosNow)

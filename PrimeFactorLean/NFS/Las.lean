@@ -394,6 +394,50 @@ def lineSieveV (s : ByteArray) (len : USize) (h : len.toNat < s.size) (p R I J :
 termination_by fuel.toNat
 decreasing_by exact usize_pred_lt fuel hf
 
+/-- The position of column `c` of a row at `base` (the trash byte `len` past the
+row) is in bounds when the row lies in the region. -/
+theorem rowPos_lt (s : ByteArray) (len base c I : USize) (h : len.toNat < s.size)
+    (hb : base.toNat + I.toNat ≤ len.toNat) :
+    (if c < I then base + c else len).toNat < s.size := by
+  split
+  · rename_i hcI
+    have h1 := USize.lt_iff_toNat_lt.mp hcI
+    rw [USize.toNat_add]
+    exact Nat.lt_of_le_of_lt (Nat.mod_le _ _) (by omega)
+  · exact h
+
+/-- `lineSieveV` for ideals with at most two hits per row (`p ≥ I / 2`): both
+updates inline (the second onto the trash byte when past the row), no loop per
+row. -/
+def lineSieve2 (s : ByteArray) (len : USize) (h : len.toNat < s.size) (p R I J : USize)
+    (hlen : J.toNat * I.toNat ≤ len.toNat) (lg : UInt8) (j start : USize) (fuel : USize) :
+    ByteArray :=
+  if hf : fuel = 0 then s
+  else if hj : j < J then
+    have hj' := USize.lt_iff_toNat_lt.mp hj
+    have hlt : len.toNat < USize.size := len.toNat_lt_size
+    have hmul : j.toNat * I.toNat < USize.size :=
+      Nat.lt_of_le_of_lt (Nat.le_trans (Nat.mul_le_mul_right _ (Nat.le_of_lt hj')) hlen) hlt
+    have hb : (j * I).toNat + I.toNat ≤ len.toNat := by
+      rw [USize.toNat_mul, Nat.mod_eq_of_lt hmul]
+      have := Nat.mul_le_mul_right I.toNat (Nat.succ_le_of_lt hj')
+      rw [Nat.succ_mul] at this
+      omega
+    let base := j * I
+    let p1 := if start < I then base + start else len
+    have h1 : p1.toNat < s.size := rowPos_lt s len base start I h hb
+    let s1 := s.uset p1 (s.uget p1 h1 + lg) h1
+    have hs1 : len.toNat < s1.size := by rw [size_uset]; exact h
+    let p2 := if start + p < I then base + (start + p) else len
+    have h2 : p2.toNat < s1.size := rowPos_lt s1 len base (start + p) I hs1 hb
+    let s2 := s1.uset p2 (s1.uget p2 h2 + lg) h2
+    let start' := start + R
+    let start' := if start' ≥ p then start' - p else start'
+    lineSieve2 s2 len (by rw [size_uset]; exact hs1) p R I J hlen lg (j + 1) start' (fuel - 1)
+  else s
+termination_by fuel.toNat
+decreasing_by exact usize_pred_lt fuel hf
+
 /-- `fkSieve` with machine-word fuel. -/
 def fkSieveU (s : ByteArray) (len : USize) (h : len.toNat < s.size) (mask x y d0 d1 : USize)
     (lg : UInt8) (pos : USize) (fuel : USize) : ByteArray :=
@@ -1998,7 +2042,8 @@ def processQ11 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch
   return (rels, ⟨bufR, lab, bits⟩)
 
 /-- `sieveSideU` without the large ideals (line sieve only). -/
-def lineSieveSide (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray) : ByteArray :=
+def lineSieveSide (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray)
+    (line2 : Bool := true) : ByteArray :=
   Id.run do
   let I := ctx.I
   let len := I * ctx.J
@@ -2012,6 +2057,10 @@ def lineSieveSide (ctx : LasCtx) (side : Side) (R : Array Nat) (buf : ByteArray)
     if hb' : lenU.toNat < b.size then
       -- the rows lie in the region: no trash clamp per update (`lineRowV`)
       if hlen : ctx.J.toUSize.toNat * I.toUSize.toNat ≤ lenU.toNat then
+        if 2 * p ≥ I && line2 then
+          b := lineSieve2 b lenU hb' p.toUSize r.toUSize I.toUSize ctx.J.toUSize hlen lg
+            1 ((r + I / 2) % p).toUSize ctx.J.toUSize
+        else
         b := lineSieveV b lenU hb' p.toUSize r.toUSize I.toUSize ctx.J.toUSize hlen lg
           ((I + p - 1) / p).toUSize 1 ((r + I / 2) % p).toUSize ctx.J.toUSize
       else
