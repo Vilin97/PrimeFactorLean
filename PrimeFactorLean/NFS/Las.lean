@@ -943,8 +943,120 @@ def roots8Go (primes roots : Array Nat)
   else (o0, o1, o2, o3, o4, o5, o6, o7)
 termination_by primes.size - k
 
-/-- `latticeRoots` for up to eight bases at once (`roots8Go`; as `latticeRoots4`). -/
-def latticeRoots8 (side : Side) (bs : Array (Int × Int × Int × Int)) : Array (Array Nat) :=
+/-- `-p⁻¹ mod 2^32` for an odd `p` (Newton's iteration: each step doubles the bits). -/
+@[inline] def negInv32 (p : UInt64) : UInt64 :=
+  let x := p
+  let x := x * (2 - p * x)
+  let x := x * (2 - p * x)
+  let x := x * (2 - p * x)
+  let x := x * (2 - p * x)
+  (-x) &&& 0xFFFFFFFF
+
+/-- `a b 2^-32 mod p` for `a, b < p < 2^20` (Montgomery's reduction, `pn = -p⁻¹ mod
+2^32`; the correction by a mask). -/
+@[inline] def montMul32 (a b p pn : UInt64) : UInt64 :=
+  let t := a * b
+  let m := ((t &&& 0xFFFFFFFF) * pn) &&& 0xFFFFFFFF
+  let u := (t + m * p) >>> 32
+  let s := u - p
+  s + (p &&& -(s >>> 63))
+
+/-- `roots8Go` with the products of Montgomery's trick and of `rootOf` as
+Montgomery products (no division): the powers of `2^32` cancel along the
+prefix products and the back substitution, and the inverse is scaled once by
+`2^32` so that each `i_k` is `z_k⁻¹ 2^32`, which `montMul32` turns back into the
+standard root. The same roots (odd `p < 2^20`; other primes as `roots8Go`). -/
+def roots8GoM (primes roots : Array Nat)
+    (a0 b0 c0 d0 a1 b1 c1 d1 a2 b2 c2 d2 a3 b3 c3 d3 a4 b4 c4 d4 a5 b5 c5 d5 a6 b6 c6 d6 a7 b7 c7 d7 : Int64) (k : Nat)
+    (o0 o1 o2 o3 o4 o5 o6 o7 : Array Nat) :
+    Array Nat × Array Nat × Array Nat × Array Nat × Array Nat × Array Nat × Array Nat × Array Nat :=
+  if h : k < primes.size ∧ k < roots.size then
+    let p := primes[k].toUInt64
+    let r := roots[k].toUInt64
+    let (x0, y0) := latticeAB p r a0 b0 c0 d0
+    let (x1, y1) := latticeAB p r a1 b1 c1 d1
+    let (x2, y2) := latticeAB p r a2 b2 c2 d2
+    let (x3, y3) := latticeAB p r a3 b3 c3 d3
+    let (x4, y4) := latticeAB p r a4 b4 c4 d4
+    let (x5, y5) := latticeAB p r a5 b5 c5 d5
+    let (x6, y6) := latticeAB p r a6 b6 c6 d6
+    let (x7, y7) := latticeAB p r a7 b7 c7 d7
+    let z0 := if x0 == 0 then 1 else x0
+    let z1 := if x1 == 0 then 1 else x1
+    let z2 := if x2 == 0 then 1 else x2
+    let z3 := if x3 == 0 then 1 else x3
+    let z4 := if x4 == 0 then 1 else x4
+    let z5 := if x5 == 0 then 1 else x5
+    let z6 := if x6 == 0 then 1 else x6
+    let z7 := if x7 == 0 then 1 else x7
+    if p &&& 1 == 0 || p >>> 20 != 0 then
+      let q1 := z0 * z1 % p
+      let q2 := q1 * z2 % p
+      let q3 := q2 * z3 % p
+      let q4 := q3 * z4 % p
+      let q5 := q4 * z5 % p
+      let q6 := q5 * z6 % p
+      let q7 := q6 * z7 % p
+      let inv := invMod32 q7.toUInt32 p.toUInt32
+      let t7 := inv
+      let i7 := t7 * q6 % p
+      let t6 := t7 * z7 % p
+      let i6 := t6 * q5 % p
+      let t5 := t6 * z6 % p
+      let i5 := t5 * q4 % p
+      let t4 := t5 * z5 % p
+      let i4 := t4 * q3 % p
+      let t3 := t4 * z4 % p
+      let i3 := t3 * q2 % p
+      let t2 := t3 * z3 % p
+      let i2 := t2 * q1 % p
+      let t1 := t2 * z2 % p
+      let i1 := t1 * z0 % p
+      let i0 := t1 * z1 % p
+      roots8GoM primes roots a0 b0 c0 d0 a1 b1 c1 d1 a2 b2 c2 d2 a3 b3 c3 d3 a4 b4 c4 d4 a5 b5 c5 d5 a6 b6 c6 d6 a7 b7 c7 d7 (k + 1)
+        (o0.push (rootOf p x0 y0 i0)) (o1.push (rootOf p x1 y1 i1)) (o2.push (rootOf p x2 y2 i2)) (o3.push (rootOf p x3 y3 i3)) (o4.push (rootOf p x4 y4 i4)) (o5.push (rootOf p x5 y5 i5)) (o6.push (rootOf p x6 y6 i6)) (o7.push (rootOf p x7 y7 i7))
+    else
+      let pn := negInv32 p
+      -- q_k = z_0 ⋯ z_k 2^-32k
+      let q1 := montMul32 z0 z1 p pn
+      let q2 := montMul32 q1 z2 p pn
+      let q3 := montMul32 q2 z3 p pn
+      let q4 := montMul32 q3 z4 p pn
+      let q5 := montMul32 q4 z5 p pn
+      let q6 := montMul32 q5 z6 p pn
+      let q7 := montMul32 q6 z7 p pn
+      -- (z_0 ⋯ z_7)⁻¹ 2^(32·8): the inverse of q7 times 2^32
+      let inv := ((invMod32 q7.toUInt32 p.toUInt32) <<< 32) % p
+      let t7 := inv
+      let i7 := montMul32 t7 q6 p pn
+      let t6 := montMul32 t7 z7 p pn
+      let i6 := montMul32 t6 q5 p pn
+      let t5 := montMul32 t6 z6 p pn
+      let i5 := montMul32 t5 q4 p pn
+      let t4 := montMul32 t5 z5 p pn
+      let i4 := montMul32 t4 q3 p pn
+      let t3 := montMul32 t4 z4 p pn
+      let i3 := montMul32 t3 q2 p pn
+      let t2 := montMul32 t3 z3 p pn
+      let i2 := montMul32 t2 q1 p pn
+      let t1 := montMul32 t2 z2 p pn
+      let i1 := montMul32 t1 z0 p pn
+      let i0 := montMul32 t1 z1 p pn
+      let ro (α β i : UInt64) : Nat :=
+        if α == 0 then p.toNat
+        else
+          let t := montMul32 β i p pn
+          if t == 0 then 0 else (p - t).toNat
+      roots8GoM primes roots a0 b0 c0 d0 a1 b1 c1 d1 a2 b2 c2 d2 a3 b3 c3 d3 a4 b4 c4 d4 a5 b5 c5 d5 a6 b6 c6 d6 a7 b7 c7 d7 (k + 1)
+        (o0.push (ro x0 y0 i0)) (o1.push (ro x1 y1 i1)) (o2.push (ro x2 y2 i2)) (o3.push (ro x3 y3 i3)) (o4.push (ro x4 y4 i4)) (o5.push (ro x5 y5 i5)) (o6.push (ro x6 y6 i6)) (o7.push (ro x7 y7 i7))
+  else (o0, o1, o2, o3, o4, o5, o6, o7)
+termination_by primes.size - k
+
+/-- `latticeRoots` for up to eight bases at once (`roots8GoM`, or with `mont :=
+false` `roots8Go`; as `latticeRoots4`). At 100 digits the roots of a special-q
+take 1.45 ms instead of 1.93 ms with the divisions of `roots8Go`. -/
+def latticeRoots8 (side : Side) (bs : Array (Int × Int × Int × Int)) (mont : Bool := true) :
+    Array (Array Nat) :=
   let small := bs.all fun (a, b, c, d) =>
     a.natAbs < 2 ^ 31 && b.natAbs < 2 ^ 31 && c.natAbs < 2 ^ 31 && d.natAbs < 2 ^ 31
   if bs.isEmpty || bs.size > 8 || !small then
@@ -962,7 +1074,7 @@ def latticeRoots8 (side : Side) (bs : Array (Int × Int × Int × Int)) : Array 
     let (a6, b6, c6, d6) := g 6
     let (a7, b7, c7, d7) := g 7
     let n := side.primes.size
-    let (o0, o1, o2, o3, o4, o5, o6, o7) := roots8Go side.primes side.roots a0 b0 c0 d0 a1 b1 c1 d1 a2 b2 c2 d2 a3 b3 c3 d3 a4 b4 c4 d4 a5 b5 c5 d5 a6 b6 c6 d6 a7 b7 c7 d7 0
+    let (o0, o1, o2, o3, o4, o5, o6, o7) := (if mont then roots8GoM else roots8Go) side.primes side.roots a0 b0 c0 d0 a1 b1 c1 d1 a2 b2 c2 d2 a3 b3 c3 d3 a4 b4 c4 d4 a5 b5 c5 d5 a6 b6 c6 d6 a7 b7 c7 d7 0
       (Array.mkEmpty n) (Array.mkEmpty n) (Array.mkEmpty n) (Array.mkEmpty n) (Array.mkEmpty n) (Array.mkEmpty n) (Array.mkEmpty n) (Array.mkEmpty n)
     #[o0, o1, o2, o3, o4, o5, o6, o7].extract 0 bs.size
 

@@ -1505,8 +1505,15 @@ def lasStages (path : String) (q0 count : Nat) (kvs : List String) : IO Unit := 
     let bases ← IO.lazyPure fun _ => grp.map fun (q, ρ) =>
       let (u, v) := reduceLattice q ρ las.skew
       (u.1, u.2, v.1, v.2)
-    let Rrs ← IO.lazyPure fun _ => if get "batch" 8 == 4 then Las.latticeRoots4 las.rat bases else Las.latticeRoots8 las.rat bases
-    let Ras ← IO.lazyPure fun _ => if get "batch" 8 == 4 then Las.latticeRoots4 las.alg bases else Las.latticeRoots8 las.alg bases
+    -- `mont=0`: the lattice roots by divisions (`roots8Go`)
+    let mont := get "mont" 1 == 1
+    let Rrs ← IO.lazyPure fun _ => if get "batch" 8 == 4 then Las.latticeRoots4 las.rat bases else Las.latticeRoots8 las.rat bases mont
+    let Ras ← IO.lazyPure fun _ => if get "batch" 8 == 4 then Las.latticeRoots4 las.alg bases else Las.latticeRoots8 las.alg bases mont
+    if get "rootcheck" 0 == 1 then
+      -- the Montgomery roots against the divisions, root for root
+      let (r1, a1) := (Las.latticeRoots8 las.rat bases (!mont), Las.latticeRoots8 las.alg bases (!mont))
+      if r1.map (·.toList) != Rrs.map (·.toList) || a1.map (·.toList) != Ras.map (·.toList) then
+        IO.println s!"rootcheck: roots differ at group {i}"
     let t1 ← IO.monoNanosNow
     tm := tm.modify 0 (· + (t1 - t0))
     if get "basis" 0 == 1 then
