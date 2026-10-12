@@ -385,17 +385,19 @@ structure Params where
   deriving Repr, Inhabited
 
 /-- `(digits, factor-base size, M, large-prime multiplier, dlpDiv, slack)`, measured with
-16 threads on the balanced semiprimes of the dataset (`scripts/tune_siqs.py`). The 76- and
-80-digit entries were checked against the best settings of a grid on two fresh semiprimes
-per size (7000/98304 and 15000/196608) on six more fresh semiprimes each: those totalled
-37.9 s and 88.8 s against 36.9 s and 71.3 s for the entries below (times vary up to twofold
-between numbers of one size, so two numbers do not decide). -/
+16 threads on the balanced semiprimes of the dataset (`scripts/tune_siqs.py`). Re-tuned at
+68-80 digits once relations were collected from a task queue (590f68c), on the two dataset
+semiprimes and eight fresh ones per size (one run each, totals in seconds): 68 digits
+5500/65536 10.60, 7000/65536 9.88, 7000/98304 9.56; 72 digits 6000/65536 20.53 (larger
+bases no better); 76 digits 7000/65536 54.08, 10000/98304 46.71; 80 digits (six numbers)
+12000/131072 57.68, 20000/196608 52.88. Times vary up to twofold between numbers of one
+size, so two numbers do not decide. -/
 def paramTable : List (Nat × Nat × Nat × Nat × Nat × Nat) :=
   [(20, 60, 2048, 20, 0, 10), (25, 100, 4096, 30, 0, 10), (30, 150, 8192, 30, 0, 10),
    (35, 220, 16384, 40, 0, 10), (40, 300, 32768, 60, 0, 8), (44, 500, 32768, 60, 0, 14),
    (48, 800, 16384, 60, 0, 10), (52, 1200, 32768, 60, 0, 10), (56, 1800, 65536, 60, 0, 10),
-   (60, 2400, 32768, 80, 0, 12), (64, 5500, 65536, 80, 0, 14), (68, 5500, 65536, 80, 0, 16),
-   (72, 6000, 65536, 80, 16, 12), (76, 7000, 65536, 80, 16, 12), (80, 12000, 131072, 90, 16, 10),
+   (60, 2400, 32768, 80, 0, 12), (64, 5500, 65536, 80, 0, 14), (68, 7000, 98304, 80, 0, 16),
+   (72, 6000, 65536, 80, 16, 12), (76, 10000, 98304, 80, 16, 12), (80, 20000, 196608, 90, 16, 10),
    (85, 17000, 131072, 100, 16, 10), (90, 22000, 196608, 110, 16, 10),
    (95, 30000, 196608, 120, 16, 10), (100, 40000, 262144, 150, 16, 10),
    (110, 60000, 262144, 150, 16, 10)]
