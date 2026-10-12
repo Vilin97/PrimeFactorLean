@@ -153,10 +153,14 @@ def ecmScheduleFull (digits : Nat) : List (Nat × Nat) :=
 
 /-- ECM over a list of `(B1, curves)` levels; the first factor wins. Each level
 draws its own Suyama parameters (a level reusing the curves of the previous one
-would retry group orders already known not to be smooth enough). -/
+would retry group orders already known not to be smooth enough). The curves run
+in batches of `threads`, so a level is rounded up to whole batches: the extra
+curves take no extra time. -/
 def ecmLevels (threads : Nat) (levels : List (Nat × Nat)) : Splitter := fun n =>
+  let t := max 1 threads
   (levels.zip (List.range levels.length)).foldl (fun acc ((b1, curves), i) => acc.orElse fun _ =>
-    ECMF.split n { b1 := b1, curves := curves, threads := threads, sigma := 11 + 100003 * i })
+    ECMF.split n { b1 := b1, curves := (curves + t - 1) / t * t, threads := threads,
+                   sigma := 11 + 100003 * i })
     none
 
 /-- `(b, k, plus)` with `n ∣ b^k + 1` (`plus`) or `n ∣ b^k - 1` for a small base

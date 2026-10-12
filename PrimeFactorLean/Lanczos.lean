@@ -449,16 +449,41 @@ def innerAcc3 (V AV V0 : ByteArray) (hi : Nat) (hV : 8 * hi ≤ V.size) (hA : 8 
   else (t1, t2, t3)
 termination_by hi - k
 
+theorem mod2048_lt (x : USize) : (x % 2048).toNat < 2048 := by
+  rw [USize.toNat_mod]
+  have h : (2048 : USize).toNat = 2048 := by
+    show (USize.ofNat 2048).toNat = 2048
+    have : (USize.ofNat 2048).toNat = 2048 % 2 ^ System.Platform.numBits := rfl
+    rw [this]
+    apply Nat.mod_eq_of_lt
+    rcases System.Platform.numBits_eq with h | h <;> rw [h] <;> decide
+  rw [h]
+  exact Nat.mod_lt _ (by decide)
+
+/-- Rows `8 b … 8 b + 7` of `tablesMat` (`base = 256 b`), pushed onto `out`: one
+pass over the entries `v, …, 255` (`fuel` of them), each folded into the rows
+of its bits. -/
+def byteRows (acc : Tab) (base v : USize) (r0 r1 r2 r3 r4 r5 r6 r7 : UInt64) (out : Words) :
+    Nat → Words
+  | 0 => (((((((out.push r0).push r1).push r2).push r3).push r4).push r5).push r6).push r7
+  | fuel + 1 =>
+    let x := acc.get ((base + v) % 2048) (mod2048_lt _)
+    let w := v.toUInt64
+    byteRows acc base (v + 1)
+      (r0 ^^^ (x &&& -(w &&& 1))) (r1 ^^^ (x &&& -((w >>> 1) &&& 1)))
+      (r2 ^^^ (x &&& -((w >>> 2) &&& 1))) (r3 ^^^ (x &&& -((w >>> 3) &&& 1)))
+      (r4 ^^^ (x &&& -((w >>> 4) &&& 1))) (r5 ^^^ (x &&& -((w >>> 5) &&& 1)))
+      (r6 ^^^ (x &&& -((w >>> 6) &&& 1))) (r7 ^^^ (x &&& -((w >>> 7) &&& 1))) out fuel
+
 /-- The 64 × 64 matrix of accumulated byte tables: row `i` is the `⊕` of
-`acc[256 b + v]` over the `v` with bit `i mod 8` set, `b = i / 8`. -/
-def tablesMat (acc : Tab) : Mat :=
-  Mat.ofFn fun i => Id.run do
-    let b := i / 8
-    let m := i % 8
-    let mut r : UInt64 := 0
-    for v in [1:256] do
-      if (v >>> m) % 2 == 1 then r := r ^^^ acc.getN (256 * b + v)
-    return r
+`acc[256 b + v]` over the `v` with bit `i mod 8` set, `b = i / 8` (one pass
+over each byte's 255 entries: 1.3 ms -> 0.17 ms per Lanczos step on a 24K matrix
+with 16 tasks, where the tasks' 48 reductions dominated the inner products). -/
+def tablesMat (acc : Tab) : Mat := Id.run do
+  let mut out : Words := ⟨Array.mkEmpty 128⟩
+  for b in [0:8] do
+    out := byteRows acc (256 * b).toUSize 1 0 0 0 0 0 0 0 0 out 255
+  return ⟨out⟩
 
 /-- `Vᵀ W` (64 × 64). -/
 def inner (V W : Block) : Mat :=

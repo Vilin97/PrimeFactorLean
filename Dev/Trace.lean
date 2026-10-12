@@ -1104,3 +1104,32 @@ def siqsRounds (n threads : Nat) : IO Unit := do
   IO.println s!"{processed} A in {(t1 - t0) / 1000000} ms (main thread {tMain / 1000000} ms), graphCycles {(t2 - t1) / 1000000} ms ({cyc.size} cycles), raw relations {raw}"
 
 end PrimeFactorLean.Trace
+
+namespace PrimeFactorLean.Trace
+
+open Lanczos in
+/-- Per-call cost of the 64 × 64 helpers of a Lanczos step. -/
+def matBench (reps : Nat) : IO Unit := do
+  let mk (s : Nat) : Mat := Mat.ofFn fun i => splitmix (s * 64 + i).toUInt64
+  let a := mk 1
+  let b := mk 2
+  let t0 ← IO.monoNanosNow
+  let r1 ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc k =>
+    acc ^^^ (Mat.mul (mk k) b).get 3) 0
+  let t1 ← IO.monoNanosNow
+  let r2 ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc k =>
+    acc ^^^ ((selectColumns (mk k) (Array.range 64)).map (·.2.2)).getD 0) 0
+  let t2 ← IO.monoNanosNow
+  let r3 ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc k =>
+    acc ^^^ (tables (mk k)).getN 5) 0
+  let t3 ← IO.monoNanosNow
+  let r4 ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc k =>
+    acc ^^^ (tablesMat (tables (mk k))).get 7) 0
+  let t4 ← IO.monoNanosNow
+  let r5 ← IO.lazyPure fun _ => (List.range reps).foldl (fun acc k =>
+    acc ^^^ (mk k).get 7) 0
+  let t5 ← IO.monoNanosNow
+  let per (a b : Nat) : Nat := (b - a) / reps
+  IO.println s!"per call (ns): mk {per t4 t5}, Mat.mul {per t0 t1}, selectColumns {per t1 t2}, tables+toB {per t2 t3}, tables+tablesMat {per t3 t4} ({r1 ^^^ r2 ^^^ r3 ^^^ r4 ^^^ r5 ^^^ a.get 0})"
+
+end PrimeFactorLean.Trace
