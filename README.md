@@ -1,5 +1,7 @@
 # PrimeFactorLean
 
+[![Lean proofs and regression suite](https://github.com/Vilin97/PrimeFactorLean/actions/workflows/lean.yml/badge.svg)](https://github.com/Vilin97/PrimeFactorLean/actions/workflows/lean.yml)
+
 Integer factorization in Lean 4, from trial division to the general number
 field sieve, with kernel-checked proofs of correctness.
 
@@ -504,6 +506,14 @@ gzip-compressed JSON (`gzip -dc results/…json.gz`).
 `--threads T` bounds the parallelism: for inputs of 45 digits and more the CLI
 runs itself once more with `LEAN_NUM_THREADS=T`, so that at most `T` worker
 threads of the Lean runtime compute at once, even in nested parallel phases.
+
+Continuous integration (`.github/workflows/lean.yml`, results under the badge
+above) builds every target, including `Tests/Audit.lean`, which fails on any
+axiom beyond `propext`, `Classical.choice` and `Quot.sound` in the audited
+theorems. It runs `lake test` (dataset factorizations, raw splitters, failure
+bounds, certificates and tampered certificates), rejects the proof escape
+hatches in the sources (`scripts/audit_sources.py`), validates the dataset's
+reference factorizations, and smoke-tests the CLI on Cunningham numbers.
 
 ## Repository layout
 
