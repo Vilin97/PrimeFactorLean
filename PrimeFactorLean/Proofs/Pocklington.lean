@@ -2,6 +2,7 @@ import Mathlib.FieldTheory.Finite.Basic
 import Mathlib.GroupTheory.OrderOfElement
 import Mathlib.Data.Nat.GCD.BigOperators
 import PrimeFactorLean.Proofs.Arith
+import PrimeFactorLean.Proofs.PlusOne
 import PrimeFactorLean.Pocklington
 
 /-! Proof layer: see the runtime module for documentation. -/
@@ -55,6 +56,70 @@ theorem list_prod_dvd_of_coprime {l : List Nat} {m : Nat}
 
 theorem factoredPart_eq (ws : List (Nat × Nat × Nat)) :
     factoredPart ws = (ws.map fun t => t.1 ^ t.2.1).prod := rfl
+
+theorem plusPart_eq (ws : List (Nat × Nat × Nat × Nat)) :
+    plusPart ws = (ws.map fun t => t.1 ^ t.2.1).prod := rfl
+
+/-- **The `N + 1` test**, in the form used by the checker: with `gcd(2D, N) = 1`
+and passed witness checks for `F = ∏ q^e ∣ N + 1`, every prime factor `p` of `N`
+has `F ∣ p - 1` or `F ∣ p + 1` (`plus_prime_pow_dvd`, one sign for all `q` since
+`D` is common), so `(F - 1)² > N` leaves no prime factor below `√N`. -/
+theorem plus_test {N D : Nat} (hN : 3 ≤ N) (hD : Nat.gcd (2 * D) N = 1)
+    (ws : List (Nat × Nat × Nat × Nat)) (hprime : ∀ t ∈ ws, t.1.Prime)
+    (hnodup : (ws.map Prod.fst).Nodup) (hdvd : ∀ t ∈ ws, t.1 ^ t.2.1 ∣ N + 1)
+    (hbig : N < (plusPart ws - 1) ^ 2)
+    (hwit : ∀ t ∈ ws, lucasOK N D t.1 t.2.2.1 t.2.2.2 = true) : N.Prime := by
+  by_contra hnp
+  have hp : N.minFac.Prime := Nat.minFac_prime (by omega)
+  have hpN : N.minFac ∣ N := Nat.minFac_dvd N
+  have hsq : N.minFac ^ 2 ≤ N := Nat.minFac_sq_le_self (by omega) hnp
+  set p := N.minFac with hpdef
+  haveI := Fact.mk hp
+  have hp2 : p ≠ 2 := by
+    intro h2
+    have : 2 ∣ Nat.gcd (2 * D) N := Nat.dvd_gcd (dvd_mul_right 2 D) (h2 ▸ hpN)
+    rw [hD] at this
+    omega
+  have hD0 : ((D : ℕ) : ZMod p) ≠ 0 := by
+    intro h0
+    have hpD : p ∣ D := (ZMod.natCast_eq_zero_iff D p).mp h0
+    have : p ∣ Nat.gcd (2 * D) N := Nat.dvd_gcd (Dvd.dvd.mul_left hpD 2) hpN
+    rw [hD] at this
+    exact hp.one_lt.ne' (Nat.dvd_one.mp this)
+  have hw : ∀ t ∈ ws, ((D : ZMod p) ^ (p / 2) = 1 → t.1 ^ t.2.1 ∣ p - 1) ∧
+      ((D : ZMod p) ^ (p / 2) = -1 → t.1 ^ t.2.1 ∣ p + 1) := by
+    intro t ht
+    obtain ⟨h1, h2, h3⟩ := lucasOK_sound (p := p) (by omega) hpN (hwit t ht)
+    exact plus_prime_pow_dvd hp2 (hprime t ht) _ h1 (hdvd t ht) h2 h3
+  have hco : (ws.map fun t => t.1 ^ t.2.1).Pairwise Nat.Coprime := by
+    rw [List.pairwise_map]
+    have hne : ws.Pairwise (fun a b => a.1 ≠ b.1) := by
+      have := hnodup
+      rw [List.Nodup, List.pairwise_map] at this
+      exact this
+    refine List.Pairwise.imp_of_mem ?_ hne
+    intro a b ha hb hab
+    exact Nat.Coprime.pow _ _ ((Nat.coprime_primes (hprime a ha) (hprime b hb)).mpr hab)
+  have h2 := hp.two_le
+  have hle : plusPart ws ≤ p + 1 := by
+    rcases ZMod.pow_div_two_eq_neg_one_or_one p hD0 with h1 | h1
+    · have hF : plusPart ws ∣ p - 1 := by
+        rw [plusPart_eq]
+        apply list_prod_dvd_of_coprime hco
+        intro x hx
+        obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hx
+        exact (hw t ht).1 h1
+      have := Nat.le_of_dvd (by omega) hF
+      omega
+    · have hF : plusPart ws ∣ p + 1 := by
+        rw [plusPart_eq]
+        apply list_prod_dvd_of_coprime hco
+        intro x hx
+        obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hx
+        exact (hw t ht).2 h1
+      exact Nat.le_of_dvd (by omega) hF
+  have : (plusPart ws - 1) ^ 2 ≤ p ^ 2 := Nat.pow_le_pow_left (by omega) 2
+  omega
 
 /-- **Pocklington's criterion**, in the form used by the checker. -/
 theorem pocklington {N : Nat} (hN : 2 ≤ N) (ws : List (Nat × Nat × Nat))
@@ -307,7 +372,14 @@ theorem knownPrime_sound {known : List Nat} (hk : ∀ p ∈ known, p.Prime) {q :
 /-- Accepted steps prove primality, assuming only that earlier values were prime. -/
 theorem Step.check_sound (s : Step) (known : List Nat) (hk : ∀ p ∈ known, p.Prime)
     (h : s.check known = true) : s.n.Prime := by
-  simp only [Step.check, Bool.and_eq_true, decide_eq_true_eq, List.all_eq_true,
+  unfold Step.check at h
+  split_ifs at h with hpl
+  swap
+  · simp only [Bool.and_eq_true, decide_eq_true_eq, List.all_eq_true, beq_iff_eq] at h
+    obtain ⟨⟨⟨⟨hn, hgcd⟩, hnodup⟩, hall⟩, hbig⟩ := h
+    exact plus_test hn hgcd s.plus (fun t ht => knownPrime_sound hk (hall t ht).1.1) hnodup
+      (fun t ht => Nat.dvd_of_mod_eq_zero (hall t ht).1.2) hbig (fun t ht => (hall t ht).2)
+  simp only [Bool.and_eq_true, decide_eq_true_eq, List.all_eq_true,
     beq_iff_eq, Bool.or_eq_true] at h
   obtain ⟨⟨⟨hn, hnodup⟩, hall⟩, hbig⟩ := h
   have hprime : ∀ t ∈ s.witnesses, t.1.Prime := fun t ht => knownPrime_sound hk (hall t ht).1.1
@@ -353,21 +425,22 @@ theorem checked_sound {n : Nat} {steps : List Step} {c : Certificate}
   cases h
   exact ⟨rfl, Certificate.check_sound _ hc⟩
 
-theorem generate_sound {split : Nat → Option Nat} {n fuel : Nat} {c : Certificate}
-    (h : generate split n fuel = some c) : c.n = n ∧ c.n.Prime := by
+theorem generate_sound {split : Nat → Option Nat} {n fuel : Nat}
+    {cheap : List (Nat → Option Nat)} {c : Certificate}
+    (h : generate split n fuel cheap = some c) : c.n = n ∧ c.n.Prime := by
   unfold generate at h
   obtain ⟨steps, _, hc⟩ := Option.bind_eq_some_iff.mp h
   exact checked_sound hc
 
 /-- The Boolean primality checker of the factorization engine accepts only primes. -/
 theorem oracle_sound {split : Nat → Option Nat} {fuel n : Nat}
-    (h : oracle split fuel n = true) : n.Prime := by
+    {cheap : List (Nat → Option Nat)} (h : oracle split fuel n cheap = true) : n.Prime := by
   unfold oracle at h
   split at h
   · exact Arith.smallPrime_sound h
   · simp only [Bool.and_eq_true] at h
     obtain ⟨_, hg⟩ := h
-    cases hc : generate split n fuel with
+    cases hc : generate split n fuel cheap with
     | none => simp [hc] at hg
     | some c =>
       have := generate_sound hc

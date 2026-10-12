@@ -21,6 +21,15 @@ have a prime divisor `p ≤ √n`.
 Certificates are produced by an untrusted generator that may call any
 factoring routine; only `Step.check`/`Certificate.check` are trusted, and both
 are proved sound below.
+
+**The `n + 1` side.** A step may instead use a factored part `F ∣ n + 1`: with
+`gcd(2D, n) = 1`, a prime `p ∣ n` sees the ring `ℤ/p[√D]`, where the Frobenius
+map `z ↦ z^p` fixes `√D` or negates it as `D` is a square mod `p` or not. For
+`α = a + b√D` of norm `a² - D b²` prime to `n`, with `α^(n+1)` free of `√D` and
+the `√D` part of `α^((n+1)/q)` prime to `n` (computed mod `n`), the element
+`α/ᾱ` has order divisible by `q^e` and dividing `p ∓ 1`. One `D` serves every
+witness, so `F ∣ p - 1` or `F ∣ p + 1`, and `(F - 1)² > n` proves `n` prime
+(the `n + 1` test of Lehmer, Morrison and Brillhart–Lehmer–Selfridge).
 -/
 
 namespace PrimeFactorLean.Pocklington
@@ -38,12 +47,44 @@ def witnessOK (n q a : Nat) : Bool :=
   powMod a (n - 1) n == 1 % n &&
   Nat.gcd ((powMod a ((n - 1) / q) n + n - 1) % n) n == 1
 
-/-- A Pocklington step: prove `n` prime from witnesses `(q, e, a)`. Each `q`
-must be proved prime earlier in the certificate or be small enough for the
-verified trial division. -/
+/-- `(x₁ + y₁√D)(x₂ + y₂√D)` with coordinates mod `n`. -/
+def mulPair (n D : Nat) (x y : Nat × Nat) : Nat × Nat :=
+  ((x.1 * y.1 + D * (x.2 * y.2)) % n, (x.1 * y.2 + x.2 * y.1) % n)
+
+/-- `(x.1 + x.2 √D)^k` with coordinates mod `n`, by squaring. -/
+def powPair (n D : Nat) (x : Nat × Nat) (k : Nat) : Nat × Nat :=
+  if k = 0 then (1 % n, 0)
+  else
+    let r := powPair n D x (k / 2)
+    let r2 := mulPair n D r r
+    if k % 2 = 1 then mulPair n D r2 x else r2
+termination_by k
+decreasing_by omega
+
+/-- The norm `a² - D b²` mod `n`. -/
+def normMod (n D a b : Nat) : Nat := (a * a % n + (n - D * (b * b) % n)) % n
+
+/-- One `n + 1` witness check for `α = a + b√D`: the norm is prime to `n`,
+`α^(n+1)` has no `√D` part mod `n`, and the `√D` part of `α^((n+1)/q)` is prime
+to `n`. -/
+def lucasOK (n D q a b : Nat) : Bool :=
+  Nat.gcd (normMod n D a b) n == 1 &&
+  (powPair n D (a, b) (n + 1)).2 == 0 &&
+  Nat.gcd (powPair n D (a, b) ((n + 1) / q)).2 n == 1
+
+/-- The factored part of an `n + 1` row: `∏ q^e` over its `(q, e, a, b)`. -/
+def plusPart (ws : List (Nat × Nat × Nat × Nat)) : Nat :=
+  (ws.map fun t => t.1 ^ t.2.1).foldr (· * ·) 1
+
+/-- A Pocklington step: prove `n` prime from witnesses `(q, e, a)` for `n - 1`,
+or, when `plus` is not empty, from `D` and witnesses `(q, e, a, b)` for `n + 1`
+(then `witnesses` is not used). Each `q` must be proved prime earlier in the
+certificate or be small enough for the verified trial division. -/
 structure Step where
   n : Nat
   witnesses : List (Nat × Nat × Nat)
+  D : Nat := 0
+  plus : List (Nat × Nat × Nat × Nat) := []
   deriving Repr, Inhabited
 
 /-- Bound below which a witness prime may be certified by exact trial division. -/
@@ -70,14 +111,23 @@ def cubeTest (N F : Nat) : Bool :=
   !squareDiscriminant c₂ c₁ && (c₁ == 0 || !squareDiscriminant (c₂ + F) (c₁ - 1))
 
 /-- The executable acceptance test for one step: Pocklington (`F² > N`) or
-Brillhart–Lehmer–Selfridge (`F³ > N` and `cubeTest`). -/
+Brillhart–Lehmer–Selfridge (`F³ > N` and `cubeTest`) on `N - 1`, or the `N + 1`
+test (`(F - 1)² > N`). -/
 def Step.check (s : Step) (known : List Nat) : Bool :=
-  decide (2 ≤ s.n) &&
-  decide ((s.witnesses.map Prod.fst).Nodup) &&
-  s.witnesses.all (fun t =>
-    knownPrime known t.1 && (s.n - 1) % (t.1 ^ t.2.1) == 0 && witnessOK s.n t.1 t.2.2) &&
-  (decide (s.n < factoredPart s.witnesses ^ 2) ||
-    (decide (s.n < factoredPart s.witnesses ^ 3) && cubeTest s.n (factoredPart s.witnesses)))
+  if s.plus.isEmpty then
+    decide (2 ≤ s.n) &&
+    decide ((s.witnesses.map Prod.fst).Nodup) &&
+    s.witnesses.all (fun t =>
+      knownPrime known t.1 && (s.n - 1) % (t.1 ^ t.2.1) == 0 && witnessOK s.n t.1 t.2.2) &&
+    (decide (s.n < factoredPart s.witnesses ^ 2) ||
+      (decide (s.n < factoredPart s.witnesses ^ 3) && cubeTest s.n (factoredPart s.witnesses)))
+  else
+    decide (3 ≤ s.n) && Nat.gcd (2 * s.D) s.n == 1 &&
+    decide ((s.plus.map Prod.fst).Nodup) &&
+    s.plus.all (fun t =>
+      knownPrime known t.1 && (s.n + 1) % (t.1 ^ t.2.1) == 0 &&
+        lucasOK s.n s.D t.1 t.2.2.1 t.2.2.2) &&
+    decide (s.n < (plusPart s.plus - 1) ^ 2)
 
 /-- Verify a dependency-ordered list of steps; the result lists proved primes. -/
 def verifySteps : List Step → List Nat → Option (List Nat)
@@ -113,12 +163,11 @@ def stripFactor (m q : Nat) : Nat × Nat := Id.run do
 def findWitness (n q : Nat) (bound : Nat := 200) : Option Nat :=
   (List.range bound).find? (fun i => witnessOK n q (i + 2)) |>.map (· + 2)
 
-/-- Partially factor `m = n - 1` until the factored part `F` has `F^k > n`
-(`k = 3` for the Brillhart–Lehmer–Selfridge test, `k = 2` for Pocklington).
+/-- Partially factor `m` until the factored part `F` satisfies `enough F`.
 Returns prime candidates with multiplicities (unproved; the checker decides). -/
-def partialFactor (split : Nat → Option Nat) (smallPrimes : Array Nat)
-    (n : Nat) (k : Nat := 2) : Option (List (Nat × Nat)) := Id.run do
-  let mut m := n - 1
+def partialFactorOf (split : Nat → Option Nat) (smallPrimes : Array Nat)
+    (m : Nat) (enough : Nat → Bool) : Option (List (Nat × Nat)) := Id.run do
+  let mut m := m
   let mut found : List (Nat × Nat) := []
   let mut part := 1
   for p in smallPrimes do
@@ -128,10 +177,10 @@ def partialFactor (split : Nat → Option Nat) (smallPrimes : Array Nat)
       found := (p, e) :: found
       part := part * p ^ e
     if m == 1 then break
-  -- Peel larger prime factors from the cofactor until F^k > n.
+  -- Peel larger prime factors from the cofactor until `enough F`.
   let mut work : List Nat := if m > 1 then [m] else []
   let mut fuel := 64
-  while part ^ k ≤ n && !work.isEmpty && fuel > 0 do
+  while !enough part && !work.isEmpty && fuel > 0 do
     fuel := fuel - 1
     match work with
     | [] => break
@@ -154,40 +203,81 @@ def partialFactor (split : Nat → Option Nat) (smallPrimes : Array Nat)
             work := a :: b :: work
           else continue
         | none => continue
-  if part ^ k > n then return some found else return none
+  if enough part then return some found else return none
 
-/-- Recursively build dependency-ordered Pocklington steps for `n`. -/
-def generateSteps (split : Nat → Option Nat) (smallPrimes : Array Nat) :
+/-- Partially factor `n - 1` until the factored part `F` has `F^k > n`
+(`k = 3` for the Brillhart–Lehmer–Selfridge test, `k = 2` for Pocklington). -/
+def partialFactor (split : Nat → Option Nat) (smallPrimes : Array Nat)
+    (n : Nat) (k : Nat := 2) : Option (List (Nat × Nat)) :=
+  partialFactorOf split smallPrimes (n - 1) fun part => part ^ k > n
+
+/-- A `D` for the `n + 1` test: Jacobi symbol `(D/n) = -1`, so `D` is prime to
+`n` and, for prime `n`, not a square (the witnesses then exist). -/
+def plusD (n : Nat) : Option Nat :=
+  (List.range 1000).find? (fun i => jacobi (i + 2) n == -1) |>.map (· + 2)
+
+/-- An `n + 1` witness `α = a + √D` for `(n, q)` among small `a`. -/
+def findPlusWitness (n D q : Nat) (bound : Nat := 200) : Option Nat :=
+  (List.range bound).find? (fun i => lucasOK n D q (i + 1) 1) |>.map (· + 1)
+
+/-- The fewest large primes of `found` (smallest first) whose product reaches `enough`. -/
+def chooseFactors (found : List (Nat × Nat)) (enough : Nat → Bool) : List (Nat × Nat) × Nat :=
+  Id.run do
+    let sorted := found.mergeSort (fun a b => a.1 ≤ b.1)
+    let mut chosen : List (Nat × Nat) := []
+    let mut part := 1
+    for (q, e) in sorted do
+      if enough part then break
+      chosen := (q, e) :: chosen
+      part := part * q ^ e
+    return (chosen.reverse, part)
+
+/-- Recursively build dependency-ordered steps for `n`. The splitters are tried
+in order, each on `n - 1` (cube-root test, then square root) and then on
+`n + 1`: cheap splitters first, so that a hard cofactor on one side (a product
+of two large primes) does not cost a full factorization when the other side is
+easy. -/
+def generateSteps (splits : List (Nat → Option Nat)) (smallPrimes : Array Nat) :
     Nat → Nat → Option (List Step)
   | 0, _ => none
   | fuel + 1, n =>
     if n < smallBound then
       if smallPrime n then some [] else none
     else if !isProbablePrime n then none
-    else do
-      -- Prefer the cube-root test (less of `n - 1` to factor); fall back to
-      -- the square-root test if its quadratic check happens to fail.
-      let attempt (k : Nat) : Option (List Step) := do
+    else
+      -- `n - 1`: prefer the cube-root test (less of `n - 1` to factor); fall
+      -- back to the square-root test if its quadratic check happens to fail.
+      let minus (split : Nat → Option Nat) (k : Nat) : Option (List Step) := do
         let found ← partialFactor split smallPrimes n k
-        -- Use the fewest large primes: sort by size and keep a prefix reaching n^{1/k}.
-        let sorted := found.mergeSort (fun a b => a.1 ≤ b.1)
-        let mut chosen : List (Nat × Nat) := []
-        let mut part := 1
-        for (q, e) in sorted do
-          if part ^ k > n then break
-          chosen := (q, e) :: chosen
-          part := part * q ^ e
+        let (chosen, part) := chooseFactors found fun part => part ^ k > n
         if k == 3 && part ^ 2 ≤ n && !cubeTest n part then none
         let mut steps : List Step := []
         let mut witnesses : List (Nat × Nat × Nat) := []
-        for (q, e) in chosen.reverse do
+        for (q, e) in chosen do
           if q ≥ smallBound then
-            let sub ← generateSteps split smallPrimes fuel q
+            let sub ← generateSteps splits smallPrimes fuel q
             steps := steps ++ sub
           let a ← findWitness n q
           witnesses := witnesses ++ [(q, e, a)]
-        return steps ++ [⟨n, witnesses⟩]
-      (attempt 3).orElse fun _ => attempt 2
+        return steps ++ [{ n := n, witnesses := witnesses }]
+      -- `n + 1`: a factored part with `(F - 1)² > n`
+      let plus (split : Nat → Option Nat) : Option (List Step) := do
+        let enough := fun part => n < (part - 1) ^ 2
+        let found ← partialFactorOf split smallPrimes (n + 1) enough
+        let (chosen, _) := chooseFactors found enough
+        let D ← plusD n
+        let mut steps : List Step := []
+        let mut ws : List (Nat × Nat × Nat × Nat) := []
+        for (q, e) in chosen do
+          if q ≥ smallBound then
+            let sub ← generateSteps splits smallPrimes fuel q
+            steps := steps ++ sub
+          let a ← findPlusWitness n D q
+          ws := ws ++ [(q, e, a, 1)]
+        return steps ++ [{ n := n, witnesses := [], D := D, plus := ws }]
+      let attempts := splits.map fun split => fun (_ : Unit) =>
+        ((minus split 3).orElse fun _ => plus split).orElse fun _ => minus split 2
+      attempts.foldl (fun acc f => acc.orElse f) none
 
 /-- Package steps as a certificate for `n`, accepting it only if it checks. -/
 def checked (n : Nat) (steps : List Step) : Option Certificate :=
@@ -200,17 +290,20 @@ set_option compiler.extract_closed false in
 def smallPrimes16 : Thunk (Array Nat) := Thunk.mk fun _ => primesUpTo 65536
 
 set_option compiler.extract_closed false in
-/-- Generate a certificate and check it before returning. -/
-def generate (split : Nat → Option Nat) (n : Nat) (fuel : Nat := 64) : Option Certificate :=
-  (if n < smallBound then some [] else generateSteps split smallPrimes16.get fuel n).bind
-    (checked n)
+/-- Generate a certificate and check it before returning (`cheap`: splitters to
+try before `split`, see `generateSteps`). -/
+def generate (split : Nat → Option Nat) (n : Nat) (fuel : Nat := 64)
+    (cheap : List (Nat → Option Nat) := []) : Option Certificate :=
+  (if n < smallBound then some [] else
+    generateSteps (cheap ++ [split]) smallPrimes16.get fuel n).bind (checked n)
 
 /-- The primality checker used by the verified factorization engine: exact
 trial division below `2^32`, otherwise a Pocklington certificate that is
 generated (untrusted) and then accepted by `Certificate.check`. Its soundness,
 `Proofs.Pocklington.oracle_sound`, rests on Pocklington's theorem. -/
-def oracle (split : Nat → Option Nat) (fuel : Nat := 64) (n : Nat) : Bool :=
+def oracle (split : Nat → Option Nat) (fuel : Nat := 64) (n : Nat)
+    (cheap : List (Nat → Option Nat) := []) : Bool :=
   if n < smallBound then smallPrime n
-  else isProbablePrime n && (generate split n fuel).isSome
+  else isProbablePrime n && (generate split n fuel cheap).isSome
 
 end PrimeFactorLean.Pocklington

@@ -7,6 +7,7 @@ import PrimeFactorLean
 #print axioms PrimeFactorLean.factorSigned_total_correct
 #print axioms PrimeFactorLean.Pocklington.pocklington
 #print axioms PrimeFactorLean.Pocklington.pocklington_cube
+#print axioms PrimeFactorLean.Pocklington.plus_test
 #print axioms PrimeFactorLean.Squares.Relation.toSquares
 #print axioms PrimeFactorLean.Squares.SquareCongruence.factor_isSome
 #print axioms PrimeFactorLean.GNFS.nfs_square
@@ -37,6 +38,9 @@ run_cmd do
     ``PrimeFactorLean.Pocklington.prime_pow_dvd_sub_one,
     ``PrimeFactorLean.Pocklington.pocklington,
     ``PrimeFactorLean.Pocklington.pocklington_cube,
+    ``PrimeFactorLean.Pocklington.plus_prime_pow_dvd,
+    ``PrimeFactorLean.Pocklington.plus_test,
+    ``PrimeFactorLean.Pocklington.lucasOK_sound,
     ``PrimeFactorLean.Pocklington.Step.check_sound,
     ``PrimeFactorLean.Pocklington.Certificate.check_sound,
     ``PrimeFactorLean.Pocklington.generate_sound,

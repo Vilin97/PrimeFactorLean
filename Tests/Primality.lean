@@ -74,7 +74,7 @@ def run : IO Unit := do
     | some last =>
       let init := c.steps.dropLast
       let tamper (ws : List (Nat × Nat × Nat)) : Pocklington.Certificate :=
-        ⟨big, init ++ [⟨big, ws⟩]⟩
+        ⟨big, init ++ [{ n := big, witnesses := ws }]⟩
       require "wrong witness" (!(tamper (last.witnesses.map fun t => (t.1, t.2.1, 1))).check)
       require "too small factored part" (!(tamper (last.witnesses.take 1)).check)
       require "exponent too large"
@@ -83,6 +83,31 @@ def run : IO Unit := do
       require "unproved composite witness prime"
         (!(tamper ((last.witnesses.map fun t => (t.1 * 4294967311, t.2.1, t.2.2)))).check)
       require "different target" (!(Pocklington.Certificate.mk (big + 2) c.steps).check)
+  -- `n + 1` steps: the 76-digit factor of 7^101 - 1, whose `n - 1` cofactor is a
+  -- product of two 36-digit primes while `n + 1` = 30 · p18 · p57
+  let p76 := 1226962153072980952980067096888460031879516017670288348423584305043494594529
+  match Pocklington.generate split p76 64 (certSplitters {}) with
+  | none => throw (IO.userError "Failed to construct an n + 1 certificate")
+  | some c =>
+    require "n + 1 certificate checks" (c.n == p76 && c.check)
+    match c.steps.getLast? with
+    | none => throw (IO.userError "empty n + 1 certificate")
+    | some last =>
+      require "n + 1 step used" (!last.plus.isEmpty)
+      let init := c.steps.dropLast
+      let tamper (s : Pocklington.Step) : Pocklington.Certificate := ⟨p76, init ++ [s]⟩
+      require "n + 1: wrong witness"
+        (!(tamper { last with plus := last.plus.map fun t => (t.1, t.2.1, 0, 0) }).check)
+      require "n + 1: square D"
+        (!(tamper { last with D := 4 }).check)
+      require "n + 1: too small factored part"
+        (!(tamper { last with plus := last.plus.take 1 }).check)
+      require "n + 1: exponent too large"
+        (!(tamper { last with plus := last.plus.map fun t => (t.1, t.2.1 + 50, t.2.2) }).check)
+      require "n + 1: duplicated prime"
+        (!(tamper { last with plus := last.plus ++ last.plus }).check)
+      require "n + 1: different target"
+        (!(Pocklington.Certificate.mk (p76 + 2) c.steps).check)
   require "production factor prime" (factor .auto 1000000007 == some [1000000007])
   require "production factor Carmichael" (factor .auto 561 == some [3, 11, 17])
   let hostileOracle : Nat → Bool := fun n => (prattOracle (fun _ => [0]) (n := n)).isSome
