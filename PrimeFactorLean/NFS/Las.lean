@@ -2870,540 +2870,6 @@ def tinyAlgU (t : TinyQ) (c j i0 : UInt64) (k : Nat) (acc : Float) : Float :=
   else acc
 termination_by t.p.size - k
 
-/-- Per special-`q` data of the floating-point bounds: the tiny-prime residues,
-the basis and polynomials as floats, and the rejection limits of each side
-(`mfb`, and the gap `(lpb, 2 log₂ lim)`, each narrowed by a quarter bit). -/
-structure Bounds where
-  tq : TinyQ
-  /-- `packSmall` of each side. -/
-  tabR : Array Nat
-  tabA : Array Nat
-  /-- The basis, `Y₁`, `m`, `q` and the algebraic coefficients modulo `2^64`. -/
-  ua64 : UInt64
-  ub64 : UInt64
-  va64 : UInt64
-  vb64 : UInt64
-  y1U : UInt64
-  mU : UInt64
-  qU : UInt64
-  cs64 : Array UInt64
-  /-- `lpb`, `mfb` and `lim²` of each side as words. -/
-  lpbR : UInt64
-  mfbR : UInt64
-  lim2R : UInt64
-  lpbA : UInt64
-  mfbA : UInt64
-  lim2A : UInt64
-  cs : FloatArray
-  uaf : Float
-  ubf : Float
-  vaf : Float
-  vbf : Float
-  mF : Float
-  y1F : Float
-  qF : Float
-  hiR : Float
-  loR : Float
-  gapR : Float
-  hiA : Float
-  loA : Float
-  gapA : Float
-
-def mkBounds (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat) : Bounds :=
-  let tol := fc 1 / fc 4
-  let w (x : Int) : UInt64 := (x % 18446744073709551616).toNat.toUInt64
-  { tq := mkTinyQ ctx ua ub va vb, tabR := packSmall ctx.rat Rr (squareRoots ctx.rat ua ub va vb),
-    tabA := packSmall ctx.alg Ra (squareRoots ctx.alg ua ub va vb), cs := coeffsF ctx,
-    ua64 := w ua, ub64 := w ub, va64 := w va, vb64 := w vb, y1U := w ctx.base.sel.y1,
-    mU := w ctx.base.sel.m, qU := w q, cs64 := ctx.base.sel.coeffs.map w,
-    lpbR := ctx.params.lpbR.toUInt64, mfbR := ctx.params.mfbR.toUInt64,
-    lim2R := (ctx.limR * ctx.limR).toUInt64, lpbA := ctx.params.lpbA.toUInt64,
-    mfbA := ctx.params.mfbA.toUInt64, lim2A := (ctx.limA * ctx.limA).toUInt64,
-    uaf := intF ua, ubf := intF ub, vaf := intF va, vbf := intF vb,
-    mF := nf ctx.base.sel.m, y1F := nf ctx.base.sel.y1, qF := nf q,
-    hiR := nf ctx.params.mfbR + tol, loR := nf ctx.params.lpbR + tol,
-    gapR := fc 2 * Float.log2 (nf ctx.limR) - tol,
-    hiA := nf ctx.params.mfbA + tol, loA := nf ctx.params.lpbA + tol,
-    gapA := fc 2 * Float.log2 (nf ctx.limA) - tol }
-
-/-- A cofactor bound (bits) above `hi` or inside the gap `(lo, gap)`. -/
-@[inline] def hopeless (est hi lo gap : Float) : Bool :=
-  est > hi || (est > lo && est < gap)
-
-/-- The floating-point bounds (bits) of the rational and algebraic cofactors at
-`pos` (the latter only when `rat` is false). -/
-def cofactorBound (ctx : LasCtx) (bd : Bounds) (rat : Bool) (list : List Nat) (pos : Nat) : Float :=
-  let I := ctx.I
-  let j := pos / I
-  let c := pos % I
-  let iF := nf c - nf (I / 2)
-  let jF := nf j
-  let aF := iF * bd.uaf + jF * bd.vaf
-  let bF := iF * bd.ubf + jF * bd.vbf
-  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
-  let x0 := cU - IU / 2
-  if rat then
-    let side := ctx.rat
-    Float.log2 ((bd.y1F * aF - bd.mF * bF).abs + fc 1) - tinyRatU bd.tq cU jU (IU / 2) 0 (fc 0) -
-      smallLogsP bd.tabR side.pinvLim side.lg2 side.sieveStart x0 jU IU 0 (fc 0) -
-      list.foldl (fun acc k => acc + side.lg2.get! k) (fc 0)
-  else
-    let d := bd.cs.size - 1
-    let side := ctx.alg
-    Float.log2 ((homEvalFA bd.cs aF bF d (bd.cs.get! d) (fc 1)).abs / bd.qF + fc 1) -
-      tinyAlgU bd.tq cU jU (IU / 2) 0 (fc 0) -
-      smallLogsP bd.tabA side.pinvLim side.lg2 side.sieveStart x0 jU IU 0 (fc 0) -
-      list.foldl (fun acc k => acc + side.lg2.get! k) (fc 0)
-
-/-- `factorSurvivor2` behind the floating-point cofactor bounds of both sides. -/
-def factorSurvivor3 (ctx : LasCtx) (bd : Bounds) (q ρ : Nat) (ua ub va vb : Int)
-    (Rr Ra : Array Nat) (listR listA : List Nat) (pos : Nat) : Option Rel :=
-  if hopeless (cofactorBound ctx bd true listR pos) bd.hiR bd.loR bd.gapR then none
-  else if hopeless (cofactorBound ctx bd false listA pos) bd.hiA bd.loA bd.gapA then none
-  else factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listR listA pos
-
-/-! ### Cofactors modulo `2^64`
-
-Four in five survivors fail the cheap checks of `factorSurvivor2`, most of them
-because their cofactor (40 to 48 bits, no factor below the factor-base bound) is
-prime, which the floating-point bound cannot see. The cofactor itself fits in a
-machine word: the norm modulo `2^64` (wrapping arithmetic), shifted by the power
-of 2 and multiplied by the inverse of the found odd prime powers, is the
-cofactor modulo `2^(64 - v₂)`. It is trusted only when its logarithm matches the
-floating-point bound (a missed power would give an unrelated word), and then
-classified like `cofactorClass` (with the base-2 probable-prime screen). Only
-survivors that pass on both sides are factored with big numbers. -/
-
-/-- `Σ log₂ p` and `Π p mod 2^64` over the found ideals. -/
-structure LogProd where
-  lg : Float
-  prod : UInt64
-
-/-- `smallLogsP` that also multiplies the found primes (squares twice). -/
-def smallScan (tab pl : Array Nat) (lg2 : FloatArray) (off : Nat) (x0 j I : UInt64) (k : Nat)
-    (acc : Float) (pr : UInt64) : LogProd :=
-  if h : k < tab.size ∧ k < pl.size then
-    let w := tab[k].toUInt64
-    let p := w &&& 4095
-    let r := (w >>> 12) &&& 4095
-    let v := pl[k].toUInt64
-    let hit := if r ≥ p then j % p == 0
-      else (x0 + I * p - j * r).toUInt32 * v.toUInt32 ≤ (v >>> 32).toUInt32
-    if hit then
-      let lg := lg2.get! (off + k)
-      let M := p * p
-      let r2 := w >>> 24
-      if r < p && r2 < M && (x0 + I * M - j * r2) % M == 0 then
-        smallScan tab pl lg2 off x0 j I (k + 1) (acc + lg + lg) (pr * M)
-      else smallScan tab pl lg2 off x0 j I (k + 1) (acc + lg) (pr * p)
-    else smallScan tab pl lg2 off x0 j I (k + 1) acc pr
-  else ⟨acc, pr⟩
-termination_by tab.size - k
-
-/-- The tiny primes' part of a norm: `Σ v_p log₂ p`, `Π_{p odd} p^{v_p} mod 2^64`
-and `v₂`. -/
-structure TinyPart where
-  lg : Float
-  prod : UInt64
-  v2 : UInt64
-
-/-- `p^e` modulo `2^64`. -/
-def powU (p : UInt64) : Nat → UInt64
-  | 0 => 1
-  | e + 1 => p * powU p e
-
-/-- The tiny part of the rational norm at column `c` of row `j` (`i0 = I/2`). -/
-def tinyRatP (t : TinyQ) (c j i0 : UInt64) (k : Nat) (lg : Float) (pr v2 : UInt64) : TinyPart :=
-  if k < t.p.size then
-    let P := t.P[k]!.toUInt64
-    let p := t.p[k]!.toUInt64
-    let i := (c + P - i0 % P) % P
-    let r := (i * t.rA[k]!.toUInt64 + j * t.rB[k]!.toUInt64) % P
-    let v := valU r p 0 t.K[k]!
-    let lg := lg + nf v * t.lg.get! k
-    if p == 2 then tinyRatP t c j i0 (k + 1) lg pr v.toUInt64
-    else tinyRatP t c j i0 (k + 1) lg (pr * powU p v) v2
-  else ⟨lg, pr, v2⟩
-termination_by t.p.size - k
-
-/-- The tiny part of the algebraic norm (`i0 = I/2`). -/
-def tinyAlgP (t : TinyQ) (c j i0 : UInt64) (k : Nat) (lg : Float) (pr v2 : UInt64) : TinyPart :=
-  if k < t.p.size then
-    let P := t.P[k]!.toUInt64
-    let p := t.p[k]!.toUInt64
-    let i := (c + P - i0 % P) % P
-    let a := (i * t.ua[k]!.toUInt64 + j * t.va[k]!.toUInt64) % P
-    let b := (i * t.ub[k]!.toUInt64 + j * t.vb[k]!.toUInt64) % P
-    let cs := t.cs[k]!
-    let d := cs.size - 1
-    let v := valU (hornerMod cs a b P d (cs[d]!.toUInt64 % P) 1) p 0 t.K[k]!
-    let lg := lg + nf v * t.lg.get! k
-    if p == 2 then tinyAlgP t c j i0 (k + 1) lg pr v.toUInt64
-    else tinyAlgP t c j i0 (k + 1) lg (pr * powU p v) v2
-  else ⟨lg, pr, v2⟩
-termination_by t.p.size - k
-
-/-- `x⁻¹ mod 2^64` for odd `x` (Newton's iteration; `x` is its own inverse
-modulo 8). -/
-@[inline] def inv64 (x : UInt64) : UInt64 :=
-  let y := x * (2 - x * x)
-  let y := y * (2 - x * y)
-  let y := y * (2 - x * y)
-  let y := y * (2 - x * y)
-  y * (2 - x * y)
-
-/-- `F(a, b) mod 2^64` (Horner from the top, as `hornerMod`). -/
-def hornerU (cs : Array UInt64) (a b : UInt64) : Nat → UInt64 → UInt64 → UInt64
-  | 0, acc, _ => acc
-  | k + 1, acc, bp =>
-    let bp := bp * b
-    hornerU cs a b k (acc * a + cs[k]! * bp) bp
-
-/-- `cofactorClass` on a word. -/
-@[inline] def cofactorClassU (u lpb mfb lim2 : UInt64) : Nat :=
-  if u == 1 then 1
-  else if u >>> mfb != 0 then 0
-  else if u >>> lpb == 0 then 1
-  else if u < lim2 then 0
-  else if u >>> 51 == 0 && u &&& 1 == 1 && sprp2 u then 0
-  else 2
-
-/-- The class of a side's cofactor from the norm modulo `2^64` (`n64`, absolute
-value), the product of the found odd prime powers and `v₂`, if the word matches
-the floating-point bound `est`; `3` (undecided) otherwise. -/
-def sideClass (est : Float) (n64 odd v2 lpb mfb lim2 : UInt64) : Nat :=
-  let u := (n64 >>> v2) * inv64 odd
-  let u := if v2 == 0 then u else u &&& ((1 <<< (64 - v2)) - 1)
-  if (Float.log2 u.toFloat - est).abs < fc 1 / fc 4 then cofactorClassU u lpb mfb lim2 else 3
-
-/-- `sideClass` with the probable-prime test left to the caller: `0` (class 0),
-`1` (class 1, 2 or undecided), or the cofactor `u ≥ lim² ≥ 2` itself when only
-`sprp2 u` decides (class 0 if it holds, 2 otherwise). -/
-def sideClassP (est : Float) (n64 odd v2 lpb mfb lim2 : UInt64) : UInt64 :=
-  let u := (n64 >>> v2) * inv64 odd
-  let u := if v2 == 0 then u else u &&& ((1 <<< (64 - v2)) - 1)
-  if (Float.log2 u.toFloat - est).abs < fc 1 / fc 4 then
-    if u == 1 then 1
-    else if u >>> mfb != 0 then 0
-    else if u >>> lpb == 0 then 1
-    else if u < lim2 then 0
-    else if u >>> 51 == 0 && u &&& 1 == 1 then (if u < 2 then 1 else u)
-    else 1
-  else 1
-
-/-- Where the word checks leave a survivor: `0`/`1` rejected by the rational
-bound or class, `2`/`3` by the algebraic ones, `4 + 2 cr' + ca'` passed (`cr'`,
-`ca'` whether the class was decided, `1`, or undecided, `0`). -/
-def survivorGate (ctx : LasCtx) (bd : Bounds) (listR listA : List Nat) (pos : Nat) : Nat :=
-  let I := ctx.I
-  let j := pos / I
-  let c := pos % I
-  let iF := nf c - nf (I / 2)
-  let jF := nf j
-  let aF := iF * bd.uaf + jF * bd.vaf
-  let bF := iF * bd.ubf + jF * bd.vbf
-  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
-  let x0 := cU - IU / 2
-  let a64 := x0 * bd.ua64 + jU * bd.va64
-  let b64 := x0 * bd.ub64 + jU * bd.vb64
-  let side := ctx.rat
-  let nF := bd.y1F * aF - bd.mF * bF
-  let tR := tinyRatP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
-  let sR := smallScan bd.tabR side.pinvLim side.lg2 side.sieveStart x0 jU IU 0 (fc 0) 1
-  let lR := listR.foldl (fun acc k => acc + side.lg2.get! k) (fc 0)
-  let estR := Float.log2 (nF.abs + fc 1) - tR.lg - sR.lg - lR
-  if hopeless estR bd.hiR bd.loR bd.gapR then 0
-  else
-    let n64 := bd.y1U * a64 - bd.mU * b64
-    let pR := listR.foldl (fun acc k => acc * side.primes[k]!.toUInt64) 1
-    let cr := sideClass estR (if nF < fc 0 then -n64 else n64) (tR.prod * sR.prod * pR) tR.v2
-      bd.lpbR bd.mfbR bd.lim2R
-    if cr == 0 then 1
-    else
-      let d := bd.cs.size - 1
-      let sideA := ctx.alg
-      let fF := homEvalFA bd.cs aF bF d (bd.cs.get! d) (fc 1)
-      let tA := tinyAlgP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
-      let sA := smallScan bd.tabA sideA.pinvLim sideA.lg2 sideA.sieveStart x0 jU IU 0 (fc 0) 1
-      let lA := listA.foldl (fun acc k => acc + sideA.lg2.get! k) (fc 0)
-      let estA := Float.log2 (fF.abs / bd.qF + fc 1) - tA.lg - sA.lg - lA
-      if hopeless estA bd.hiA bd.loA bd.gapA then 2
-      else
-        let f64 := hornerU bd.cs64 a64 b64 d (bd.cs64[d]!) 1
-        let pA := listA.foldl (fun acc k => acc * sideA.primes[k]!.toUInt64) 1
-        let ca := sideClass estA (if fF < fc 0 then -f64 else f64)
-          (bd.qU * tA.prod * sA.prod * pA) tA.v2 bd.lpbA bd.mfbA bd.lim2A
-        if ca == 0 then 3
-        else 4 + 2 * (if cr == 3 then 0 else 1) + (if ca == 3 then 0 else 1)
-
-/-- `factorSurvivor2` behind `survivorGate`. -/
-def factorSurvivor4 (ctx : LasCtx) (bd : Bounds) (q ρ : Nat) (ua ub va vb : Int)
-    (Rr Ra : Array Nat) (listR listA : List Nat) (pos : Nat) : Option Rel :=
-  if survivorGate ctx bd listR listA pos < 4 then none
-  else factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listR listA pos
-
-
-/-! ### The gate over all survivors at once
-
-`survivorGate` scans the small ideals once per survivor (some 560 ideals per
-side at 100 digits, 2.6 ns each: 5.4 ms per special-`q` on the rational side).
-`gateAll` turns the loops around: each small ideal scans every survivor, with
-its constants in registers and a handful of word operations per survivor. -/
-
-/-- The survivors `[s, …)` (positions `j I + c`) in the progression of the
-small ideal `(p, r)`, `r < p`: `log₂ p` added into `lgs` and `p` multiplied into
-`prs` (twice and `p²` when the root `r2` modulo `p²` matches as well, `r2 < p²`).
-With `K = I p - I/2`, `y = c + K - j r` is the exact positive value
-`x₀ + I p - j r` of `smallScan`, divisible by `p` iff `y p⁻¹ ≤ lim (mod 2^32)`. -/
-def scanIdeal (survs : Array Nat) (mask logI half p r r2 K : UInt64) (pinv lim : UInt32)
-    (lg : Float) (s : Nat) (lgs : FloatArray) (prs : Array UInt64) :
-    FloatArray × Array UInt64 :=
-  if h : s < survs.size then
-    let pos := survs[s].toUInt64
-    let c := pos &&& mask
-    let j := pos >>> logI
-    if (c + K - j * r).toUInt32 * pinv ≤ lim then
-      let M := p * p
-      let sq := r2 < M && (c + (M <<< logI) - half - j * r2) % M == 0
-      scanIdeal survs mask logI half p r r2 K pinv lim lg (s + 1)
-        (lgs.set! s (lgs.get! s + (if sq then lg + lg else lg)))
-        (prs.set! s (prs[s]! * (if sq then M else p)))
-    else scanIdeal survs mask logI half p r r2 K pinv lim lg (s + 1) lgs prs
-  else (lgs, prs)
-termination_by survs.size - s
-
-/-- A degenerate small ideal (`R ≥ p`): it divides the norm exactly on the rows
-`j ≡ 0 (mod p)`. -/
-def scanRows (survs : Array Nat) (logI p : UInt64) (lg : Float) (s : Nat) (lgs : FloatArray)
-    (prs : Array UInt64) : FloatArray × Array UInt64 :=
-  if h : s < survs.size then
-    if (survs[s].toUInt64 >>> logI) % p == 0 then
-      scanRows survs logI p lg (s + 1) (lgs.set! s (lgs.get! s + lg)) (prs.set! s (prs[s]! * p))
-    else scanRows survs logI p lg (s + 1) lgs prs
-  else (lgs, prs)
-termination_by survs.size - s
-
-/-- `smallScan` at every survivor, ideal by ideal (`tab`, `pl`, `lg2`, `off` as
-for `smallScan`): the sums of logarithms and the products modulo `2^64`. -/
-def smallScanAll (tab pl : Array Nat) (lg2 : FloatArray) (off : Nat) (survs : Array Nat)
-    (I logI : UInt64) : FloatArray × Array UInt64 := Id.run do
-  let n := survs.size
-  let mut lgs : FloatArray := FloatArray.emptyWithCapacity n
-  for _ in [0:n] do lgs := lgs.push (fc 0)
-  let mut prs : Array UInt64 := Array.replicate n 1
-  let mask := I - 1
-  let half := I / 2
-  for k in [0:min tab.size pl.size] do
-    let w := tab[k]!.toUInt64
-    let p := w &&& 4095
-    let r := (w >>> 12) &&& 4095
-    let lg := lg2.get! (off + k)
-    if r ≥ p then
-      (lgs, prs) := scanRows survs logI p lg 0 lgs prs
-    else
-      let v := pl[k]!.toUInt64
-      (lgs, prs) := scanIdeal survs mask logI half p r (w >>> 24) (I * p - half) v.toUInt32
-        (v >>> 32).toUInt32 lg 0 lgs prs
-  return (lgs, prs)
-
-/-- The resieve records `pos <<< 24 ||| k` of the survivors without per-survivor
-lists: each record's survivor (located as in `groupLabelled`) into `idx`, and the
-counts into `cnt[s + 1]` (tail recursive: no loop state to allocate). -/
-def countRecs (I : Nat) (survs : Array Nat) (lab : ByteArray) (rowStart recs : Array Nat) (i : Nat)
-    (idx cnt : Array Nat) : Array Nat × Array Nat :=
-  if h : i < recs.size then
-    let pos := recs[i] >>> 24
-    let v := (lab.get! pos).toNat
-    let c := if v < 255 then rowStart[pos / I]! + v - 1 else SIQS.findCand survs pos
-    countRecs I survs lab rowStart recs (i + 1) (idx.push c)
-      (if c < survs.size then cnt.modify (c + 1) (· + 1) else cnt)
-  else (idx, cnt)
-termination_by recs.size - i
-
-/-- Place each record's ideal at its survivor's cursor. -/
-def placeRecs (survs recs idx : Array Nat) (i : Nat) (ks cur : Array Nat) : Array Nat :=
-  if h : i < recs.size then
-    let c := idx[i]!
-    if c < survs.size then
-      let slot := cur[c]!
-      placeRecs survs recs idx (i + 1) (ks.set! slot (recs[i] &&& 0xFFFFFF)) (cur.set! c (slot + 1))
-    else placeRecs survs recs idx (i + 1) ks cur
-  else ks
-termination_by recs.size - i
-
-/-- The ideals of the resieve records grouped by survivor as `(off, ks)`: those of
-survivor `s` are `ks[off[s]], …, ks[off[s + 1] - 1]` (`groupLabelled` without its
-lists, one allocation per survivor and record fewer). -/
-def groupFlat (ctx : LasCtx) (survs : Array Nat) (lab : ByteArray) (rowStart recs : Array Nat) :
-    Array Nat × Array Nat := Id.run do
-  let n := survs.size
-  let (idx, cnt) := countRecs ctx.I survs lab rowStart recs 0 (Array.mkEmpty recs.size)
-    (Array.replicate (n + 1) 0)
-  let mut off := cnt
-  for s in [0:n] do off := off.set! (s + 1) (off[s + 1]! + off[s]!)
-  return (off, placeRecs survs recs idx 0 (Array.replicate off[n]! 0) off)
-
-/-- `Σ log₂ p` over the ideals `ks[lo], …, ks[hi - 1]`. -/
-def rangeLog (lg2 : FloatArray) (ks : Array Nat) (lo hi : Nat) (acc : Float) : Float :=
-  if lo < hi then rangeLog lg2 ks (lo + 1) hi (acc + lg2.get! ks[lo]!) else acc
-termination_by hi - lo
-
-/-- `∏ p mod 2^64` over the ideals `ks[lo], …, ks[hi - 1]`. -/
-def rangeProd (primes : Array Nat) (ks : Array Nat) (lo hi : Nat) (acc : UInt64) : UInt64 :=
-  if lo < hi then rangeProd primes ks (lo + 1) hi (acc * primes[ks[lo]!]!.toUInt64) else acc
-termination_by hi - lo
-
-/-- The rational half of `survivorGate` with the small ideals' part given
-(`sLg`, `sPr` from `smallScanAll`), the probable-prime test left to the caller
-(`sideClassP`): `0` fails, `1` passes, `u ≥ 2` passes unless `sprp2 u`. -/
-def ratPre (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
-    (sPr : UInt64) : UInt64 :=
-  let I := ctx.I
-  let j := pos / I
-  let c := pos % I
-  let iF := nf c - nf (I / 2)
-  let jF := nf j
-  let aF := iF * bd.uaf + jF * bd.vaf
-  let bF := iF * bd.ubf + jF * bd.vbf
-  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
-  let x0 := cU - IU / 2
-  let a64 := x0 * bd.ua64 + jU * bd.va64
-  let b64 := x0 * bd.ub64 + jU * bd.vb64
-  let side := ctx.rat
-  let nF := bd.y1F * aF - bd.mF * bF
-  let tR := tinyRatP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
-  let lR := rangeLog side.lg2 ks lo hi (fc 0)
-  let estR := Float.log2 (nF.abs + fc 1) - tR.lg - sLg - lR
-  if hopeless estR bd.hiR bd.loR bd.gapR then 0
-  else
-    let n64 := bd.y1U * a64 - bd.mU * b64
-    let pR := rangeProd side.primes ks lo hi 1
-    sideClassP estR (if nF < fc 0 then -n64 else n64) (tR.prod * sPr * pR) tR.v2
-      bd.lpbR bd.mfbR bd.lim2R
-
-/-- Whether a gate code (`ratPre`, `algPre`) passes, the probable-prime test done. -/
-@[inline] def codePasses (c : UInt64) : Bool := c == 1 || (c ≥ 2 && !SIQS.sprp2 c)
-
-/-- The rational half of `survivorGate` (`ratPre` with its probable-prime test). -/
-def ratPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
-    (sPr : UInt64) : Bool :=
-  codePasses (ratPre ctx bd ks lo hi pos sLg sPr)
-
-/-- The algebraic half of `survivorGate` (as `ratPre`). -/
-def algPre (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
-    (sPr : UInt64) : UInt64 :=
-  let I := ctx.I
-  let j := pos / I
-  let c := pos % I
-  let iF := nf c - nf (I / 2)
-  let jF := nf j
-  let aF := iF * bd.uaf + jF * bd.vaf
-  let bF := iF * bd.ubf + jF * bd.vbf
-  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
-  let x0 := cU - IU / 2
-  let a64 := x0 * bd.ua64 + jU * bd.va64
-  let b64 := x0 * bd.ub64 + jU * bd.vb64
-  let d := bd.cs.size - 1
-  let sideA := ctx.alg
-  let fF := homEvalFA bd.cs aF bF d (bd.cs.get! d) (fc 1)
-  let tA := tinyAlgP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
-  let lA := rangeLog sideA.lg2 ks lo hi (fc 0)
-  let estA := Float.log2 (fF.abs / bd.qF + fc 1) - tA.lg - sLg - lA
-  if hopeless estA bd.hiA bd.loA bd.gapA then 0
-  else
-    let f64 := hornerU bd.cs64 a64 b64 d (bd.cs64[d]!) 1
-    let pA := rangeProd sideA.primes ks lo hi 1
-    sideClassP estA (if fF < fc 0 then -f64 else f64) (bd.qU * tA.prod * sPr * pA) tA.v2
-      bd.lpbA bd.mfbA bd.lim2A
-
-/-- The algebraic half of `survivorGate` (`algPre` with its probable-prime test). -/
-def algPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
-    (sPr : UInt64) : Bool :=
-  codePasses (algPre ctx bd ks lo hi pos sLg sPr)
-
-/-- The indices of the survivors that pass `survivorGate` (the same decisions),
-each side's small ideals scanned over all its survivors at once: the rational
-side over every survivor, the algebraic side over those that passed it. The
-resieved ideals come grouped by `groupFlat`. -/
-def gateAll (ctx : LasCtx) (bd : Bounds) (survs : Array Nat) (offR ksR offA ksA : Array Nat) :
-    Array Nat := Id.run do
-  let IU := ctx.I.toUInt64
-  let logI := ctx.params.logI.toUInt64
-  let side := ctx.rat
-  let (lgR, prR) := smallScanAll bd.tabR side.pinvLim side.lg2 side.sieveStart survs IU logI
-  let mut codes : Array Nat := Array.mkEmpty survs.size
-  for s in [0:survs.size] do
-    codes := codes.push (ratPre ctx bd ksR offR[s]! offR[s + 1]! survs[s]! (lgR.get! s) prR[s]!).toNat
-  let idx := passing codes
-  let sideA := ctx.alg
-  let (lgA, prA) := smallScanAll bd.tabA sideA.pinvLim sideA.lg2 sideA.sieveStart
-    (idx.map (survs[·]!)) IU logI
-  let mut codesA : Array Nat := Array.mkEmpty idx.size
-  for t in [0:idx.size] do
-    let s := idx[t]!
-    codesA := codesA.push (algPre ctx bd ksA offA[s]! offA[s + 1]! survs[s]! (lgA.get! t) prA[t]!).toNat
-  return (passing codesA).map (idx[·]!)
-where
-  /-- The indices whose gate code passes (`codePasses`), in increasing order:
-  the pending probable-prime tests four at a time (`SIQS.sprp2x4`). -/
-  passing (codes : Array Nat) : Array Nat := Id.run do
-    let pend := (Array.range codes.size).filter (codes[·]! ≥ 2)
-    let mut ok : ByteArray := ByteArray.emptyWithCapacity pend.size
-    let mut i := 0
-    while i + 4 ≤ pend.size do
-      let m := SIQS.sprp2x4 codes[pend[i]!]!.toUInt64 codes[pend[i + 1]!]!.toUInt64
-        codes[pend[i + 2]!]!.toUInt64 codes[pend[i + 3]!]!.toUInt64
-      ok := ((ok.push (m &&& 1).toUInt8).push ((m >>> 1) &&& 1).toUInt8).push
-        ((m >>> 2) &&& 1).toUInt8 |>.push ((m >>> 3) &&& 1).toUInt8
-      i := i + 4
-    while i < pend.size do
-      ok := ok.push (if SIQS.sprp2 codes[pend[i]!]!.toUInt64 then 1 else 0)
-      i := i + 1
-    -- merge: the passes and the composite pending ones, by index
-    let mut out : Array Nat := Array.mkEmpty codes.size
-    let mut t := 0
-    for s in [0:codes.size] do
-      let c := codes[s]!
-      if c == 1 then out := out.push s
-      else if c ≥ 2 then
-        if ok.get! t == 0 then out := out.push s
-        t := t + 1
-    return out
-
-/-- The resieved ideals of survivor `s` as a list (for `factorSurvivor2`). -/
-@[inline] def idealsOf (off ks : Array Nat) (s : Nat) : List Nat :=
-  (ks.extract off[s]! off[s + 1]!).toList
-
-/-! ## The production sievers (survivors through `gateAll`) -/
-
-/-- `processQ11` with the reduced bases of the large ideals cached for the resieve. -/
-def processQ12 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
-  let ⟨b1, b2, bits⟩ := sc
-  let (u, v) := reduceLattice q ρ ctx.skew
-  let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
-  let len := ctx.I * ctx.J
-  let Rr := latticeRoots ctx.rat ua ub va vb
-  let Ra := latticeRoots ctx.alg ua ub va vb
-  let thrR := rowThresholds ctx q ua ub va vb ctx.params.mfbR false
-  let thrA := rowThresholds ctx q ua ub va vb ctx.params.mfbA true
-  let (bufR, Rr) := sieveLargePaired ctx ctx.rat Rr (lineSieveSide ctx ctx.rat Rr (fillRows ctx b1 thrR))
-  let (bufA, Ra) := sieveLargePaired ctx ctx.alg Ra (lineSieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA))
-  let surv := prefilterRows ctx q ua ub va vb thrR thrA bufR bufA
-    (dropSmallGcd ctx (survivors bufR bufA len))
-  if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
-  let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
-  let bits := markBits bits surv true
-  let (offR, ksR) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
-  let (offA, ksA) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
-  let bits := markBits bits surv false
-  let bd := mkBounds ctx q ua ub va vb Rr Ra
-  let mut rels : Array Rel := #[]
-  for k in gateAll ctx bd surv offR ksR offA ksA do
-    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra (idealsOf offR ksR k)
-        (idealsOf offA ksA k) surv[k]! then
-      rels := rels.push rel
-  return (rels, ⟨bufR, lab, bits⟩)
-
 /-! ### Exact tiny-prime bits at the candidates (`tinyT`)
 
 The tiny primes (below `sieveFrom`) contribute very unequally to algebraic norms
@@ -3537,6 +3003,632 @@ def mkTinyF (ctx : LasCtx) (ua ub va vb : Int) : TinyF :=
   let M := t.M
   let mi := t.mi
   montMul (addModU (addModU (montMul c r.1 M mi) (montMul j r.2.1 M mi) M) r.2.2 M) 1 M mi
+
+/-- Per special-`q` data of the floating-point bounds: the tiny-prime residues,
+the basis and polynomials as floats, and the rejection limits of each side
+(`mfb`, and the gap `(lpb, 2 log₂ lim)`, each narrowed by a quarter bit). -/
+structure Bounds where
+  tq : TinyQ
+  /-- The residues of the exact tiny-prime bits (`tinyRatF`, `tinyAlgF`). -/
+  tf : TinyF
+  /-- `packSmall` of each side. -/
+  tabR : Array Nat
+  tabA : Array Nat
+  /-- The basis, `Y₁`, `m`, `q` and the algebraic coefficients modulo `2^64`. -/
+  ua64 : UInt64
+  ub64 : UInt64
+  va64 : UInt64
+  vb64 : UInt64
+  y1U : UInt64
+  mU : UInt64
+  qU : UInt64
+  cs64 : Array UInt64
+  /-- `lpb`, `mfb` and `lim²` of each side as words. -/
+  lpbR : UInt64
+  mfbR : UInt64
+  lim2R : UInt64
+  lpbA : UInt64
+  mfbA : UInt64
+  lim2A : UInt64
+  cs : FloatArray
+  uaf : Float
+  ubf : Float
+  vaf : Float
+  vbf : Float
+  mF : Float
+  y1F : Float
+  qF : Float
+  hiR : Float
+  loR : Float
+  gapR : Float
+  hiA : Float
+  loA : Float
+  gapA : Float
+
+def mkBounds (ctx : LasCtx) (q : Nat) (ua ub va vb : Int) (Rr Ra : Array Nat) : Bounds :=
+  let tol := fc 1 / fc 4
+  let w (x : Int) : UInt64 := (x % 18446744073709551616).toNat.toUInt64
+  { tq := mkTinyQ ctx ua ub va vb, tf := mkTinyF ctx ua ub va vb,
+    tabR := packSmall ctx.rat Rr (squareRoots ctx.rat ua ub va vb),
+    tabA := packSmall ctx.alg Ra (squareRoots ctx.alg ua ub va vb), cs := coeffsF ctx,
+    ua64 := w ua, ub64 := w ub, va64 := w va, vb64 := w vb, y1U := w ctx.base.sel.y1,
+    mU := w ctx.base.sel.m, qU := w q, cs64 := ctx.base.sel.coeffs.map w,
+    lpbR := ctx.params.lpbR.toUInt64, mfbR := ctx.params.mfbR.toUInt64,
+    lim2R := (ctx.limR * ctx.limR).toUInt64, lpbA := ctx.params.lpbA.toUInt64,
+    mfbA := ctx.params.mfbA.toUInt64, lim2A := (ctx.limA * ctx.limA).toUInt64,
+    uaf := intF ua, ubf := intF ub, vaf := intF va, vbf := intF vb,
+    mF := nf ctx.base.sel.m, y1F := nf ctx.base.sel.y1, qF := nf q,
+    hiR := nf ctx.params.mfbR + tol, loR := nf ctx.params.lpbR + tol,
+    gapR := fc 2 * Float.log2 (nf ctx.limR) - tol,
+    hiA := nf ctx.params.mfbA + tol, loA := nf ctx.params.lpbA + tol,
+    gapA := fc 2 * Float.log2 (nf ctx.limA) - tol }
+
+/-- A cofactor bound (bits) above `hi` or inside the gap `(lo, gap)`. -/
+@[inline] def hopeless (est hi lo gap : Float) : Bool :=
+  est > hi || (est > lo && est < gap)
+
+/-- The floating-point bounds (bits) of the rational and algebraic cofactors at
+`pos` (the latter only when `rat` is false). -/
+def cofactorBound (ctx : LasCtx) (bd : Bounds) (rat : Bool) (list : List Nat) (pos : Nat) : Float :=
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let iF := nf c - nf (I / 2)
+  let jF := nf j
+  let aF := iF * bd.uaf + jF * bd.vaf
+  let bF := iF * bd.ubf + jF * bd.vbf
+  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
+  let x0 := cU - IU / 2
+  if rat then
+    let side := ctx.rat
+    Float.log2 ((bd.y1F * aF - bd.mF * bF).abs + fc 1) - tinyRatU bd.tq cU jU (IU / 2) 0 (fc 0) -
+      smallLogsP bd.tabR side.pinvLim side.lg2 side.sieveStart x0 jU IU 0 (fc 0) -
+      list.foldl (fun acc k => acc + side.lg2.get! k) (fc 0)
+  else
+    let d := bd.cs.size - 1
+    let side := ctx.alg
+    Float.log2 ((homEvalFA bd.cs aF bF d (bd.cs.get! d) (fc 1)).abs / bd.qF + fc 1) -
+      tinyAlgU bd.tq cU jU (IU / 2) 0 (fc 0) -
+      smallLogsP bd.tabA side.pinvLim side.lg2 side.sieveStart x0 jU IU 0 (fc 0) -
+      list.foldl (fun acc k => acc + side.lg2.get! k) (fc 0)
+
+/-- `factorSurvivor2` behind the floating-point cofactor bounds of both sides. -/
+def factorSurvivor3 (ctx : LasCtx) (bd : Bounds) (q ρ : Nat) (ua ub va vb : Int)
+    (Rr Ra : Array Nat) (listR listA : List Nat) (pos : Nat) : Option Rel :=
+  if hopeless (cofactorBound ctx bd true listR pos) bd.hiR bd.loR bd.gapR then none
+  else if hopeless (cofactorBound ctx bd false listA pos) bd.hiA bd.loA bd.gapA then none
+  else factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listR listA pos
+
+/-! ### Cofactors modulo `2^64`
+
+Four in five survivors fail the cheap checks of `factorSurvivor2`, most of them
+because their cofactor (40 to 48 bits, no factor below the factor-base bound) is
+prime, which the floating-point bound cannot see. The cofactor itself fits in a
+machine word: the norm modulo `2^64` (wrapping arithmetic), shifted by the power
+of 2 and multiplied by the inverse of the found odd prime powers, is the
+cofactor modulo `2^(64 - v₂)`. It is trusted only when its logarithm matches the
+floating-point bound (a missed power would give an unrelated word), and then
+classified like `cofactorClass` (with the base-2 probable-prime screen). Only
+survivors that pass on both sides are factored with big numbers. -/
+
+/-- `Σ log₂ p` and `Π p mod 2^64` over the found ideals. -/
+structure LogProd where
+  lg : Float
+  prod : UInt64
+
+/-- `smallLogsP` that also multiplies the found primes (squares twice). -/
+def smallScan (tab pl : Array Nat) (lg2 : FloatArray) (off : Nat) (x0 j I : UInt64) (k : Nat)
+    (acc : Float) (pr : UInt64) : LogProd :=
+  if h : k < tab.size ∧ k < pl.size then
+    let w := tab[k].toUInt64
+    let p := w &&& 4095
+    let r := (w >>> 12) &&& 4095
+    let v := pl[k].toUInt64
+    let hit := if r ≥ p then j % p == 0
+      else (x0 + I * p - j * r).toUInt32 * v.toUInt32 ≤ (v >>> 32).toUInt32
+    if hit then
+      let lg := lg2.get! (off + k)
+      let M := p * p
+      let r2 := w >>> 24
+      if r < p && r2 < M && (x0 + I * M - j * r2) % M == 0 then
+        smallScan tab pl lg2 off x0 j I (k + 1) (acc + lg + lg) (pr * M)
+      else smallScan tab pl lg2 off x0 j I (k + 1) (acc + lg) (pr * p)
+    else smallScan tab pl lg2 off x0 j I (k + 1) acc pr
+  else ⟨acc, pr⟩
+termination_by tab.size - k
+
+/-- The tiny primes' part of a norm: `Σ v_p log₂ p`, `Π_{p odd} p^{v_p} mod 2^64`
+and `v₂`. -/
+structure TinyPart where
+  lg : Float
+  prod : UInt64
+  v2 : UInt64
+
+/-- `p^e` modulo `2^64`. -/
+def powU (p : UInt64) : Nat → UInt64
+  | 0 => 1
+  | e + 1 => p * powU p e
+
+/-- The tiny part of the rational norm at column `c` of row `j` (`i0 = I/2`). -/
+def tinyRatP (t : TinyQ) (c j i0 : UInt64) (k : Nat) (lg : Float) (pr v2 : UInt64) : TinyPart :=
+  if k < t.p.size then
+    let P := t.P[k]!.toUInt64
+    let p := t.p[k]!.toUInt64
+    let i := (c + P - i0 % P) % P
+    let r := (i * t.rA[k]!.toUInt64 + j * t.rB[k]!.toUInt64) % P
+    let v := valU r p 0 t.K[k]!
+    let lg := lg + nf v * t.lg.get! k
+    if p == 2 then tinyRatP t c j i0 (k + 1) lg pr v.toUInt64
+    else tinyRatP t c j i0 (k + 1) lg (pr * powU p v) v2
+  else ⟨lg, pr, v2⟩
+termination_by t.p.size - k
+
+/-- The tiny part of the algebraic norm (`i0 = I/2`). -/
+def tinyAlgP (t : TinyQ) (c j i0 : UInt64) (k : Nat) (lg : Float) (pr v2 : UInt64) : TinyPart :=
+  if k < t.p.size then
+    let P := t.P[k]!.toUInt64
+    let p := t.p[k]!.toUInt64
+    let i := (c + P - i0 % P) % P
+    let a := (i * t.ua[k]!.toUInt64 + j * t.va[k]!.toUInt64) % P
+    let b := (i * t.ub[k]!.toUInt64 + j * t.vb[k]!.toUInt64) % P
+    let cs := t.cs[k]!
+    let d := cs.size - 1
+    let v := valU (hornerMod cs a b P d (cs[d]!.toUInt64 % P) 1) p 0 t.K[k]!
+    let lg := lg + nf v * t.lg.get! k
+    if p == 2 then tinyAlgP t c j i0 (k + 1) lg pr v.toUInt64
+    else tinyAlgP t c j i0 (k + 1) lg (pr * powU p v) v2
+  else ⟨lg, pr, v2⟩
+termination_by t.p.size - k
+
+/-- The tiny part of a norm (`TinyPart`, as `tinyRatP`/`tinyAlgP` compute it)
+from its residues modulo `2^64` (`z`) and the two moduli of `TinyF` (`x1`, `x2`),
+when they decide every valuation: below the caps `3^5 5^3 7^2 11^2 13^2`, none of
+`17 … 29` dividing (`2` capped at `2^20` as there). The same sums in the same
+order, so the same part bit for bit; otherwise `slow`. -/
+@[inline] def tinyFromRes (t : TinyF) (z x1 x2 : UInt64) (slow : Unit → TinyPart) : TinyPart :=
+  let v3 := val3 x1
+  let v5 := val5 x1
+  let v7 := val7 x1
+  let v11 := val11 x1
+  let v13 := val13 x2
+  if v3 ≥ 5 || v5 ≥ 3 || v7 ≥ 2 || v11 ≥ 2 || v13 ≥ 2 || x2 % 17 == 0 || x2 % 19 == 0 ||
+      x2 % 23 == 0 || x2 % 29 == 0 then slow ()
+  else
+    let v2 := min (ctz64 z) 20
+    let l := t.lgs
+    let lg := fc 0 + nf v2 * l.get! 0
+    let lg := lg + nf v3 * l.get! 1
+    let lg := lg + nf v5 * l.get! 2
+    let lg := lg + nf v7 * l.get! 3
+    let lg := lg + nf v11 * l.get! 4
+    let lg := lg + nf v13 * l.get! 5
+    let lg := lg + fc 0 * l.get! 6
+    let lg := lg + fc 0 * l.get! 7
+    let lg := lg + fc 0 * l.get! 8
+    let lg := lg + fc 0 * l.get! 9
+    ⟨lg, powU 3 v3 * powU 5 v5 * powU 7 v7 * powU 11 v11 * powU 13 v13, v2.toUInt64⟩
+
+/-- `x⁻¹ mod 2^64` for odd `x` (Newton's iteration; `x` is its own inverse
+modulo 8). -/
+@[inline] def inv64 (x : UInt64) : UInt64 :=
+  let y := x * (2 - x * x)
+  let y := y * (2 - x * y)
+  let y := y * (2 - x * y)
+  let y := y * (2 - x * y)
+  y * (2 - x * y)
+
+/-- `F(a, b) mod 2^64` (Horner from the top, as `hornerMod`). -/
+def hornerU (cs : Array UInt64) (a b : UInt64) : Nat → UInt64 → UInt64 → UInt64
+  | 0, acc, _ => acc
+  | k + 1, acc, bp =>
+    let bp := bp * b
+    hornerU cs a b k (acc * a + cs[k]! * bp) bp
+
+/-- `tinyRatP` at column `c` of row `j` by `tinyFromRes` (`TinyF` residues). -/
+def tinyRatF (tq : TinyQ) (t : TinyF) (c j i0 : UInt64) : TinyPart :=
+  tinyFromRes t ((c - t.half) * t.rU64 + j * t.rV64) (tinyLinEval t.m1 t.r1 c j)
+    (tinyLinEval t.m2 t.r2 c j) fun _ => tinyRatP tq c j i0 0 (fc 0) 1 0
+
+/-- `tinyAlgP` by `tinyFromRes`. -/
+def tinyAlgF (tq : TinyQ) (t : TinyF) (c j i0 : UInt64) : TinyPart :=
+  let x0 := c - t.half
+  let a64 := x0 * t.ua64 + j * t.va64
+  let b64 := x0 * t.ub64 + j * t.vb64
+  let d := t.cs64.size - 1
+  tinyFromRes t (hornerU t.cs64 a64 b64 d t.cs64[d]! 1) (tinyModEval t.m1 c j)
+    (tinyModEval t.m2 c j) fun _ => tinyAlgP tq c j i0 0 (fc 0) 1 0
+
+/-- `cofactorClass` on a word. -/
+@[inline] def cofactorClassU (u lpb mfb lim2 : UInt64) : Nat :=
+  if u == 1 then 1
+  else if u >>> mfb != 0 then 0
+  else if u >>> lpb == 0 then 1
+  else if u < lim2 then 0
+  else if u >>> 51 == 0 && u &&& 1 == 1 && sprp2 u then 0
+  else 2
+
+/-- The class of a side's cofactor from the norm modulo `2^64` (`n64`, absolute
+value), the product of the found odd prime powers and `v₂`, if the word matches
+the floating-point bound `est`; `3` (undecided) otherwise. -/
+def sideClass (est : Float) (n64 odd v2 lpb mfb lim2 : UInt64) : Nat :=
+  let u := (n64 >>> v2) * inv64 odd
+  let u := if v2 == 0 then u else u &&& ((1 <<< (64 - v2)) - 1)
+  if (Float.log2 u.toFloat - est).abs < fc 1 / fc 4 then cofactorClassU u lpb mfb lim2 else 3
+
+/-- `sideClass` with the probable-prime test left to the caller: `0` (class 0),
+`1` (class 1, 2 or undecided), or the cofactor `u ≥ lim² ≥ 2` itself when only
+`sprp2 u` decides (class 0 if it holds, 2 otherwise). -/
+def sideClassP (est : Float) (n64 odd v2 lpb mfb lim2 : UInt64) : UInt64 :=
+  let u := (n64 >>> v2) * inv64 odd
+  let u := if v2 == 0 then u else u &&& ((1 <<< (64 - v2)) - 1)
+  if (Float.log2 u.toFloat - est).abs < fc 1 / fc 4 then
+    if u == 1 then 1
+    else if u >>> mfb != 0 then 0
+    else if u >>> lpb == 0 then 1
+    else if u < lim2 then 0
+    else if u >>> 51 == 0 && u &&& 1 == 1 then (if u < 2 then 1 else u)
+    else 1
+  else 1
+
+/-- Where the word checks leave a survivor: `0`/`1` rejected by the rational
+bound or class, `2`/`3` by the algebraic ones, `4 + 2 cr' + ca'` passed (`cr'`,
+`ca'` whether the class was decided, `1`, or undecided, `0`). -/
+def survivorGate (ctx : LasCtx) (bd : Bounds) (listR listA : List Nat) (pos : Nat) : Nat :=
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let iF := nf c - nf (I / 2)
+  let jF := nf j
+  let aF := iF * bd.uaf + jF * bd.vaf
+  let bF := iF * bd.ubf + jF * bd.vbf
+  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
+  let x0 := cU - IU / 2
+  let a64 := x0 * bd.ua64 + jU * bd.va64
+  let b64 := x0 * bd.ub64 + jU * bd.vb64
+  let side := ctx.rat
+  let nF := bd.y1F * aF - bd.mF * bF
+  let tR := tinyRatP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
+  let sR := smallScan bd.tabR side.pinvLim side.lg2 side.sieveStart x0 jU IU 0 (fc 0) 1
+  let lR := listR.foldl (fun acc k => acc + side.lg2.get! k) (fc 0)
+  let estR := Float.log2 (nF.abs + fc 1) - tR.lg - sR.lg - lR
+  if hopeless estR bd.hiR bd.loR bd.gapR then 0
+  else
+    let n64 := bd.y1U * a64 - bd.mU * b64
+    let pR := listR.foldl (fun acc k => acc * side.primes[k]!.toUInt64) 1
+    let cr := sideClass estR (if nF < fc 0 then -n64 else n64) (tR.prod * sR.prod * pR) tR.v2
+      bd.lpbR bd.mfbR bd.lim2R
+    if cr == 0 then 1
+    else
+      let d := bd.cs.size - 1
+      let sideA := ctx.alg
+      let fF := homEvalFA bd.cs aF bF d (bd.cs.get! d) (fc 1)
+      let tA := tinyAlgP bd.tq cU jU (IU / 2) 0 (fc 0) 1 0
+      let sA := smallScan bd.tabA sideA.pinvLim sideA.lg2 sideA.sieveStart x0 jU IU 0 (fc 0) 1
+      let lA := listA.foldl (fun acc k => acc + sideA.lg2.get! k) (fc 0)
+      let estA := Float.log2 (fF.abs / bd.qF + fc 1) - tA.lg - sA.lg - lA
+      if hopeless estA bd.hiA bd.loA bd.gapA then 2
+      else
+        let f64 := hornerU bd.cs64 a64 b64 d (bd.cs64[d]!) 1
+        let pA := listA.foldl (fun acc k => acc * sideA.primes[k]!.toUInt64) 1
+        let ca := sideClass estA (if fF < fc 0 then -f64 else f64)
+          (bd.qU * tA.prod * sA.prod * pA) tA.v2 bd.lpbA bd.mfbA bd.lim2A
+        if ca == 0 then 3
+        else 4 + 2 * (if cr == 3 then 0 else 1) + (if ca == 3 then 0 else 1)
+
+/-- `factorSurvivor2` behind `survivorGate`. -/
+def factorSurvivor4 (ctx : LasCtx) (bd : Bounds) (q ρ : Nat) (ua ub va vb : Int)
+    (Rr Ra : Array Nat) (listR listA : List Nat) (pos : Nat) : Option Rel :=
+  if survivorGate ctx bd listR listA pos < 4 then none
+  else factorSurvivor2 ctx q ρ ua ub va vb Rr Ra listR listA pos
+
+
+/-! ### The gate over all survivors at once
+
+`survivorGate` scans the small ideals once per survivor (some 560 ideals per
+side at 100 digits, 2.6 ns each: 5.4 ms per special-`q` on the rational side).
+`gateAll` turns the loops around: each small ideal scans every survivor, with
+its constants in registers and a handful of word operations per survivor. -/
+
+/-- The survivors `[s, …)` (positions `j I + c`) in the progression of the
+small ideal `(p, r)`, `r < p`: `log₂ p` added into `lgs` and `p` multiplied into
+`prs` (twice and `p²` when the root `r2` modulo `p²` matches as well, `r2 < p²`).
+With `K = I p - I/2`, `y = c + K - j r` is the exact positive value
+`x₀ + I p - j r` of `smallScan`, divisible by `p` iff `y p⁻¹ ≤ lim (mod 2^32)`. -/
+def scanIdeal (survs : Array Nat) (mask logI half p r r2 K : UInt64) (pinv lim : UInt32)
+    (lg : Float) (s : Nat) (lgs : FloatArray) (prs : Array UInt64) :
+    FloatArray × Array UInt64 :=
+  if h : s < survs.size then
+    let pos := survs[s].toUInt64
+    let c := pos &&& mask
+    let j := pos >>> logI
+    if (c + K - j * r).toUInt32 * pinv ≤ lim then
+      let M := p * p
+      let sq := r2 < M && (c + (M <<< logI) - half - j * r2) % M == 0
+      scanIdeal survs mask logI half p r r2 K pinv lim lg (s + 1)
+        (lgs.set! s (lgs.get! s + (if sq then lg + lg else lg)))
+        (prs.set! s (prs[s]! * (if sq then M else p)))
+    else scanIdeal survs mask logI half p r r2 K pinv lim lg (s + 1) lgs prs
+  else (lgs, prs)
+termination_by survs.size - s
+
+theorem usize_succ_of_lt (i n : USize) (h : i < n) : (i + 1).toNat = i.toNat + 1 := by
+  have h1 := USize.lt_iff_toNat_lt.mp h
+  have h2 : n.toNat < USize.size := n.toNat_lt_size
+  rw [USize.toNat_add]
+  have h3 : (1 : USize).toNat = 1 := by
+    show (USize.ofNat 1).toNat = 1
+    have : (USize.ofNat 1).toNat = 1 % 2 ^ System.Platform.numBits := rfl
+    rw [this]
+    apply Nat.mod_eq_of_lt
+    rcases System.Platform.numBits_eq with h | h <;> rw [h] <;> decide
+  rw [h3]
+  have h4 : n.toNat < 2 ^ System.Platform.numBits := h2
+  exact Nat.mod_eq_of_lt (by omega)
+
+theorem toUSize_toNat_le (n : Nat) : n.toUSize.toNat ≤ n := by
+  show (USize.ofNat n).toNat ≤ n
+  have : (USize.ofNat n).toNat = n % 2 ^ System.Platform.numBits := rfl
+  rw [this]
+  exact Nat.mod_le _ _
+
+/-- `scanIdeal` over the survivors `[i, n)` as 32-bit positions with a
+machine-word index: the loop of `scanIdeal` boxed and unboxed its `Nat` index
+and each position (27 instructions per survivor against about 12). -/
+def scanIdealU (survs : Array UInt32) (n : USize) (hn : n.toNat ≤ survs.size)
+    (mask logI half p r r2 K : UInt64) (pinv lim : UInt32)
+    (lg : Float) (i : USize) (lgs : FloatArray) (prs : Array UInt64) :
+    FloatArray × Array UInt64 :=
+  if h : i < n then
+    have hi : i.toNat < survs.size := Nat.lt_of_lt_of_le (USize.lt_iff_toNat_lt.mp h) hn
+    let pos := (survs.uget i hi).toUInt64
+    let c := pos &&& mask
+    let j := pos >>> logI
+    if (c + K - j * r).toUInt32 * pinv ≤ lim then
+      let M := p * p
+      let sq := r2 < M && (c + (M <<< logI) - half - j * r2) % M == 0
+      let s := i.toNat
+      scanIdealU survs n hn mask logI half p r r2 K pinv lim lg (i + 1)
+        (lgs.set! s (lgs.get! s + (if sq then lg + lg else lg)))
+        (prs.set! s (prs[s]! * (if sq then M else p)))
+    else scanIdealU survs n hn mask logI half p r r2 K pinv lim lg (i + 1) lgs prs
+  else (lgs, prs)
+termination_by n.toNat - i.toNat
+decreasing_by all_goals (rw [usize_succ_of_lt i n h]; have := USize.lt_iff_toNat_lt.mp h; omega)
+
+/-- A degenerate small ideal (`R ≥ p`): it divides the norm exactly on the rows
+`j ≡ 0 (mod p)`. -/
+def scanRows (survs : Array Nat) (logI p : UInt64) (lg : Float) (s : Nat) (lgs : FloatArray)
+    (prs : Array UInt64) : FloatArray × Array UInt64 :=
+  if h : s < survs.size then
+    if (survs[s].toUInt64 >>> logI) % p == 0 then
+      scanRows survs logI p lg (s + 1) (lgs.set! s (lgs.get! s + lg)) (prs.set! s (prs[s]! * p))
+    else scanRows survs logI p lg (s + 1) lgs prs
+  else (lgs, prs)
+termination_by survs.size - s
+
+/-- `smallScan` at every survivor, ideal by ideal (`tab`, `pl`, `lg2`, `off` as
+for `smallScan`): the sums of logarithms and the products modulo `2^64`. -/
+def smallScanAll (tab pl : Array Nat) (lg2 : FloatArray) (off : Nat) (survs : Array Nat)
+    (I logI : UInt64) : FloatArray × Array UInt64 := Id.run do
+  let n := survs.size
+  let mut lgs : FloatArray := FloatArray.emptyWithCapacity n
+  for _ in [0:n] do lgs := lgs.push (fc 0)
+  let mut prs : Array UInt64 := Array.replicate n 1
+  let mask := I - 1
+  let half := I / 2
+  let survsU : Array UInt32 := survs.map (·.toUInt32)
+  let nU := survsU.size.toUSize
+  have hn : nU.toNat ≤ survsU.size := toUSize_toNat_le _
+  for k in [0:min tab.size pl.size] do
+    let w := tab[k]!.toUInt64
+    let p := w &&& 4095
+    let r := (w >>> 12) &&& 4095
+    let lg := lg2.get! (off + k)
+    if r ≥ p then
+      (lgs, prs) := scanRows survs logI p lg 0 lgs prs
+    else
+      let v := pl[k]!.toUInt64
+      (lgs, prs) := scanIdealU survsU nU hn mask logI half p r (w >>> 24) (I * p - half)
+        v.toUInt32 (v >>> 32).toUInt32 lg 0 lgs prs
+  return (lgs, prs)
+
+/-- The resieve records `pos <<< 24 ||| k` of the survivors without per-survivor
+lists: each record's survivor (located as in `groupLabelled`) into `idx`, and the
+counts into `cnt[s + 1]` (tail recursive: no loop state to allocate). -/
+def countRecs (I : Nat) (survs : Array Nat) (lab : ByteArray) (rowStart recs : Array Nat) (i : Nat)
+    (idx cnt : Array Nat) : Array Nat × Array Nat :=
+  if h : i < recs.size then
+    let pos := recs[i] >>> 24
+    let v := (lab.get! pos).toNat
+    let c := if v < 255 then rowStart[pos / I]! + v - 1 else SIQS.findCand survs pos
+    countRecs I survs lab rowStart recs (i + 1) (idx.push c)
+      (if c < survs.size then cnt.modify (c + 1) (· + 1) else cnt)
+  else (idx, cnt)
+termination_by recs.size - i
+
+/-- Place each record's ideal at its survivor's cursor. -/
+def placeRecs (survs recs idx : Array Nat) (i : Nat) (ks cur : Array Nat) : Array Nat :=
+  if h : i < recs.size then
+    let c := idx[i]!
+    if c < survs.size then
+      let slot := cur[c]!
+      placeRecs survs recs idx (i + 1) (ks.set! slot (recs[i] &&& 0xFFFFFF)) (cur.set! c (slot + 1))
+    else placeRecs survs recs idx (i + 1) ks cur
+  else ks
+termination_by recs.size - i
+
+/-- The ideals of the resieve records grouped by survivor as `(off, ks)`: those of
+survivor `s` are `ks[off[s]], …, ks[off[s + 1] - 1]` (`groupLabelled` without its
+lists, one allocation per survivor and record fewer). -/
+def groupFlat (ctx : LasCtx) (survs : Array Nat) (lab : ByteArray) (rowStart recs : Array Nat) :
+    Array Nat × Array Nat := Id.run do
+  let n := survs.size
+  let (idx, cnt) := countRecs ctx.I survs lab rowStart recs 0 (Array.mkEmpty recs.size)
+    (Array.replicate (n + 1) 0)
+  let mut off := cnt
+  for s in [0:n] do off := off.set! (s + 1) (off[s + 1]! + off[s]!)
+  return (off, placeRecs survs recs idx 0 (Array.replicate off[n]! 0) off)
+
+/-- `Σ log₂ p` over the ideals `ks[lo], …, ks[hi - 1]`. -/
+def rangeLog (lg2 : FloatArray) (ks : Array Nat) (lo hi : Nat) (acc : Float) : Float :=
+  if lo < hi then rangeLog lg2 ks (lo + 1) hi (acc + lg2.get! ks[lo]!) else acc
+termination_by hi - lo
+
+/-- `∏ p mod 2^64` over the ideals `ks[lo], …, ks[hi - 1]`. -/
+def rangeProd (primes : Array Nat) (ks : Array Nat) (lo hi : Nat) (acc : UInt64) : UInt64 :=
+  if lo < hi then rangeProd primes ks (lo + 1) hi (acc * primes[ks[lo]!]!.toUInt64) else acc
+termination_by hi - lo
+
+/-- The rational half of `survivorGate` with the small ideals' part given
+(`sLg`, `sPr` from `smallScanAll`), the probable-prime test left to the caller
+(`sideClassP`): `0` fails, `1` passes, `u ≥ 2` passes unless `sprp2 u`. -/
+def ratPre (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
+    (sPr : UInt64) : UInt64 :=
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let iF := nf c - nf (I / 2)
+  let jF := nf j
+  let aF := iF * bd.uaf + jF * bd.vaf
+  let bF := iF * bd.ubf + jF * bd.vbf
+  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
+  let x0 := cU - IU / 2
+  let a64 := x0 * bd.ua64 + jU * bd.va64
+  let b64 := x0 * bd.ub64 + jU * bd.vb64
+  let side := ctx.rat
+  let nF := bd.y1F * aF - bd.mF * bF
+  let tR := tinyRatF bd.tq bd.tf cU jU (IU / 2)
+  let lR := rangeLog side.lg2 ks lo hi (fc 0)
+  let estR := Float.log2 (nF.abs + fc 1) - tR.lg - sLg - lR
+  if hopeless estR bd.hiR bd.loR bd.gapR then 0
+  else
+    let n64 := bd.y1U * a64 - bd.mU * b64
+    let pR := rangeProd side.primes ks lo hi 1
+    sideClassP estR (if nF < fc 0 then -n64 else n64) (tR.prod * sPr * pR) tR.v2
+      bd.lpbR bd.mfbR bd.lim2R
+
+/-- Whether a gate code (`ratPre`, `algPre`) passes, the probable-prime test done. -/
+@[inline] def codePasses (c : UInt64) : Bool := c == 1 || (c ≥ 2 && !SIQS.sprp2 c)
+
+/-- The rational half of `survivorGate` (`ratPre` with its probable-prime test). -/
+def ratPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
+    (sPr : UInt64) : Bool :=
+  codePasses (ratPre ctx bd ks lo hi pos sLg sPr)
+
+/-- The algebraic half of `survivorGate` (as `ratPre`). -/
+def algPre (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
+    (sPr : UInt64) : UInt64 :=
+  let I := ctx.I
+  let j := pos / I
+  let c := pos % I
+  let iF := nf c - nf (I / 2)
+  let jF := nf j
+  let aF := iF * bd.uaf + jF * bd.vaf
+  let bF := iF * bd.ubf + jF * bd.vbf
+  let (cU, jU, IU) := (c.toUInt64, j.toUInt64, I.toUInt64)
+  let x0 := cU - IU / 2
+  let a64 := x0 * bd.ua64 + jU * bd.va64
+  let b64 := x0 * bd.ub64 + jU * bd.vb64
+  let d := bd.cs.size - 1
+  let sideA := ctx.alg
+  let fF := homEvalFA bd.cs aF bF d (bd.cs.get! d) (fc 1)
+  let tA := tinyAlgF bd.tq bd.tf cU jU (IU / 2)
+  let lA := rangeLog sideA.lg2 ks lo hi (fc 0)
+  let estA := Float.log2 (fF.abs / bd.qF + fc 1) - tA.lg - sLg - lA
+  if hopeless estA bd.hiA bd.loA bd.gapA then 0
+  else
+    let f64 := hornerU bd.cs64 a64 b64 d (bd.cs64[d]!) 1
+    let pA := rangeProd sideA.primes ks lo hi 1
+    sideClassP estA (if fF < fc 0 then -f64 else f64) (bd.qU * tA.prod * sPr * pA) tA.v2
+      bd.lpbA bd.mfbA bd.lim2A
+
+/-- The algebraic half of `survivorGate` (`algPre` with its probable-prime test). -/
+def algPass (ctx : LasCtx) (bd : Bounds) (ks : Array Nat) (lo hi : Nat) (pos : Nat) (sLg : Float)
+    (sPr : UInt64) : Bool :=
+  codePasses (algPre ctx bd ks lo hi pos sLg sPr)
+
+/-- The indices of the survivors that pass `survivorGate` (the same decisions),
+each side's small ideals scanned over all its survivors at once: the rational
+side over every survivor, the algebraic side over those that passed it. The
+resieved ideals come grouped by `groupFlat`. -/
+def gateAll (ctx : LasCtx) (bd : Bounds) (survs : Array Nat) (offR ksR offA ksA : Array Nat) :
+    Array Nat := Id.run do
+  let IU := ctx.I.toUInt64
+  let logI := ctx.params.logI.toUInt64
+  let side := ctx.rat
+  let (lgR, prR) := smallScanAll bd.tabR side.pinvLim side.lg2 side.sieveStart survs IU logI
+  let mut codes : Array Nat := Array.mkEmpty survs.size
+  for s in [0:survs.size] do
+    codes := codes.push (ratPre ctx bd ksR offR[s]! offR[s + 1]! survs[s]! (lgR.get! s) prR[s]!).toNat
+  let idx := passing codes
+  let sideA := ctx.alg
+  let (lgA, prA) := smallScanAll bd.tabA sideA.pinvLim sideA.lg2 sideA.sieveStart
+    (idx.map (survs[·]!)) IU logI
+  let mut codesA : Array Nat := Array.mkEmpty idx.size
+  for t in [0:idx.size] do
+    let s := idx[t]!
+    codesA := codesA.push (algPre ctx bd ksA offA[s]! offA[s + 1]! survs[s]! (lgA.get! t) prA[t]!).toNat
+  return (passing codesA).map (idx[·]!)
+where
+  /-- The indices whose gate code passes (`codePasses`), in increasing order:
+  the pending probable-prime tests four at a time (`SIQS.sprp2x4`). -/
+  passing (codes : Array Nat) : Array Nat := Id.run do
+    let pend := (Array.range codes.size).filter (codes[·]! ≥ 2)
+    let mut ok : ByteArray := ByteArray.emptyWithCapacity pend.size
+    let mut i := 0
+    while i + 4 ≤ pend.size do
+      let m := SIQS.sprp2x4 codes[pend[i]!]!.toUInt64 codes[pend[i + 1]!]!.toUInt64
+        codes[pend[i + 2]!]!.toUInt64 codes[pend[i + 3]!]!.toUInt64
+      ok := ((ok.push (m &&& 1).toUInt8).push ((m >>> 1) &&& 1).toUInt8).push
+        ((m >>> 2) &&& 1).toUInt8 |>.push ((m >>> 3) &&& 1).toUInt8
+      i := i + 4
+    while i < pend.size do
+      ok := ok.push (if SIQS.sprp2 codes[pend[i]!]!.toUInt64 then 1 else 0)
+      i := i + 1
+    -- merge: the passes and the composite pending ones, by index
+    let mut out : Array Nat := Array.mkEmpty codes.size
+    let mut t := 0
+    for s in [0:codes.size] do
+      let c := codes[s]!
+      if c == 1 then out := out.push s
+      else if c ≥ 2 then
+        if ok.get! t == 0 then out := out.push s
+        t := t + 1
+    return out
+
+/-- The resieved ideals of survivor `s` as a list (for `factorSurvivor2`). -/
+@[inline] def idealsOf (off ks : Array Nat) (s : Nat) : List Nat :=
+  (ks.extract off[s]! off[s + 1]!).toList
+
+/-! ## The production sievers (survivors through `gateAll`) -/
+
+/-- `processQ11` with the reduced bases of the large ideals cached for the resieve. -/
+def processQ12 (ctx : LasCtx) (q ρ : Nat) (sc : Scratch) : Array Rel × Scratch := Id.run do
+  let ⟨b1, b2, bits⟩ := sc
+  let (u, v) := reduceLattice q ρ ctx.skew
+  let (ua, ub, va, vb) := (u.1, u.2, v.1, v.2)
+  let len := ctx.I * ctx.J
+  let Rr := latticeRoots ctx.rat ua ub va vb
+  let Ra := latticeRoots ctx.alg ua ub va vb
+  let thrR := rowThresholds ctx q ua ub va vb ctx.params.mfbR false
+  let thrA := rowThresholds ctx q ua ub va vb ctx.params.mfbA true
+  let (bufR, Rr) := sieveLargePaired ctx ctx.rat Rr (lineSieveSide ctx ctx.rat Rr (fillRows ctx b1 thrR))
+  let (bufA, Ra) := sieveLargePaired ctx ctx.alg Ra (lineSieveSide ctx ctx.alg Ra (fillRows ctx b2 thrA))
+  let surv := prefilterRows ctx q ua ub va vb thrR thrA bufR bufA
+    (dropSmallGcd ctx (survivors bufR bufA len))
+  if surv.isEmpty then return (#[], ⟨bufR, bufA, bits⟩)
+  let (lab, rowStart) := labelSurvivors ctx (zeroRows ctx bufA) surv
+  let bits := markBits bits surv true
+  let (offR, ksR) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.rat Rr bits #[])
+  let (offA, ksA) := groupFlat ctx surv lab rowStart (resievePaired ctx ctx.alg Ra bits #[])
+  let bits := markBits bits surv false
+  let bd := mkBounds ctx q ua ub va vb Rr Ra
+  let mut rels : Array Rel := #[]
+  for k in gateAll ctx bd surv offR ksR offA ksA do
+    if let some rel := factorSurvivor2 ctx q ρ ua ub va vb Rr Ra (idealsOf offR ksR k)
+        (idealsOf offA ksA k) surv[k]! then
+      rels := rels.push rel
+  return (rels, ⟨bufR, lab, bits⟩)
 
 /-- The bits of the tiny primes in the rational norm at column `c` of row `j`
 (capped as `tinyBits`). -/
