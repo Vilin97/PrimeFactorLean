@@ -30,10 +30,7 @@ def split (cfg : Config) (depth n : Nat) : IO (Option Nat) := do
   if n ≥ 10 ^ 44 then
     if let some d ← st "pm1" fun _ => (PM1F.split n 20000).map (·.val) then return some d
   let snfs := snfsCandidate n
-  let pretest := match snfs with
-    | some (_, _, _, D) => min (QS.decimalDigits n) ((38 * D + 4430) / 100)
-    | none => QS.decimalDigits n
-  let levels := ecmSchedule pretest
+  let levels := autoEcmLevels cfg.threads n snfs
   for ((b1, curves), i) in levels.zip (List.range levels.length) do
     if let some d ← st s!"ecm B1={b1} curves={curves}" fun _ =>
         (ECMF.split n { b1 := b1, curves := curves, threads := cfg.threads,
@@ -332,6 +329,23 @@ def lanczosScale (numCols : Nat) (rows : Array (Array Nat)) (ts : List Nat) (rep
       acc := acc ^^^ r.get 3
     let t2 ← IO.monoNanosNow
     IO.println s!"tasks {t}: B x {(t1 - t0) / 1000 / reps} us, Bt y {(t2 - t1) / 1000 / reps} us ({acc})"
+  -- the same entries with the column indices folded into the first `n / k`
+  -- columns: the gathers of `B x` touch a vector `k` times smaller (cache test)
+  for k in [2, 3, 4, 8] do
+    let m := n / k
+    let mut fcols : Array (Array Nat) := Array.replicate m #[]
+    for c in [0:cols.size] do
+      fcols := fcols.modify (c % m) (· ++ cols[c]!)
+    let F := Sparse.mk' active (fcols.map fun c => (c.qsort (· < ·)))
+    let vf := randomBlock F.ncols 5
+    let _ ← IO.lazyPure fun _ => (mulB F vf 16).get 3
+    let t0 ← IO.monoNanosNow
+    let mut acc : UInt64 := 0
+    for _ in [0:reps] do
+      let r ← IO.lazyPure fun _ => mulB F vf 16
+      acc := acc ^^^ r.get 3
+    let t1 ← IO.monoNanosNow
+    IO.println s!"folded to 1/{k} ({F.ncols} columns, {F.ncols * 8 / 1024} KiB vector): B x at 16 tasks {(t1 - t0) / 1000 / reps} us ({acc})"
 
 open Lanczos in
 /-- `steps` iterations of the Lanczos recurrence (as `Lanczos.step`) with the time of

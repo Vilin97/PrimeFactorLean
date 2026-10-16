@@ -19,7 +19,7 @@ def autoStages (n threads : Nat) : IO Unit := do
   stageTime "brent 20000x2 (fast)" fun _ => (RhoF.split n 20000 2).map (·.val)
   stageTime "p-1 B1=20000 (nat)" fun _ => (PMinusOne.splitPMinusOne n 20000).map (·.val)
   stageTime "p-1 B1=20000 (fast)" fun _ => (PM1F.split n 20000).map (·.val)
-  for (b1, curves) in ecmSchedule (QS.decimalDigits n) do
+  for (b1, curves) in autoEcmLevels threads n (snfsCandidate n) do
     stageTime s!"ecm B1={b1} curves={curves}" fun _ =>
       (ECMF.split n { b1 := b1, curves := curves, threads := threads }).map (·.val)
   stageTime "siqs" fun _ => (SIQS.split n { threads := threads }).map (·.val)

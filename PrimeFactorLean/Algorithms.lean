@@ -143,6 +143,54 @@ def ecmSchedule (digits : Nat) : List (Nat × Nat) :=
     else if target ≥ 10 * t then some (b1, curves)
     else some (b1, max 1 (curves * (target - lo) / 50))
 
+/-- Single-thread time (ms) of one curve with `B2 = 100 B1` on an 80-digit number
+(ten limbs), measured at `f9b4a63`: the cost model of `ecmScheduleCost`. -/
+def curveMs (b1 : Nat) : Float :=
+  if b1 ≤ 2000 then 3.4 else if b1 ≤ 11000 then 11.9 else if b1 ≤ 50000 then 49.7
+  else if b1 ≤ 250000 then 244.0 else if b1 ≤ 1000000 then 1000.0 else 3000.0
+
+/-- Expected wall time (seconds, 16 threads) of the quadratic sieve on `d` digits:
+7.0 s at 80 digits (`89e67d2`), doubling every 3.72 digits (`snfsCandidate`). -/
+def qsSeconds (d : Nat) : Float := 7.0 * Float.exp2 ((d.toFloat - 80.0) / 3.72)
+
+/-- Expected wall time (seconds, 16 threads) of the special number field sieve on a
+`D`-digit `b^k ± 1` (`snfsCandidate`). -/
+def snfsSeconds (D : Nat) : Float := 2.1 * Float.exp2 ((D.toFloat - 83.0) / 10.5)
+
+/-- The levels of `ecmScheduleCost` from `levels` on (`prev` the previous level's
+digits, `L` the limbs of `n`, `th` the threads, `T` the time ECM may save). A level
+of `t` digits expects `k` curves for a factor of `t` digits; the factors it looks
+for lie between `t - 5` and `t` digits, and a factor at the geometric middle of
+that band needs about `k / √7.5` curves at its `B1` (expected curve counts grow
+about 7.5 times per five digits): the rate used. -/
+def ecmCostGo (T L th : Float) : List (Nat × Nat × Nat) → Nat → List (Nat × Nat)
+  | [], _ => []
+  | (t, b1, k) :: rest, prev =>
+    let P := Float.log (t.toFloat / prev.toFloat)
+    let c := curveMs b1 * (L / 10.0) * (L / 10.0) / th * 1.3 / 1000.0
+    let ke := k.toFloat / 2.7386
+    let r := P * 0.9 * T / (ke * c)
+    let x := if r ≤ 1.0 then 0.0 else min k.toFloat (ke * Float.log r)
+    if x < 0.05 * k.toFloat then [] else (b1, x.toUInt64.toNat) :: ecmCostGo T L th rest t
+
+/-- `(B1, curves)` of the ECM levels for factors of 25 digits and more before a
+method expected to take `T` seconds on the `d`-digit `n`, from a cost model (a
+fixed share of the digits, YAFU's `4/13`, suits an ECM several times faster
+relative to the sieves). For each level in turn (factors of `t` digits, `B1`, `k`
+curves expected to find one), the number `x` of curves that maximizes the expected
+saving `P w T (1 - e^{-x/k'})` minus the cost `c x`, that is
+`x = k' ln(P w T/(k' c))`: `P = ln(t/t')` is the probability of a prime factor
+between the previous level's `t'` and `t` digits (Mertens), `w = 0.9` the share of
+`T` saved when one is found, `k' = k/√7.5` the curves for a factor in the middle
+of that band (see `ecmCostGo`) and `c` the time of one curve on `threads` threads
+(`curveMs` scaled by the square of the width of `n` and by 1.3 for the all-core
+clock). The levels stop at the first one worth less than a twentieth of its
+curves. -/
+def ecmScheduleCost (d : Nat) (T : Float) (threads : Nat) : List (Nat × Nat) :=
+  let L := ((d.toFloat * 3.3219 + 28.0) / 28.0).floor
+  ecmCostGo T L (max 1 threads).toFloat
+    [(25, 50000, 300), (30, 250000, 700), (35, 1000000, 1800), (40, 3000000, 5100)] 20
+
 /-- The full GMP-ECM schedule, levels for factors of 15, 20, …, 40 digits, up to
 factors of about half the size of `n` (standalone ECM). -/
 def ecmScheduleFull (digits : Nat) : List (Nat × Nat) :=
@@ -193,11 +241,26 @@ def snfsCandidate (n : Nat) : Option (Nat × Nat × Bool × Nat) :=
     if 354 * D + 43000 ≤ 1000 * dn && D ≤ 140 then some (b, k, plus, D) else none
   | none => none
 
-/-- The automatic portfolio: cheap methods first, then ECM, then the special
-number field sieve for divisors of `b^k ± 1` where it pays off, else SIQS. The
-ECM pretest is sized for the sieve that follows: for the special sieve on `D`
-digits, the size of a quadratic sieve of the same expected time
-(`0.354 D + 43.0` digits, see `snfsCandidate`). -/
+/-- The ECM pretest of the automatic portfolio: `ecmScheduleCost` for the sieve
+that follows (the special sieve on `D` digits for divisors of `b^k ± 1` where it
+pays off, else the quadratic sieve). -/
+def autoEcmLevels (threads : Nat) (n : Nat) (snfs : Option (Nat × Nat × Bool × Nat)) :
+    List (Nat × Nat) :=
+  let d := QS.decimalDigits n
+  let pretest := match snfs with
+    | some (_, _, _, D) => min d ((354 * D + 43000) / 1000)
+    | none => d
+  -- the cheap levels (factors of up to 20 digits) keep the fixed share of the
+  -- digits; from 25 digits on, where that share would go, the cost model decides
+  (ecmSchedule pretest).filter (·.1 ≤ 11000) ++
+    if (ecmSchedule pretest).length ≤ 2 then [] else
+    ecmScheduleCost d (match snfs with
+      | some (_, _, _, D) => snfsSeconds D
+      | none => qsSeconds d) threads
+
+/-- The automatic portfolio: cheap methods first, then ECM (`autoEcmLevels`), then
+the special number field sieve for divisors of `b^k ± 1` where it pays off, else
+SIQS. -/
 def autoSplitter (cfg : Config) : Splitter := fun n =>
   if n < 4 then none else
   (smallSplitter 4096 n).orElse fun _ =>
@@ -208,10 +271,7 @@ def autoSplitter (cfg : Config) : Splitter := fun n =>
   -- `p - 1` pays off only once the quadratic sieve is slow (from about 45 digits)
   (if n < 10 ^ 44 then none else PM1F.split n 20000).orElse fun _ =>
   let snfs := snfsCandidate n
-  let pretest := match snfs with
-    | some (_, _, _, D) => min (QS.decimalDigits n) ((354 * D + 43000) / 1000)
-    | none => QS.decimalDigits n
-  (ecmLevels cfg.threads (ecmSchedule pretest) n).orElse fun _ =>
+  (ecmLevels cfg.threads (autoEcmLevels cfg.threads n snfs) n).orElse fun _ =>
   match snfs with
   | some (b, k, plus, _) =>
     (GNFS.splitSNFS n b k plus { threads := cfg.threads }).orElse fun _ =>

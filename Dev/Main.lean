@@ -207,6 +207,9 @@ def devMain (args : List String) : IO Unit := do
   | ["mulbench", k] => mulBench k.toNat!
   | ["laddercmp", b] => ladderCompare b.toNat!
   | ["opbench", k] => opBench k.toNat!
+  | ["ecmplan", ns] =>
+    let n := ns.toNat!
+    IO.println s!"{QS.decimalDigits n} digits, snfs {snfsCandidate n}: {autoEcmLevels 16 n (snfsCandidate n)}"
   | ["praccheck", b] => pracCheck b.toNat!
   | ["pm1time", ns, b1] =>
     let n := ns.toNat!
