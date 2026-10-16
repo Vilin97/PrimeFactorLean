@@ -127,12 +127,9 @@ def ladderCompare (b1 : Nat) : IO Unit := do
   let P : ECMF.Pt N10 := ⟨x0, one⟩
   let D := ECMF.dbl m a24 P
   let t0 ← IO.monoNanosNow
-  let r1 ← IO.lazyPure fun _ => Mont.Arith.ladder m a24 x0 bits (bits.size - 1) P.x P.z D.x D.z
-  let t1 ← IO.monoNanosNow
   let r2 ← IO.lazyPure fun _ => ECMF.ladderLoop m a24 x0 bits P D (bits.size - 1)
-  let t2 ← IO.monoNanosNow
-  let same := Arith.fromMont m (Arith.mul m r1.1 r2.z) == Arith.fromMont m (Arith.mul m r2.x r1.2)
-  IO.println s!"{bits.size} bits: fused {(t1 - t0).toFloat / bits.size.toFloat} ns/bit, generic {(t2 - t1).toFloat / bits.size.toFloat} ns/bit, same point {same}"
+  let t1 ← IO.monoNanosNow
+  IO.println s!"{bits.size} bits: ladder {(t1 - t0).toFloat / bits.size.toFloat} ns/bit ({r2.x.l0})"
 
 /-- Wall time of `curves` curves on `threads` tasks (one batch per round), with
 `B2 = b2` (`b2 = b1`: stage 1 only), in one process. -/
@@ -161,3 +158,28 @@ def planTime (b1 : Nat) : IO Unit := do
   let bits ← IO.lazyPure fun _ => ECMF.natBits (plan.powers.foldl (· * ·) 1)
   let t3 ← IO.monoNanosNow
   IO.println s!"B1={b1}: mkPlan {(t1 - t0) / 1000000} ms ({plan.isPrime.size}), schedule {(t2 - t1) / 1000000} ms ({sched.hits.size}), bits {(t3 - t2) / 1000000} ms ({bits.size})"
+
+/-- `k` dependent Montgomery squares. -/
+def sqrChain (m : Mod10) : N10 → Nat → N10
+  | a, 0 => a
+  | a, k + 1 => sqrChain m (N10.sqr m a) k
+
+/-- `k` dependent additions and subtractions. -/
+def addChain (m : Mod10) (b : N10) : N10 → Nat → N10
+  | a, 0 => a
+  | a, k + 1 => addChain m b (N10.sub m (N10.add m a b) b |> fun x => N10.add m x b) k
+
+/-- Per-operation costs at 80 digits (one thread): square, add+sub+add chain. -/
+def opBench (k : Nat) : IO Unit := do
+  let n := 17100104831195064426243855290661269581152208979016832912601645679249190067150771
+  let m := Mod10.ofNat n
+  let a : N10 := Arith.toMont m 1234567891011
+  let b : N10 := Arith.toMont m 98765432123456789
+  let t0 ← IO.monoNanosNow
+  let r1 ← IO.lazyPure fun _ => mulChain m b a k
+  let t1 ← IO.monoNanosNow
+  let r2 ← IO.lazyPure fun _ => sqrChain m a k
+  let t2 ← IO.monoNanosNow
+  let r3 ← IO.lazyPure fun _ => addChain m b a k
+  let t3 ← IO.monoNanosNow
+  IO.println s!"mul {(t1 - t0).toFloat / k.toFloat} ns, sqr {(t2 - t1).toFloat / k.toFloat} ns, add/sub {(t3 - t2).toFloat / (3 * k).toFloat} ns ({r1.l0 + r2.l0 + r3.l0})"

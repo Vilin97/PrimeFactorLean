@@ -9,6 +9,7 @@ import Dev.QSDebug
 import Dev.Micro
 import Dev.RB
 import Dev.SiqsProf
+import Dev.RegFile
 import Dev.LasDebug
 import Dev.Bench8
 import Dev.Stages
@@ -205,6 +206,13 @@ def devMain (args : List String) : IO Unit := do
   | ["monttest"] => montTestMain
   | ["mulbench", k] => mulBench k.toNat!
   | ["laddercmp", b] => ladderCompare b.toNat!
+  | ["opbench", k] => opBench k.toNat!
+  | ["pm1time", ns, b1] =>
+    let n := ns.toNat!
+    timed s!"p-1 B1={b1}" fun _ => (PM1F.split n b1.toNat!).map (·.val)
+  | ["regbench", b] => RegFile.regBench b.toNat!
+  | ["nibench", b] => RegFile.niBench b.toNat!
+  | ["ni2bench", b] => RegFile.ni2Bench b.toNat!
   | ["siqsprof", ns, as] =>
     let n := ns.toNat!
     SiqsProf.run n (SIQS.chooseParams (QS.decimalDigits n)) as.toNat!

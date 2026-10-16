@@ -247,9 +247,7 @@ inductive Outcome
   let one : α := toMont m 1
   let P : Pt α := ⟨x0, one⟩
   let Q : Pt α := if bits.size ≤ 1 then P else
-    let D := dbl m a24 P
-    let (x, z) := Mont.Arith.ladder m a24 x0 bits (bits.size - 1) P.x P.z D.x D.z
-    ⟨x, z⟩
+    ladderLoop m a24 x0 bits P (dbl m a24 P) (bits.size - 1)
   let g := gcdN m Q.z
   if g == n then .collapsed
   else if g > 1 then .value (limbNat Q.z)

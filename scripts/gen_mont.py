@@ -10,7 +10,7 @@ For every limb count L in LIMBS, the generated module defines
 * Montgomery multiplication and squaring (finely integrated product scanning,
   radix 2^28: column sums stay below 2^61 for L ≤ 12, so a single machine word
   accumulates them), modular addition and subtraction, and conversions;
-* the stage-1 ladder of ECM with the coordinates in machine words;
+* shared (non-inlined) entry points for multiplication and squaring;
 * an instance of `Mont.Arith` so that generic code (ECM, P-1) specializes to
   each width.
 
@@ -158,46 +158,18 @@ def gen(L):
         c = f'e{i + 1}'
     w('  ⟨' + ', '.join(f'y{i} &&& msk' for i in range(L)) + '⟩')
     w('')
-    # fused ECM stage-1 ladder
-    names = {c: [f'{c}{i}' for i in range(L)] for c in 'abcd'}
-    params = ' '.join(names['a'] + names['b'] + names['c'] + names['d'])
-    w(f'set_option maxRecDepth 200000 in')
-    w(f'/-- The ECM stage-1 Montgomery ladder over `bits[i-1], …, bits[0]` from')
-    w(f'`(r0, r1) = ((a : b), (c : d))` (limbs) for the curve `a24` and the base point')
-    w(f'`(xP : 1)`; returns `r0`. One step doubles `r0` (bit `0`) or `r1` (bit `1`) and')
-    w(f'adds `r0 + r1`; the coordinates stay in machine words, so a step allocates')
-    w(f'nothing. -/')
-    w(f'def N{L}.ladderGo (m : Mod{L}) (a24 xP : N{L}) (bits : ByteArray) (i : Nat)')
-    w(f'    ({params} : UInt64) : N{L} × N{L} :=')
-    w(f'  match i with')
-    w(f'  | 0 => (⟨' + ', '.join(names['a']) + '⟩, ⟨' + ', '.join(names['b']) + '⟩)')
-    w(f'  | i + 1 =>')
-    w(f'    let sel := (if bits.get! i == 1 then (1 : UInt64) else 0) * {M}')
-    w(f'    let X0 : N{L} := ⟨' + ', '.join(names['a']) + '⟩')
-    w(f'    let Z0 : N{L} := ⟨' + ', '.join(names['b']) + '⟩')
-    w(f'    let X1 : N{L} := ⟨' + ', '.join(names['c']) + '⟩')
-    w(f'    let Z1 : N{L} := ⟨' + ', '.join(names['d']) + '⟩')
-    w(f'    let Ax : N{L} := ⟨' + ', '.join(f'a{i} ^^^ ((a{i} ^^^ c{i}) &&& sel)' for i in range(L)) + '⟩')
-    w(f'    let Az : N{L} := ⟨' + ', '.join(f'b{i} ^^^ ((b{i} ^^^ d{i}) &&& sel)' for i in range(L)) + '⟩')
-    w(f'    let s := N{L}.sqr m (N{L}.add m Ax Az)')
-    w(f'    let e := N{L}.sqr m (N{L}.sub m Ax Az)')
-    w(f'    let t := N{L}.sub m s e')
-    w(f'    let Dx := N{L}.mul m s e')
-    w(f'    let Dz := N{L}.mul m t (N{L}.add m e (N{L}.mul m a24 t))')
-    w(f'    let u := N{L}.mul m (N{L}.sub m X1 Z1) (N{L}.add m X0 Z0)')
-    w(f'    let v := N{L}.mul m (N{L}.add m X1 Z1) (N{L}.sub m X0 Z0)')
-    w(f'    let Sx := N{L}.sqr m (N{L}.add m u v)')
-    w(f'    let Sz := N{L}.mul m xP (N{L}.sqr m (N{L}.sub m u v))')
-    sel0 = lambda P, Q: [f'{P}.l{i} ^^^ (({P}.l{i} ^^^ {Q}.l{i}) &&& sel)' for i in range(L)]
-    w(f'    N{L}.ladderGo m a24 xP bits i')
-    w(f'      ' + ' '.join(f'({x})' for x in sel0('Dx', 'Sx')))
-    w(f'      ' + ' '.join(f'({x})' for x in sel0('Dz', 'Sz')))
-    w(f'      ' + ' '.join(f'({x})' for x in sel0('Sx', 'Dx')))
-    w(f'      ' + ' '.join(f'({x})' for x in sel0('Sz', 'Dz')))
+    # shared (non-inlined) multiplication and squaring
+    w(f'/-- `N{L}.mul` as one shared function: the ECM and `p - 1` loops call it rather')
+    w(f'than inlining it (inlined copies of a {L}-limb product overflow the instruction')
+    w(f'cache: the fused ladder of earlier versions ran 15% slower than these calls). -/')
+    w(f'@[noinline] def N{L}.mulS (m : Mod{L}) (a b : N{L}) : N{L} := N{L}.mul m a b')
+    w('')
+    w(f'/-- `N{L}.sqr` as one shared function. -/')
+    w(f'@[noinline] def N{L}.sqrS (m : Mod{L}) (a : N{L}) : N{L} := N{L}.sqr m a')
     w('')
     w(f'instance : Arith N{L} Mod{L} where')
-    w(f'  mul := N{L}.mul')
-    w(f'  sqr := N{L}.sqr')
+    w(f'  mul := N{L}.mulS')
+    w(f'  sqr := N{L}.sqrS')
     w(f'  add := N{L}.add')
     w(f'  sub := N{L}.sub')
     w(f'  modulus := Mod{L}.n')
@@ -205,9 +177,6 @@ def gen(L):
     w(f'  limbNat := N{L}.limbNat')
     w(f'  isZero := N{L}.isZero')
     w(f'  limbs := {L}')
-    w(f'  ladder m a24 xP bits i X0 Z0 X1 Z1 := N{L}.ladderGo m a24 xP bits i')
-    w(f'    ' + ' '.join(f'X0.l{i}' for i in range(L)) + ' ' + ' '.join(f'Z0.l{i}' for i in range(L)))
-    w(f'    ' + ' '.join(f'X1.l{i}' for i in range(L)) + ' ' + ' '.join(f'Z1.l{i}' for i in range(L)))
     w('')
     return '\n'.join(out)
 
