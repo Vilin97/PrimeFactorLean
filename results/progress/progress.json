@@ -1593,6 +1593,206 @@
      }
     }
    }
+  },
+  {
+   "index": 12,
+   "label": "89e67d2",
+   "first_record": "2026-10-16T07:28:22",
+   "note": "commit 89e67d2",
+   "files": [
+    "89e67d2-auto-core-medium-large.jsonl",
+    "89e67d2-auto-huge.jsonl",
+    "89e67d2-gnfs-balanced.jsonl",
+    "89e67d2-rsa100.jsonl"
+   ],
+   "panels": {
+    "core": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.574734486
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 2.105810453
+     }
+    },
+    "medium": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.337485425
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 1.165199561
+     }
+    },
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 5.477553468
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.47562234
+     }
+    },
+    "huge": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 112.45367292
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 147.878376358
+     }
+    },
+    "huge-balanced": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 34.449412674
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 21.707986634
+     }
+    },
+    "huge-cunningham": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 78.004260246
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 126.170389724
+     }
+    },
+    "gnfs": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 77.039290723
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 194.631135049
+     }
+    },
+    "rsa100": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 158.191361276
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 168.718931543
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 175.593423696
+     }
+    }
+   }
   }
  ]
 }

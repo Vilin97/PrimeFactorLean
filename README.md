@@ -129,9 +129,9 @@ overlap. A run counts only if it returns the exact reference factorization. The
 tables use the median of the three runs. `factor` certifies every prime factor
 (Pocklington); YAFU reports probable primes, and CADO-NFS reports the split.
 
-Raw records are in `results/compare/b55d1d9-*.jsonl` (earlier runs at commits
-`4699f07`, `8fe59f3`, `038af0e`, `219ac2e` and `109e943`:
-`results/compare/4699f07-*.jsonl` and so on). Summaries:
+Raw records are in `results/compare/89e67d2-*.jsonl` (earlier runs at commits
+`b55d1d9`, `4699f07`, `8fe59f3`, `038af0e`, `219ac2e` and `109e943`:
+`results/compare/b55d1d9-*.jsonl` and so on). Summaries:
 `python3 scripts/compare_report.py FILE --ours TOOL --base TOOL [--cases]`.
 
 ![Total wall time per benchmark panel over the recorded comparison runs: the Lean CLI against YAFU and CADO-NFS](docs/progress.gif)
@@ -146,7 +146,7 @@ above the axis are drawn as arrows with their value. The plotted numbers are in
 frame is [`docs/progress-final.png`](docs/progress-final.png), and
 `python3 scripts/progress_gif.py` (Pillow) regenerates all three from
 `results/compare/*.jsonl`.
-These runs are at commit `b55d1d9`. The machine is a laptop: its sustained
+These runs are at commit `89e67d2`. The machine is a laptop: its sustained
 speed drifts with temperature by several percent between runs (the same binary
 took 165 s and 181 s on RSA-100 hours apart), which the interleaving spreads
 over all tools.
@@ -155,34 +155,34 @@ over all tools.
 
 | Tier | Cases | Both solved | `factor auto` total | YAFU total | Geometric mean of time ratios | `auto` faster on |
 |---|---:|---:|---:|---:|---:|---:|
-| core (≤ 8 digits and special values) | 204 | 204 | 0.57 s | 2.12 s | 0.27 | 204 |
-| medium (< 2⁶⁴) | 102 | 102 | 0.33 s | 1.17 s | 0.27 | 101 |
-| large (20–59 digits) | 271 | 271 | 5.62 s | 15.42 s | 0.39 | 248 |
-| huge (60–100 digits) | 253 | 253 | 121 s | 142 s | 0.53 | 177 |
+| core (≤ 8 digits and special values) | 204 | 204 | 0.58 s | 2.11 s | 0.27 | 204 |
+| medium (< 2⁶⁴) | 102 | 102 | 0.34 s | 1.17 s | 0.28 | 101 |
+| large (20–59 digits) | 271 | 271 | 5.48 s | 15.48 s | 0.39 | 250 |
+| huge (60–100 digits) | 253 | 253 | 112 s | 148 s | 0.52 | 182 |
 
 On the core and medium tiers both tools spend most of their time starting up:
 a `factor` run takes about 3 ms, a YAFU run about 10 ms.
 
-On the huge tier `auto` is faster in total, on 177 of the 253 cases and in
-geometric mean. On the 243 Cunningham numbers it takes 81 s against 120 s; on
-the 10 balanced semiprimes 40 s against 22 s. (YAFU's ECM draws random curves,
+On the huge tier `auto` is faster in total, on 182 of the 253 cases and in
+geometric mean. On the 243 Cunningham numbers it takes 78 s against 126 s; on
+the 10 balanced semiprimes 34 s against 22 s. (YAFU's ECM draws random curves,
 so its time on a number whose factor ECM finds varies between runs: `5¹³⁹ − 1`
-took 1.9, 1.9 and 9.7 s here, `3¹⁹⁹ − 1` 15.4, 15.6 and 0.7 s, `2³¹⁷ − 1` 0.7,
-2.2 and 12.3 s.)
+took 9.7, 1.9 and 12.1 s here, `3¹⁹⁹ − 1` 15.3, 1.8 and 15.4 s, `2²⁹³ − 1` 0.5,
+0.7 and 2.0 s.)
 
-- **Balanced semiprimes (SIQS).** YAFU's AVX-512 SIQS is about twice as fast
-  from 68 digits: at 80 digits, 5.0–5.2 s against 10.4–10.6 s (of which about
-  1.4 s is the ECM pretest). SIQS spends most of its time in byte updates of
+- **Balanced semiprimes (SIQS).** YAFU's AVX-512 SIQS is still faster from 68
+  digits: at 80 digits, 5.1–5.2 s against 8.7–8.8 s (of which about 1.2 s is
+  the ECM pretest; 10.4–10.6 s at `b55d1d9`). SIQS spends most of its time in byte updates of
   the sieve, which Lean's arrays make about twice as costly as YAFU's
   vectorized C (each write checks that the array is unshared), and in walking
   the larger primes' progressions again to find which of them divide a
   candidate.
 - **Factors found by ECM.** On some Cunningham numbers with a factor of 24–30
   digits, YAFU's vectorized ECM often finds it at once, and `auto` needs a
-  sieve: `2³¹⁷ − 1` takes 4.7 s against a median of 2.2 s, `2²⁹³ − 1` 4.4 s
-  against 1.9 s. The ECM arithmetic uses 28-bit limbs (Lean has no 64×64→128-bit
-  multiplication), so a curve at `B1 = 50000` on an 86-digit number costs about
-  71 ms of CPU.
+  sieve: `2³¹⁷ − 1` takes 4.1 s against a median of 2.2 s, `2²⁹³ − 1` 4.5 s
+  against 0.7 s. The ECM arithmetic uses 28-bit limbs (Lean has no 64×64→128-bit
+  multiplication), so a curve at `B1 = 50000` on an 80-digit number takes
+  48 ms on one core (57 ms before the products became shared functions).
 - **Certificates.** YAFU reports probable primes; `factor` proves them, on
   `p − 1` or on `p + 1`. For the 76-digit factor of `7¹⁰¹ − 1`, `p − 1` has a
   72-digit composite factor that SIQS would have to split (3.6 s), but `p + 1`
@@ -193,30 +193,31 @@ semiprimes from 60 digits (median wall time):
 
 | Case | Digits | `factor gnfs` | CADO-NFS |
 |---|---:|---:|---:|
-| balanced-60-0 | 60 | 1.17 s | 9.75 s |
-| balanced-60-1 | 60 | 1.27 s | 10.25 s |
-| balanced-64-0 | 64 | 1.91 s | 10.40 s |
-| balanced-64-1 | 64 | 2.08 s | 10.53 s |
-| balanced-68-0 | 68 | 3.06 s | 11.20 s |
-| balanced-68-1 | 68 | 3.26 s | 12.41 s |
-| balanced-72-0 | 71 | 4.17 s | 13.23 s |
-| balanced-72-1 | 72 | 4.68 s | 12.91 s |
-| balanced-76-0 | 76 | 9.64 s | 19.94 s |
-| balanced-76-1 | 76 | 10.17 s | 21.10 s |
-| balanced-80-0 | 80 | 16.55 s | 31.16 s |
-| balanced-80-1 | 80 | 17.99 s | 30.43 s |
+| balanced-60-0 | 60 | 1.26 s | 9.76 s |
+| balanced-60-1 | 60 | 1.25 s | 9.74 s |
+| balanced-64-0 | 64 | 1.95 s | 10.57 s |
+| balanced-64-1 | 64 | 2.10 s | 10.47 s |
+| balanced-68-0 | 68 | 3.28 s | 11.23 s |
+| balanced-68-1 | 68 | 3.34 s | 10.82 s |
+| balanced-72-0 | 71 | 4.31 s | 13.77 s |
+| balanced-72-1 | 72 | 4.72 s | 12.84 s |
+| balanced-76-0 | 76 | 9.81 s | 20.85 s |
+| balanced-76-1 | 76 | 10.19 s | 22.84 s |
+| balanced-80-0 | 80 | 16.52 s | 31.24 s |
+| balanced-80-1 | 80 | 18.32 s | 30.50 s |
 
 **RSA-100** (three runs each, interleaved):
 
 | Tool | Median | Runs |
 |---|---:|---|
-| `factor gnfs` | 156.2 s | 159.3, 152.7, 156.2 s |
-| CADO-NFS | 169.5 s | 166.8, 170.7, 169.5 s |
-| YAFU `factor()` | 175.1 s | 175.3, 175.1, 174.5 s |
+| `factor gnfs` | 158.2 s | 158.2, 159.1, 151.2 s |
+| CADO-NFS | 168.7 s | 167.4, 169.0, 168.7 s |
+| YAFU `factor()` | 175.6 s | 175.2, 177.8, 175.6 s |
 
-Each Lean run was faster than each CADO-NFS run: the median is 8% lower. (The
-Lean number field sieve took 158.5 s at commit `4699f07`, 160 s at `8fe59f3`,
-169 s at `038af0e`, 294 s at `219ac2e` and 366 s at `109e943`.)
+Each Lean run was faster than each CADO-NFS run: the median is 6% lower. (The
+Lean number field sieve, unchanged since, took 156.2 s at commit `b55d1d9`;
+158.5 s at `4699f07`, 160 s at `8fe59f3`, 169 s at `038af0e`, 294 s at
+`219ac2e` and 366 s at `109e943`.)
 
 Where the time goes (RSA-100, the same polynomial, which the Lean polynomial
 selection now reproduces):
@@ -495,6 +496,10 @@ messages):
 | The SNFS/SIQS cost model refitted to current timings (the special sieve had become 2.3 times faster than the model): the choice between them and the ECM pretest before SNFS | the seven SNFS cases of the huge tier 41.3 → 38.8 s; `10⁷¹ − 1` 2.06 → 1.28 s (now SNFS) |
 | Block Lanczos: row kernels on machine-word indices, update tables built directly in their byte layout, the 64 × 64 products through those tables | RSA-100 iterations 16.7 → 16.1 s; 24K-row matrix 368–396 → 341–350 ms |
 | These changes | huge tier against YAFU: 152 s → 125 s → 121 s (`8fe59f3`, `4699f07`, `b55d1d9`) |
+| SIQS kernels on machine-word indices; primes beyond the interval add to one of 64 trash bytes instead of a mispredicted branch; small-prime tests with one packed read and no branch per root; candidates factored in machine words first (the cofactor as `\|v\| 2^-e₂ ∏ p⁻¹ mod 2^(64−e₂)`, checked against the floating-point estimate), the big-number relation only for accepted candidates | 80 digits, one thread: 362 → 315 µs per polynomial (20,000 primes), 878 → 572 µs (46,000); balanced 64–80 digits (CLI) 40.0 → 37.5 s |
+| SIQS: each new `A` in 32-bit Montgomery arithmetic modulo the factor-base primes (one inverse per prime), prime, delta and stride count in one word per prime, candidate loops without allocated loop state, parity rows in one pass | `A` setup 8.4 → 3.3 ms at 80 digits; rows of the 80-digit matrix 166 → 37 ms; balanced 64–80 digits (CLI) 36.1 → 35.3 s |
+| ECM: the Montgomery products as shared (non-inlined) functions instead of a fused ladder step (ten inlined 10-limb products, about 40 KB of code per step, overflowed the instruction cache); `a (b − c)` as one shared function for stage 2. Fusing the additions too was 26% slower (more copies of the product) | per curve, one thread: 80 digits (`B1 = 50000`) 57.2 → 47.9 ms, 100 digits (`B1 = 11000`) 21.4 → 15.8 ms; huge tier (each case twice, interleaved) 123.2 → 113.6 s |
+| These changes | huge tier against YAFU: 121 s → 112 s (`b55d1d9`, `89e67d2`); balanced semiprimes 39.8 → 34.4 s |
 
 ## Running
 
