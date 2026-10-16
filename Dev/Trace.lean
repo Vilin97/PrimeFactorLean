@@ -282,7 +282,7 @@ def splitBench (path : String) : IO Unit := do
     if g > 1 && g.toNat < u && u % g.toNat == 0 then acc + 1 else acc) 0
   let t9 ← IO.monoNanosNow
   IO.println s!"uecm2 (pairs): {(t9 - t8) / 1000 / ns.size} us per split ({f})"
-  for (b1, k) in ([] : List (Nat × Nat)) do
+  for (b1, k) in [(70, 25), (50, 20), (60, 15), (70, 10), (70, 15), (85, 10), (85, 15), (100, 10), (70, 25)] do
     let plan := SIQS.uecmMkPlan b1 (k * b1)
     let t5 ← IO.monoNanosNow
     let d ← IO.lazyPure fun _ => ns.foldl (fun acc u =>

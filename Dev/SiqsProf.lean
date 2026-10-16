@@ -333,3 +333,20 @@ def extractParts (n : Nat) (threads : Nat) (fb : Nat := 0) : IO Unit := do
   IO.println s!"fb {ctx.fb.size}: collect {(t1 - t0) / 1000000} ms ({rels.size} rels, weight {w}), rows {(t2 - t1) / 1000000} ms, lanczos {(t3 - t2) / 1000000} ms ({deps.size} deps), sqrt {(t4 - t3) / 1000000} ms ({tried} tried, found {found})"
 
 end PrimeFactorLean.SiqsProf
+
+namespace PrimeFactorLean.SiqsProf
+
+/-- Block Lanczos on the matrix of a real SIQS run at several thread counts. -/
+def lanczosThreads (n : Nat) (threads : Nat) : IO Unit := do
+  let params := SIQS.chooseParams (QS.decimalDigits n)
+  let .inl ctx := mkCtx n params | IO.println "small factor"
+  let needed := ctx.fb.size + 1 + params.extra
+  let rels ← IO.lazyPure fun _ => collect ctx needed threads 1000
+  let rows ← IO.lazyPure fun _ => rels.map Squares.parityColumns
+  for t in [1, 2, 4, 8, 16, 16, 8] do
+    let t0 ← IO.monoNanosNow
+    let deps ← IO.lazyPure fun _ => Lanczos.dependencies (ctx.fb.size + 1) rows 64 t
+    let t1 ← IO.monoNanosNow
+    IO.println s!"threads {t}: lanczos {(t1 - t0) / 1000000} ms ({deps.size} deps)"
+
+end PrimeFactorLean.SiqsProf

@@ -1,5 +1,6 @@
 import PrimeFactorLean.MontGen
 import PrimeFactorLean.ECMMontgomery
+import PrimeFactorLean.Prac
 
 /-!
 # ECM on fixed-width Montgomery arithmetic
@@ -78,30 +79,34 @@ def schedule (plan : ECMM.Plan) : Sched := Id.run do
     mm := mm + 1
   return { m0, counts, hits }
 
-/-- Stage data shared by all curves: the plan, its stage-2 schedule and the bits
-of `∏ q`. -/
+/-- Stage data shared by all curves: the plan, its stage-2 schedule and the
+stage-1 program (`Prac.program`). -/
 structure Fast where
   plan : ECMM.Plan
   sched : Sched
-  bits : ByteArray
+  prac : ByteArray
 
 def mkFast (b1 b2 : Nat) : Fast :=
   let plan := ECMM.mkPlan b1 b2
-  { plan, sched := schedule plan, bits := natBits (plan.powers.foldl (· * ·) 1) }
+  { plan, sched := schedule plan, prac := Prac.program b1 }
+
+/-- The bits of `∏ q` (least significant first) for the binary ladder (`ladderLoop`). -/
+def Fast.bits (f : Fast) : ByteArray := natBits (f.plan.powers.foldl (· * ·) 1)
 
 section Generic
 
 variable {α μ : Type} [Arith α μ] [Inhabited α]
 
-/-- `[2]P`: `X₂ = (X+Z)²(X-Z)²`, `Z₂ = 4XZ((X-Z)² + a24·4XZ)`. -/
-@[specialize] def dbl (m : μ) (a24 : α) (P : Pt α) : Pt α :=
+/-- `[2]P`: `X₂ = (X+Z)²(X-Z)²`, `Z₂ = 4XZ((X-Z)² + a24·4XZ)`. (Not inlined: the
+fourteen cases of `pracRun` with inlined copies overflow the instruction cache.) -/
+@[specialize, noinline] def dbl (m : μ) (a24 : α) (P : Pt α) : Pt α :=
   let s := sqr m (add m P.x P.z)
   let d := sqr m (sub m P.x P.z)
   let t := sub m s d
   ⟨mul m s d, mul m t (add m d (mul m a24 t))⟩
 
-/-- `P + Q` from `P - Q = D`. -/
-@[specialize] def addPt (m : μ) (P Q D : Pt α) : Pt α :=
+/-- `P + Q` from `P - Q = D` (not inlined, as `dbl`). -/
+@[specialize, noinline] def addPt (m : μ) (P Q D : Pt α) : Pt α :=
   let u := mul m (sub m P.x P.z) (add m Q.x Q.z)
   let w := mul m (add m P.x P.z) (sub m Q.x Q.z)
   ⟨mul m D.z (sqr m (add m u w)), mul m D.x (sqr m (sub m u w))⟩
@@ -136,6 +141,53 @@ first) from `(r0, r1) = ([k']P, [k'+1]P)`, for the base point `(xP : 1)`. -/
       r1 := addPt m r1 r0 P
       r0 := dbl m a24 r0
   return r0
+
+/-- Run the stage-1 program `prog` from `i` on `A` (`B`, `C` the chain state: a
+chain keeps `C = ±(A - B)`). The cases are those of GMP-ECM's `prac`, with
+`addPt X Y Z = X + Y` given `X - Y = ±Z`. -/
+@[specialize] def pracRun (m : μ) (a24 : α) (prog : ByteArray) :
+    Nat → Nat → Pt α → Pt α → Pt α → Pt α
+  | 0, _, A, _, _ => A
+  | fuel + 1, i, A, B, C =>
+    if h : i < prog.size then
+      let op := prog[i]
+      if op == 0 then pracRun m a24 prog fuel (i + 1) B A C
+      else if op == 3 then pracRun m a24 prog fuel (i + 1) A (addPt m B A C) B
+      else if op == 9 then pracRun m a24 prog fuel (i + 1) A (dbl m a24 B) (addPt m C B A)
+      else if op == 4 then pracRun m a24 prog fuel (i + 1) (dbl m a24 A) (addPt m B A C) C
+      else if op == 5 then pracRun m a24 prog fuel (i + 1) (dbl m a24 A) B (addPt m C A B)
+      else if op == 2 then pracRun m a24 prog fuel (i + 1) (dbl m a24 A) (addPt m A B C) C
+      else if op == 1 then
+        let T := addPt m A B C
+        pracRun m a24 prog fuel (i + 1) (addPt m T A B) (addPt m B T A) C
+      else if op == 6 then
+        let T1 := dbl m a24 A
+        pracRun m a24 prog fuel (i + 1) (addPt m T1 A A) (addPt m T1 (addPt m A B C) C) B
+      else if op == 7 then
+        let B' := addPt m (addPt m A B C) A B
+        pracRun m a24 prog fuel (i + 1) (addPt m A (dbl m a24 A) A) B' C
+      else if op == 8 then
+        let T1 := addPt m A B C
+        let C' := addPt m C A B
+        pracRun m a24 prog fuel (i + 1) (addPt m A (dbl m a24 A) A) T1 C'
+      else if op == 10 then pracRun m a24 prog fuel (i + 1) (dbl m a24 A) A A
+      else if op == 11 then pracRun m a24 prog fuel (i + 1) (addPt m A B C) B C
+      else if op == 12 then pracRun m a24 prog fuel (i + 1) (dbl m a24 A) B C
+      else if op == 13 then pracRun m a24 prog fuel (i + 1) (addPt m A (dbl m a24 A) A) B C
+      else if op == 14 then
+        -- binary multiplication by the bits that follow
+        let len := if h1 : i + 1 < prog.size then prog[i + 1].toNat else 0
+        let R := pracBits m a24 prog (i + 2) len A (dbl m a24 A) A
+        pracRun m a24 prog fuel (i + 2 + len) R B C
+      else A
+    else A
+where
+  /-- The ladder over `len` bits (most significant first, the top bit implicit). -/
+  pracBits (m : μ) (a24 : α) (prog : ByteArray) (i : Nat) : Nat → Pt α → Pt α → Pt α → Pt α
+    | 0, r0, _, _ => r0
+    | len + 1, r0, r1, P =>
+      if prog.get! i == 1 then pracBits m a24 prog (i + 1) len (addPt m r1 r0 P) (dbl m a24 r1) P
+      else pracBits m a24 prog (i + 1) len (dbl m a24 r0) (addPt m r1 r0 P) P
 
 /-- `[j]Q` for `j = 1, 3, 5, …` (`count` points). -/
 @[specialize] def oddMultiples (m : μ) (a24 : α) (Q : Pt α) (count : Nat) : Array (Pt α) :=
@@ -240,14 +292,13 @@ inductive Outcome
   | nothing
 
 /-- Stages 1 and 2 of one curve with normalized base point `(x0 : 1)`;
-`bits` are the bits of `∏ q` (least significant first, top bit set). -/
-@[specialize] def curve (m : μ) (a24 x0 : α) (bits : ByteArray) (plan : ECMM.Plan) (sched : Sched) :
+`prog` is the stage-1 program (`Prac.program B1`). -/
+@[specialize] def curve (m : μ) (a24 x0 : α) (prog : ByteArray) (plan : ECMM.Plan) (sched : Sched) :
     Outcome :=
   let n := modulus (α := α) m
   let one : α := toMont m 1
   let P : Pt α := ⟨x0, one⟩
-  let Q : Pt α := if bits.size ≤ 1 then P else
-    ladderLoop m a24 x0 bits P (dbl m a24 P) (bits.size - 1)
+  let Q : Pt α := pracRun m a24 prog (prog.size + 1) 0 P P P
   let g := gcdN m Q.z
   if g == n then .collapsed
   else if g > 1 then .value (limbNat Q.z)
@@ -257,7 +308,7 @@ inductive Outcome
     | .ok prod => .value (limbNat prod)
 
 /-- One curve for the Suyama parameter `σ` at width `α`. -/
-@[specialize] def runCurveW (m : μ) (n : Nat) (plan : ECMM.Plan) (sched : Sched) (bits : ByteArray)
+@[specialize] def runCurveW (m : μ) (n : Nat) (plan : ECMM.Plan) (sched : Sched) (prog : ByteArray)
     (σ : Nat) : Option (ProperFactor n) :=
   match ECMM.suyama n σ with
   | .error f => f
@@ -266,7 +317,7 @@ inductive Outcome
     | none => ECMM.gcdFactor n P0.z
     | some zinv =>
       let x0 : α := toMont m (P0.x * zinv % n)
-      match curve m (toMont m a24N) x0 bits plan sched with
+      match curve m (toMont m a24N) x0 prog plan sched with
       | .value z => ECMM.gcdFactor n z
       | .collapsed => ECMM.stageOneReplay n a24N plan P0
       | .nothing => none
@@ -276,40 +327,40 @@ end Generic
 set_option maxHeartbeats 1000000
 
 def curve1 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N1) (Mod1.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N1) (Mod1.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve2 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N2) (Mod2.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N2) (Mod2.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve3 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N3) (Mod3.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N3) (Mod3.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve4 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N4) (Mod4.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N4) (Mod4.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve5 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N5) (Mod5.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N5) (Mod5.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve6 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N6) (Mod6.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N6) (Mod6.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve7 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N7) (Mod7.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N7) (Mod7.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve8 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N8) (Mod8.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N8) (Mod8.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve9 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N9) (Mod9.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N9) (Mod9.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve10 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N10) (Mod10.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N10) (Mod10.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve11 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N11) (Mod11.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N11) (Mod11.ofNat n) n fast.plan fast.sched fast.prac σ
 
 def curve12 (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=
-  runCurveW (α := N12) (Mod12.ofNat n) n fast.plan fast.sched fast.bits σ
+  runCurveW (α := N12) (Mod12.ofNat n) n fast.plan fast.sched fast.prac σ
 
 /-- One curve at the width that fits `n` (the `Nat` code beyond 336 bits). -/
 def runCurve (n : Nat) (fast : Fast) (σ : Nat) : Option (ProperFactor n) :=

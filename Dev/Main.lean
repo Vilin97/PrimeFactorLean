@@ -207,6 +207,7 @@ def devMain (args : List String) : IO Unit := do
   | ["mulbench", k] => mulBench k.toNat!
   | ["laddercmp", b] => ladderCompare b.toNat!
   | ["opbench", k] => opBench k.toNat!
+  | ["praccheck", b] => pracCheck b.toNat!
   | ["pm1time", ns, b1] =>
     let n := ns.toNat!
     timed s!"p-1 B1={b1}" fun _ => (PM1F.split n b1.toNat!).map (·.val)
@@ -223,6 +224,7 @@ def devMain (args : List String) : IO Unit := do
     SiqsProf.collectStats n { p1 with M := if m.toNat! > 0 then m.toNat! else p1.M } ts.toNat!
   | ["apolycheck", ns, c] => SiqsProf.aPolyCheck ns.toNat! c.toNat!
   | ["extractparts", ns, ts, fb] => SiqsProf.extractParts ns.toNat! ts.toNat! fb.toNat!
+  | ["lzthreads", ns, ts] => SiqsProf.lanczosThreads ns.toNat! ts.toNat!
   | ["siqsprofsb", ns, as, sb] =>
     let n := ns.toNat!
     SiqsProf.run n { SIQS.chooseParams (QS.decimalDigits n) with smallBound := sb.toNat! } as.toNat!

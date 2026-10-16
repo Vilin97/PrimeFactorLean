@@ -183,3 +183,31 @@ def opBench (k : Nat) : IO Unit := do
   let r3 ← IO.lazyPure fun _ => addChain m b a k
   let t3 ← IO.monoNanosNow
   IO.println s!"mul {(t1 - t0).toFloat / k.toFloat} ns, sqr {(t2 - t1).toFloat / k.toFloat} ns, add/sub {(t3 - t2).toFloat / (3 * k).toFloat} ns ({r1.l0 + r2.l0 + r3.l0})"
+
+/-- PRAC stage 1 against the binary ladder on the same curve (projective `x`
+compared), the number of primes without a chain (opcode 14), and both times. -/
+def pracCheck (b1 : Nat) : IO Unit := do
+  let n := 17100104831195064426243855290661269581152208979016832912601645679249190067150771
+  let m := Mod10.ofNat n
+  let t0 ← IO.monoNanosNow
+  let fast ← IO.lazyPure fun _ => ECMF.mkFast b1 b1
+  let t1 ← IO.monoNanosNow
+  let prog := fast.prac
+  let fallbacks := (List.range prog.size).foldl (fun acc i => if prog.get! i == 14 then acc + 1 else acc) 0
+  let mut bad := 0
+  let mut tl := 0
+  let mut tp := 0
+  for c in [0:4] do
+    let a24 : N10 := Arith.toMont m (12345 + 977 * c)
+    let x0 : N10 := Arith.toMont m (7 + c)
+    let one : N10 := Arith.toMont m 1
+    let P : ECMF.Pt N10 := ⟨x0, one⟩
+    let s0 ← IO.monoNanosNow
+    let Q1 ← IO.lazyPure fun _ => ECMF.ladderLoop m a24 x0 fast.bits P (ECMF.dbl m a24 P) (fast.bits.size - 1)
+    let s1 ← IO.monoNanosNow
+    let Q2 ← IO.lazyPure fun _ => ECMF.pracRun m a24 prog (prog.size + 1) 0 P P P
+    let s2 ← IO.monoNanosNow
+    tl := tl + (s1 - s0)
+    tp := tp + (s2 - s1)
+    if Arith.fromMont m (Arith.mul m Q1.x Q2.z) != Arith.fromMont m (Arith.mul m Q2.x Q1.z) then bad := bad + 1
+  IO.println s!"B1={b1}: program {prog.size} bytes ({(t1 - t0) / 1000000} ms), {fallbacks} primes without a chain; 4 curves: ladder {tl / 4000000} ms, PRAC {tp / 4000000} ms per curve, {bad} mismatches"
