@@ -162,14 +162,8 @@ def fastCheck (n : Nat) (params : SIQS.Params) (seed : Nat) : IO Unit := do
   let B : Int := (ap.Bl.foldl (· + ·) 0 : Nat)
   let C : Int := (B * B - (ctx.N : Int)) / (if ctx.q2 then 4 * A else A)
   IO.println s!"A={ap.A} s={ap.qs.size} check (B^2-N)%A={(B * B - (ctx.N : Int)) % A}"
-  let len : USize := ctx.size.toUSize
-  let mut buf := ctx.template.copySlice 0 ByteArray.empty 0 ctx.template.size
-  if h : len.toNat < buf.size ∧ ctx.medEnd ≤ ctx.prime.size ∧ ctx.medEnd ≤ ctx.cnt.size ∧
-      ctx.medEnd ≤ ap.roots.size ∧ ctx.medEnd ≤ ap.logp.size then
-    buf := SIQS.sieveMed ctx.prime ctx.cnt ap.roots ap.logp buf len h.1 ctx.spv ctx.medEnd h.2.1 h.2.2.1
-      h.2.2.2.1 h.2.2.2.2
-  if h : len.toNat < buf.size ∧ ctx.fb.size ≤ ap.roots.size ∧ ctx.fb.size ≤ ap.logp.size then
-    buf := SIQS.sieveLarge ap.roots ap.logp buf len h.1 ctx.medEnd ctx.fb.size h.2.1 h.2.2
+  let buf := SIQS.sieveAt ctx ap ap.roots (ctx.template.copySlice 0 ByteArray.empty 0 ctx.template.size)
+  let buf := buf.set! ctx.size 0
   let cands := SIQS.scan buf ctx.size
   let rels := SIQS.processCands ctx ap B C ap.roots buf cands #[]
   let mut full := 0
@@ -232,24 +226,8 @@ def fastProfile (n : Nat) (params : SIQS.Params) (seed : Nat) : IO Unit := do
     B := if negate then B - 2 * bv else B + 2 * bv
     let b ← IO.monoNanosNow
     let drow := ap.delta[v]!
-    let st ← IO.lazyPure fun _ => Id.run do
-      let mut buf := ctx.template.copySlice 0 buf 0 ctx.template.size
-      let mut roots := roots
-      if h : len.toNat < buf.size ∧ F ≤ ctx.prime.size ∧ F ≤ drow.size ∧ F ≤ ctx.cnt.size ∧
-          F ≤ ap.logp.size ∧ F ≤ roots.size ∧ ctx.medEnd ≤ F ∧ ctx.spv ≤ F then
-        let (r', b') := SIQS.switchMed ctx.prime drow ctx.cnt ap.logp negate roots buf len h.1
-          ctx.spv ctx.medEnd (by omega) (by omega) (by omega) (by omega) (by omega)
-        roots := r'
-        buf := b'
-      if h : len.toNat < buf.size ∧ F ≤ ctx.prime.size ∧ F ≤ drow.size ∧ F ≤ ap.logp.size ∧
-          F ≤ roots.size then
-        let (r', b') := SIQS.switchBig ctx.prime drow ap.logp negate roots buf len h.1 ctx.medEnd F
-          h.2.1 h.2.2.1 h.2.2.2.1 h.2.2.2.2
-        roots := r'
-        buf := b'
-      if h : ctx.spv ≤ ctx.prime.size ∧ ctx.spv ≤ drow.size ∧ ctx.spv ≤ roots.size then
-        roots := SIQS.moveTiny ctx.prime drow negate roots 1 ctx.spv h.1 h.2.1 h.2.2
-      return (roots, buf)
+    let st ← IO.lazyPure fun _ =>
+      SIQS.switchPoly ctx ap drow negate roots (ctx.template.copySlice 0 buf 0 ctx.template.size)
     roots := st.1
     buf := st.2
     let c ← IO.monoNanosNow
@@ -731,20 +709,9 @@ def grayCheck (n : Nat) (params : SIQS.Params) (seed steps : Nat) : IO Unit := d
     let bv : Int := (ap.Bl[v]! : Int)
     B := if negate then B - 2 * bv else B + 2 * bv
     let drow := ap.delta[v]!
-    if h : len.toNat < scratch.size ∧ F ≤ ctx.prime.size ∧ F ≤ drow.size ∧ F ≤ ctx.cnt.size ∧
-        F ≤ ap.logp.size ∧ F ≤ roots.size ∧ ctx.medEnd ≤ F ∧ ctx.spv ≤ F then
-      let (r', b') := SIQS.switchMed ctx.prime drow ctx.cnt ap.logp negate roots scratch len h.1
-        ctx.spv ctx.medEnd (by omega) (by omega) (by omega) (by omega) (by omega)
-      roots := r'
-      scratch := b'
-    if h : len.toNat < scratch.size ∧ F ≤ ctx.prime.size ∧ F ≤ drow.size ∧ F ≤ ap.logp.size ∧
-        F ≤ roots.size then
-      let (r', b') := SIQS.switchBig ctx.prime drow ap.logp negate roots scratch len h.1 ctx.medEnd F
-        h.2.1 h.2.2.1 h.2.2.2.1 h.2.2.2.2
-      roots := r'
-      scratch := b'
-    if h : ctx.spv ≤ ctx.prime.size ∧ ctx.spv ≤ drow.size ∧ ctx.spv ≤ roots.size then
-      roots := SIQS.moveTiny ctx.prime drow negate roots 1 ctx.spv h.1 h.2.1 h.2.2
+    let (r', b') := SIQS.switchPoly ctx ap drow negate roots scratch
+    roots := r'
+    scratch := b'
   let C : Int := (B * B - (ctx.N : Int)) / (if ctx.q2 then 4 * A else A)
   -- check every root against the definition: A x² + 2 B x + C ≡ 0 at j = root (mod p)
   let mut badRoots := 0
@@ -756,12 +723,7 @@ def grayCheck (n : Nat) (params : SIQS.Params) (seed steps : Nat) : IO Unit := d
       let x : Int := (r : Int) - (ctx.M : Int)
       if ((if ctx.q2 then (A * x + B) * x + C else (A * x + 2 * B) * x + C)) % (p : Int) != 0 then badRoots := badRoots + 1
   let mut buf := ctx.template.copySlice 0 ByteArray.empty 0 ctx.template.size
-  if h : len.toNat < buf.size ∧ ctx.medEnd ≤ ctx.prime.size ∧ ctx.medEnd ≤ ctx.cnt.size ∧
-      ctx.medEnd ≤ roots.size ∧ ctx.medEnd ≤ ap.logp.size then
-    buf := SIQS.sieveMed ctx.prime ctx.cnt roots ap.logp buf len h.1 ctx.spv ctx.medEnd h.2.1 h.2.2.1
-      h.2.2.2.1 h.2.2.2.2
-  if h : len.toNat < buf.size ∧ F ≤ roots.size ∧ F ≤ ap.logp.size then
-    buf := SIQS.sieveLarge roots ap.logp buf len h.1 ctx.medEnd F h.2.1 h.2.2
+  buf := SIQS.sieveAt ctx ap roots buf
   buf := buf.set! ctx.size 0
   let cands := SIQS.scan buf ctx.size
   let rels := SIQS.processCands ctx ap B C roots buf cands #[]
@@ -787,8 +749,10 @@ def grayCheck (n : Nat) (params : SIQS.Params) (seed steps : Nat) : IO Unit := d
   IO.println s!"poly {steps}: bad roots {badRoots}; brute force full {full} partial {part}; candidates {cands.size}, relations {rels.size}; bias {ctx.bias}"
 
 /-- Phase times of the fast SIQS (context, collection, extraction) on `n`. -/
-def siqsPhaseTimes (n threads reps : Nat) : IO Unit := do
+def siqsPhaseTimes (n threads reps : Nat) (fb M : Nat := 0) : IO Unit := do
   let params := PrimeFactorLean.SIQS.chooseParams (PrimeFactorLean.QS.decimalDigits n)
+  let params := if fb > 0 then { params with fbSize := fb } else params
+  let params := if M > 0 then { params with M := M } else params
   for _ in [0:reps] do
     let t0 ← IO.monoNanosNow
     let c ← IO.lazyPure fun _ => PrimeFactorLean.SIQS.mkCtx n params

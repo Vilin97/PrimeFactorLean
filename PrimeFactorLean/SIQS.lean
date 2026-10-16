@@ -129,6 +129,73 @@ theorem size_hitClamp (s : ByteArray) (len a : USize) (lg : UInt8) (h : len.toNa
     (hitClamp s len a lg h).size = s.size := by
   simp [hitClamp, size_uset]
 
+theorem usize_succ_of_lt (i n : USize) (h : i < n) : (i + 1).toNat = i.toNat + 1 := by
+  have h1 := USize.lt_iff_toNat_lt.mp h
+  have h2 : n.toNat < 2 ^ System.Platform.numBits := n.toNat_lt_size
+  rw [USize.toNat_add]
+  have h3 : (1 : USize).toNat = 1 := by
+    show (USize.ofNat 1).toNat = 1
+    have : (USize.ofNat 1).toNat = 1 % 2 ^ System.Platform.numBits := rfl
+    rw [this]
+    apply Nat.mod_eq_of_lt
+    rcases System.Platform.numBits_eq with h | h <;> rw [h] <;> decide
+  rw [h3]
+  exact Nat.mod_eq_of_lt (by omega)
+
+theorem toUSize_toNat_of_lt (n : Nat) (h : n < 2 ^ 32) : n.toUSize.toNat = n := by
+  show (USize.ofNat n).toNat = n
+  have : (USize.ofNat n).toNat = n % 2 ^ System.Platform.numBits := rfl
+  rw [this]
+  have := numBits_ge
+  exact Nat.mod_eq_of_lt (by omega)
+
+/-- `a` inside the interval, else one of the 64 trash bytes `len + (a mod 64)`
+after it: no branch, and misses do not form one dependency chain through a
+single trash byte. -/
+@[inline] def spreadPos (len a : USize) : USize :=
+  if a < len then a else len + (a &&& 63)
+
+theorem spreadPos_lt (len a : USize) (hl : len.toNat < 2 ^ 31) :
+    (spreadPos len a).toNat < len.toNat + 64 := by
+  unfold spreadPos
+  split
+  · have := USize.lt_iff_toNat_lt.mp ‹a < len›
+    omega
+  · have h63 : (a &&& 63).toNat ≤ 63 := by
+      rw [USize.toNat_and]
+      exact Nat.le_trans Nat.and_le_right (by simp)
+    rw [toNat_add_small len (a &&& 63) hl (by omega)]
+    omega
+
+/-- Add `lg` at `spreadPos len a`. -/
+@[inline] def hitSpread (s : ByteArray) (len a : USize) (lg : UInt8) (hl : len.toNat < 2 ^ 31)
+    (h : len.toNat + 64 ≤ s.size) : ByteArray :=
+  have hk : (spreadPos len a).toNat < s.size := by
+    have := spreadPos_lt len a hl
+    omega
+  s.uset (spreadPos len a) (s.uget (spreadPos len a) hk + lg) hk
+
+theorem size_hitSpread (s : ByteArray) (len a : USize) (lg : UInt8) (hl : len.toNat < 2 ^ 31)
+    (h : len.toNat + 64 ≤ s.size) : (hitSpread s len a lg hl h).size = s.size := by
+  simp [hitSpread, size_uset]
+
+/-- Sieve primes beyond the interval at their current roots (one update per root,
+misses spread over the trash bytes). -/
+def sieveLarge (roots : Array Nat) (logp : ByteArray) (s : ByteArray) (len : USize)
+    (hl : len.toNat < 2 ^ 31) (hs : len.toNat + 64 ≤ s.size) (i stop : USize)
+    (h2 : stop.toNat ≤ roots.size) (h3 : stop.toNat ≤ logp.size) : ByteArray :=
+  if hi : i < stop then
+    have hlt := USize.lt_iff_toNat_lt.mp hi
+    let w := roots.uget i (by omega)
+    let lg := logp.uget i (by omega)
+    let t := hitSpread s len (root1 w).toUSize lg hl hs
+    let t := hitSpread t len (root2 w).toUSize lg hl (by rw [size_hitSpread]; exact hs)
+    sieveLarge roots logp t len hl (by rw [size_hitSpread, size_hitSpread]; exact hs) (i + 1) stop
+      h2 h3
+  else s
+termination_by stop.toNat - i.toNat
+decreasing_by rw [usize_succ_of_lt i stop hi]; omega
+
 /-- Exactly `count` updates at `j, j + p, …`, each clamped onto the trash byte:
 for a run of primes with the same `count = ⌈len / p⌉` the loop exit is
 predictable. -/
@@ -161,19 +228,6 @@ def sieveFrom (primeB : ByteArray) (roots : Array Nat) (logp : ByteArray) (s : B
   else s
 termination_by stop - i
 
-/-- Sieve primes beyond the interval at their current roots (one clamped update
-per root). -/
-def sieveLarge (roots : Array Nat) (logp : ByteArray) (s : ByteArray) (len : USize)
-    (hs : len.toNat < s.size) (i stop : Nat) (h2 : stop ≤ roots.size) (h3 : stop ≤ logp.size) :
-    ByteArray :=
-  if hi : i < stop then
-    let w := roots[i]
-    let lg := logp.get i (by omega)
-    let t := hitClamp s len (root1 w).toUSize lg hs
-    let t := hitClamp t len (root2 w).toUSize lg (by rw [size_hitClamp]; exact hs)
-    sieveLarge roots logp t len (by rw [size_hitClamp, size_hitClamp]; exact hs) (i + 1) stop h2 h3
-  else s
-termination_by stop - i
 
 /-- Gray-code switch for the primes in `[i, stop)` below the interval length:
 both roots move by `±δ`, then the prime is sieved at the new roots. -/
@@ -295,69 +349,80 @@ theorem size_stride2 (s : ByteArray) (len a b p : USize) (lg : UInt8) (h : len.t
 /-- Sieve the primes with index in `[i, stop)` (below the interval length) at their
 current roots: the first polynomial of an `A`. -/
 def sieveMed (prime cnt : Array UInt32) (roots : Array Nat) (logp : ByteArray) (s : ByteArray)
-    (len : USize) (hs : len.toNat < s.size) (i stop : Nat) (h1 : stop ≤ prime.size)
-    (h2 : stop ≤ cnt.size) (h3 : stop ≤ roots.size) (h4 : stop ≤ logp.size) : ByteArray :=
+    (len : USize) (hs : len.toNat < s.size) (i stop : USize) (h1 : stop.toNat ≤ prime.size)
+    (h2 : stop.toNat ≤ cnt.size) (h3 : stop.toNat ≤ roots.size) (h4 : stop.toNat ≤ logp.size) :
+    ByteArray :=
   if hi : i < stop then
-    let w := roots[i]
-    let t := stride2 s len (root1 w).toUSize (root2 w).toUSize prime[i].toUSize
-      (logp.get i (by omega)) hs cnt[i].toUSize
+    have hlt := USize.lt_iff_toNat_lt.mp hi
+    let w := roots.uget i (by omega)
+    let t := stride2 s len (root1 w).toUSize (root2 w).toUSize (prime.uget i (by omega)).toUSize
+      (logp.uget i (by omega)) hs (cnt.uget i (by omega)).toUSize
     sieveMed prime cnt roots logp t len (by rw [size_stride2]; exact hs) (i + 1) stop h1 h2 h3 h4
   else s
-termination_by stop - i
+termination_by stop.toNat - i.toNat
+decreasing_by rw [usize_succ_of_lt i stop hi]; omega
 
 /-- Gray-code switch for the primes in `[i, stop)` below the interval length:
 both roots move by `±δ`, then the prime is sieved at the new roots. -/
 def switchMed (prime delta cnt : Array UInt32) (logp : ByteArray) (add : Bool)
-    (roots : Array Nat) (s : ByteArray) (len : USize) (hs : len.toNat < s.size) (i stop : Nat)
-    (h1 : stop ≤ prime.size) (h2 : stop ≤ delta.size) (h3 : stop ≤ cnt.size)
-    (h4 : stop ≤ logp.size) (h5 : stop ≤ roots.size) : Array Nat × ByteArray :=
+    (roots : Array Nat) (s : ByteArray) (len : USize) (hs : len.toNat < s.size) (i stop : USize)
+    (h1 : stop.toNat ≤ prime.size) (h2 : stop.toNat ≤ delta.size) (h3 : stop.toNat ≤ cnt.size)
+    (h4 : stop.toNat ≤ logp.size) (h5 : stop.toNat ≤ roots.size) : Array Nat × ByteArray :=
   if hi : i < stop then
-    let p := prime[i]
-    let d := delta[i]
-    let w := roots[i]
+    have hlt := USize.lt_iff_toNat_lt.mp hi
+    let p := prime.uget i (by omega)
+    let d := delta.uget i (by omega)
+    let w := roots.uget i (by omega)
     let a := moveRoot add (root1 w) d p
     let b := moveRoot add (root2 w) d p
-    let t := stride2 s len a.toUSize b.toUSize p.toUSize (logp.get i (by omega)) hs cnt[i].toUSize
-    let roots' := roots.set i (packRoots a b) (by omega)
+    let t := stride2 s len a.toUSize b.toUSize p.toUSize (logp.uget i (by omega)) hs
+      (cnt.uget i (by omega)).toUSize
+    let roots' := roots.uset i (packRoots a b) (by omega)
     switchMed prime delta cnt logp add roots' t len (by rw [size_stride2]; exact hs) (i + 1) stop
       h1 h2 h3 h4 (by simp [roots']; omega)
   else (roots, s)
-termination_by stop - i
+termination_by stop.toNat - i.toNat
+decreasing_by rw [usize_succ_of_lt i stop hi]; omega
 
-/-- Gray-code switch for primes beyond the interval: one clamped update per root. -/
+/-- Gray-code switch for primes beyond the interval: one update per root, misses
+spread over the trash bytes (a branch on `a < len` mispredicts for primes not
+much larger than the interval: 6.6 ns per prime at 80 digits). -/
 def switchBig (prime delta : Array UInt32) (logp : ByteArray) (add : Bool) (roots : Array Nat)
-    (s : ByteArray) (len : USize) (hs : len.toNat < s.size) (i stop : Nat)
-    (h1 : stop ≤ prime.size) (h2 : stop ≤ delta.size) (h4 : stop ≤ logp.size)
-    (h5 : stop ≤ roots.size) : Array Nat × ByteArray :=
+    (s : ByteArray) (len : USize) (hl : len.toNat < 2 ^ 31) (hs : len.toNat + 64 ≤ s.size)
+    (i stop : USize) (h1 : stop.toNat ≤ prime.size) (h2 : stop.toNat ≤ delta.size)
+    (h4 : stop.toNat ≤ logp.size) (h5 : stop.toNat ≤ roots.size) : Array Nat × ByteArray :=
   if hi : i < stop then
-    let p := prime[i]
-    let d := delta[i]
-    let w := roots[i]
+    have hlt := USize.lt_iff_toNat_lt.mp hi
+    let p := prime.uget i (by omega)
+    let d := delta.uget i (by omega)
+    let w := roots.uget i (by omega)
     let a := moveRoot add (root1 w) d p
     let b := moveRoot add (root2 w) d p
-    let lg := logp.get i (by omega)
-    -- a root beyond the interval is skipped (a branch rather than an update of
-    -- the trash byte: those updates would form one chain through memory)
-    let t := hitIf s len a.toUSize lg hs
-    let t := hitIf t len b.toUSize lg (by rw [size_hitIf]; exact hs)
-    let roots' := roots.set i (packRoots a b) (by omega)
-    switchBig prime delta logp add roots' t len (by rw [size_hitIf, size_hitIf]; exact hs)
+    let lg := logp.uget i (by omega)
+    let t := hitSpread s len a.toUSize lg hl hs
+    let t := hitSpread t len b.toUSize lg hl (by rw [size_hitSpread]; exact hs)
+    let roots' := roots.uset i (packRoots a b) (by omega)
+    switchBig prime delta logp add roots' t len hl (by rw [size_hitSpread, size_hitSpread]; exact hs)
       (i + 1) stop h1 h2 h4 (by simp [roots']; omega)
   else (roots, s)
-termination_by stop - i
+termination_by stop.toNat - i.toNat
+decreasing_by rw [usize_succ_of_lt i stop hi]; omega
 
 /-- Roots of the unsieved small primes `[i, stop)` move without sieving. -/
-def moveTiny (prime delta : Array UInt32) (add : Bool) (roots : Array Nat) (i stop : Nat)
-    (h1 : stop ≤ prime.size) (h2 : stop ≤ delta.size) (h5 : stop ≤ roots.size) : Array Nat :=
+def moveTiny (prime delta : Array UInt32) (add : Bool) (roots : Array Nat) (i stop : USize)
+    (h1 : stop.toNat ≤ prime.size) (h2 : stop.toNat ≤ delta.size) (h5 : stop.toNat ≤ roots.size) :
+    Array Nat :=
   if hi : i < stop then
-    let p := prime[i]
-    let d := delta[i]
-    let w := roots[i]
-    let roots' := roots.set i (packRoots (moveRoot add (root1 w) d p) (moveRoot add (root2 w) d p))
+    have hlt := USize.lt_iff_toNat_lt.mp hi
+    let p := prime.uget i (by omega)
+    let d := delta.uget i (by omega)
+    let w := roots.uget i (by omega)
+    let roots' := roots.uset i (packRoots (moveRoot add (root1 w) d p) (moveRoot add (root2 w) d p))
       (by omega)
     moveTiny prime delta add roots' (i + 1) stop h1 h2 (by simp [roots']; omega)
   else roots
-termination_by stop - i
+termination_by stop.toNat - i.toNat
+decreasing_by rw [usize_succ_of_lt i stop hi]; omega
 
 /-! ## Context -/
 
@@ -438,6 +503,8 @@ structure Ctx where
   /-- `p⁻¹ mod 2^32` and `⌊(2^32 - 1)/p⌋`: `p ∣ x` iff `x · p⁻¹ ≤ lim (mod 2^32)`. -/
   pinv : Array UInt32
   lim : Array UInt32
+  /-- `lim + 2^31 pinv` (both fit: `lim < 2^31` for `p ≥ 3`), one read per prime. -/
+  pl : Array Nat
   spv : Nat
   /-- First index whose prime is tested by walking its progression (not by roots). -/
   smallEnd : Nat
@@ -494,8 +561,8 @@ def mkCtx (n : Nat) (params : Params) : Ctx ⊕ Nat := Id.run do
   let t := thr / scale
   let t := if t < 10.0 then 10.0 else t
   let bias := (128.0 - t).toUInt8
-  -- one extra (trash) byte for clamped updates
-  let template := ByteArray.mk (Array.replicate (size + 1) bias)
+  -- trash bytes for clamped updates (the first) and spread misses (all 64)
+  let template := ByteArray.mk (Array.replicate (size + 64) bias)
   let mut medEnd := spv
   while medEnd < fb.size && fb[medEnd]! < size do medEnd := medEnd + 1
   let mut smallEnd := spv
@@ -511,6 +578,8 @@ def mkCtx (n : Nat) (params : Params) : Ctx ⊕ Nat := Id.run do
                 M := M, size := size,
                 mmod := fb.map fun p => (M % p).toUInt32, pinv := prime.map inv32,
                 lim := prime.map fun p => if p == 0 then 0 else (0xFFFFFFFF : UInt32) / p,
+                pl := prime.map fun p =>
+                  if p < 3 then 0 else ((0xFFFFFFFF : UInt32) / p).toNat + (inv32 p).toNat * 2147483648,
                 spv := spv, smallEnd := smallEnd, medEnd := medEnd, bias := bias,
                 lpBound := lpBound, dlpBound := dlpBound, template := template,
                 target := if q2 then isqrt (2 * N) / (2 * M) else isqrt (2 * N) / M,
@@ -1283,29 +1352,36 @@ powers and the unsieved primes) are factored exactly, with big numbers. -/
 
 /-- Primes `[i, stop)` dividing `v(x)` at position `j`, by their roots (primes
 with zero sieve logarithm, those of `A` and `kN`, are skipped: they are tested
-exactly later). Accumulates the indices and their `log8`. -/
-def smallTest (logp log8 : ByteArray) (pinv lim : Array UInt32) (roots : Array Nat) (j : UInt32)
-    (i stop : Nat) (h1 : stop ≤ logp.size) (h2 : stop ≤ log8.size) (h3 : stop ≤ pinv.size)
-    (h4 : stop ≤ lim.size) (h5 : stop ≤ roots.size) (hits : List Nat) (l : Nat) : List Nat × Nat :=
+exactly later). Accumulates the indices and their `log8`. `p ∣ j - r` iff
+`(j + p - r) p⁻¹ ≤ ⌊(2^32 - 1)/p⌋ (mod 2^32)` (Granlund–Montgomery; `j + p - r`
+is positive, so no comparison of `j` with the root), both roots at once by a
+`min` (no branch but the rare hit). -/
+def smallTest (logp log8 : ByteArray) (prime : Array UInt32) (pl roots : Array Nat) (j : UInt32)
+    (i stop : USize) (h1 : stop.toNat ≤ logp.size) (h2 : stop.toNat ≤ log8.size)
+    (h3 : stop.toNat ≤ prime.size) (h4 : stop.toNat ≤ pl.size) (h5 : stop.toNat ≤ roots.size)
+    (hits : List Nat) (l : Nat) : List Nat × Nat :=
   if hi : i < stop then
-    if logp.get i (by omega) == 0 then
-      smallTest logp log8 pinv lim roots j (i + 1) stop h1 h2 h3 h4 h5 hits l
+    have hlt := USize.lt_iff_toNat_lt.mp hi
+    if logp.uget i (by omega) == 0 then
+      smallTest logp log8 prime pl roots j (i + 1) stop h1 h2 h3 h4 h5 hits l
     else
-      let w := roots[i]
-      let q := pinv[i]
-      let lm := lim[i]
-      if rootHit j (root1 w) q lm || rootHit j (root2 w) q lm then
-        smallTest logp log8 pinv lim roots j (i + 1) stop h1 h2 h3 h4 h5 (i :: hits)
-          (l + (log8.get i (by omega)).toNat)
-      else smallTest logp log8 pinv lim roots j (i + 1) stop h1 h2 h3 h4 h5 hits l
+      let w := roots.uget i (by omega)
+      let c := (pl.uget i (by omega)).toUInt64
+      let q := (c >>> 31).toUInt32
+      let jp := j + prime.uget i (by omega)
+      if min ((jp - root1 w) * q) ((jp - root2 w) * q) ≤ (c &&& 0x7FFFFFFF).toUInt32 then
+        smallTest logp log8 prime pl roots j (i + 1) stop h1 h2 h3 h4 h5 (i.toNat :: hits)
+          (l + (log8.uget i (by omega)).toNat)
+      else smallTest logp log8 prime pl roots j (i + 1) stop h1 h2 h3 h4 h5 hits l
   else (hits, l)
-termination_by stop - i
+termination_by stop.toNat - i.toNat
+decreasing_by all_goals (rw [usize_succ_of_lt i stop hi]; omega)
 
 /-- `count` clamped steps of the progressions `a, b (+ p)`: record
 `pos <<< 24 ||| tag` for every position whose byte is `≥ 128`. The trash byte at
 `len` (where clamped positions land) is zero during candidate processing, so a
 clamped step never records anything. -/
-def walk2 (buf : ByteArray) (len a b p : USize) (tag : Nat) (h : len.toNat < buf.size)
+def walk2 (buf : ByteArray) (len a b p tag : USize) (h : len.toNat < buf.size)
     (acc : Array Nat) (count : USize) : Array Nat :=
   if hc : count = 0 then acc
   else
@@ -1324,8 +1400,8 @@ def walk2 (buf : ByteArray) (len a b p : USize) (tag : Nat) (h : len.toNat < buf
     let va := buf.uget ka (uget_bound hka h)
     let vb := buf.uget kb (uget_bound hkb h)
     if (va ||| vb) ≥ 128 then
-      let acc := if va ≥ 128 then acc.push ((ka.toNat <<< 24) ||| tag) else acc
-      let acc := if vb ≥ 128 then acc.push ((kb.toNat <<< 24) ||| tag) else acc
+      let acc := if va ≥ 128 then acc.push ((ka <<< 24) ||| tag).toNat else acc
+      let acc := if vb ≥ 128 then acc.push ((kb <<< 24) ||| tag).toNat else acc
       walk2 buf len (a + p) (b + p) p tag h acc (count - 1)
     else walk2 buf len (a + p) (b + p) p tag h acc (count - 1)
 termination_by count.toNat
@@ -1333,31 +1409,36 @@ decreasing_by all_goals exact usize_pred_lt count hc
 
 /-- Walk the primes `[i, stop)` below the interval (skipping zero logarithms). -/
 def walkMed (prime cnt : Array UInt32) (logp : ByteArray) (roots : Array Nat) (buf : ByteArray)
-    (len : USize) (h : len.toNat < buf.size) (i stop : Nat) (h1 : stop ≤ prime.size)
-    (h2 : stop ≤ cnt.size) (h3 : stop ≤ logp.size) (h4 : stop ≤ roots.size) (acc : Array Nat) :
-    Array Nat :=
+    (len : USize) (h : len.toNat < buf.size) (i stop : USize) (h1 : stop.toNat ≤ prime.size)
+    (h2 : stop.toNat ≤ cnt.size) (h3 : stop.toNat ≤ logp.size) (h4 : stop.toNat ≤ roots.size)
+    (acc : Array Nat) : Array Nat :=
   if hi : i < stop then
-    if logp.get i (by omega) == 0 then walkMed prime cnt logp roots buf len h (i + 1) stop h1 h2 h3 h4 acc
+    have hlt := USize.lt_iff_toNat_lt.mp hi
+    if logp.uget i (by omega) == 0 then
+      walkMed prime cnt logp roots buf len h (i + 1) stop h1 h2 h3 h4 acc
     else
-      let w := roots[i]
-      let acc := walk2 buf len (root1 w).toUSize (root2 w).toUSize prime[i].toUSize i h acc
-        cnt[i].toUSize
+      let w := roots.uget i (by omega)
+      let acc := walk2 buf len (root1 w).toUSize (root2 w).toUSize (prime.uget i (by omega)).toUSize
+        i h acc (cnt.uget i (by omega)).toUSize
       walkMed prime cnt logp roots buf len h (i + 1) stop h1 h2 h3 h4 acc
   else acc
-termination_by stop - i
+termination_by stop.toNat - i.toNat
+decreasing_by all_goals (rw [usize_succ_of_lt i stop hi]; omega)
 
 /-- Primes `[i, stop)` beyond the interval: one look at each root. -/
 def checkBig (logp : ByteArray) (roots : Array Nat) (buf : ByteArray) (len : USize)
-    (h : len.toNat < buf.size) (i stop : Nat) (h3 : stop ≤ logp.size) (h4 : stop ≤ roots.size)
-    (acc : Array Nat) : Array Nat :=
+    (h : len.toNat < buf.size) (i stop : USize) (h3 : stop.toNat ≤ logp.size)
+    (h4 : stop.toNat ≤ roots.size) (acc : Array Nat) : Array Nat :=
   if hi : i < stop then
-    if logp.get i (by omega) == 0 then checkBig logp roots buf len h (i + 1) stop h3 h4 acc
+    have hlt := USize.lt_iff_toNat_lt.mp hi
+    if logp.uget i (by omega) == 0 then checkBig logp roots buf len h (i + 1) stop h3 h4 acc
     else
-      let w := roots[i]
+      let w := roots.uget i (by omega)
       checkBig logp roots buf len h (i + 1) stop h3 h4
         (walk2 buf len (root1 w).toUSize (root2 w).toUSize 0 i h acc 1)
   else acc
-termination_by stop - i
+termination_by stop.toNat - i.toNat
+decreasing_by all_goals (rw [usize_succ_of_lt i stop hi]; omega)
 
 /-- Index of `pos` in the increasing array `cands` (`cands.size` if absent). -/
 def findCand (cands : Array Nat) (pos : Nat) : Nat := Id.run do
@@ -1410,22 +1491,116 @@ def exactRelation (ctx : Ctx) (ap : APoly) (B C : Int) (j : Nat) (found : List N
   | some r => return some ⟨r, l1, l2⟩
   | none => return none
 
-/-- All relations from the candidates of one polynomial. -/
-def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf : ByteArray)
-    (cands : Array Nat) (rels : Array (Found ctx.n ctx.fb)) : Array (Found ctx.n ctx.fb) := Id.run do
-  let F := ctx.fb.size
+/-- The large primes of a cofactor `u` (`none`: not a relation): `1` and `1` for
+`u = 1`, `1` and `u` below the large-prime bound, two primes below it for
+composite `u` below the double-large-prime bound. -/
+def largePrimes (ctx : Ctx) (u : Nat) : Option (Nat × Nat) :=
+  if u == 1 then some (1, 1)
+  else if u < ctx.lpBound then some (1, u)
+  else if ctx.dlpBound > 0 && u < ctx.dlpBound then splitCofactor u ctx.lpBound
+  else none
+
+/-- Divide the powers of `p` out of `w` (`e` counts them). -/
+def stripU (p : UInt64) : Nat → UInt64 → Nat → UInt64 × Nat
+  | 0, w, e => (w, e)
+  | fuel + 1, w, e => if w % p == 0 then stripU p fuel (w / p) (e + 1) else (w, e)
+
+/-- What `fastCofactor` concludes about a candidate. -/
+inductive Cof where
+  /-- No conclusion: factor exactly. -/
+  | unknown
+  /-- Not a relation. -/
+  | reject
+  /-- The exponents (unsorted, an index may repeat), the cofactor and its large primes. -/
+  | accept (exps : List (Nat × Nat)) (u l1 l2 : Nat)
+
+/-- The factorization of `v(x)` in machine words, for a candidate whose
+factor-base primes `found` (each dividing `v(x)`; those of `A` and `kN` aside)
+are known. `w = |v| / (2^e2 ∏ found)` is an integer, and `|v| mod 2^64`
+(`absLow`) gives `w mod 2^(64 - e2) = (|v| / 2^e2) ∏ p⁻¹`, which is `w` itself
+when `w < 2^(62 - e2)`; that is checked against the floating-point estimate
+`vf / (2^e2 ∏ p)`. The repeated primes and those of `A` and `kN` are then
+divided out of `w`, leaving the cofactor. The relation is checked when it is
+built (`Relation.mk?`), so a wrong answer here can only lose a relation; most
+candidates are rejected here without big-number arithmetic. -/
+def fastCofactor (ctx : Ctx) (ap : APoly) (found : List Nat) (absLow : UInt64) (e2 : Nat)
+    (vf : Float) : Cof := Id.run do
+  if e2 ≥ 40 then return .unknown
+  let mut r : UInt64 := absLow >>> e2.toUInt64
+  let mut pf : Float := fc 1
+  for i in found do
+    let p := (ctx.prime[i]!).toUInt64
+    -- `p⁻¹ mod 2^64` from `p⁻¹ mod 2^32` by one Newton step
+    let x := (ctx.pinv[i]!).toUInt64
+    r := r * (x * (2 - p * x))
+    pf := pf * p.toFloat
+  let wf := vf / (pf * ((1 : UInt64) <<< e2.toUInt64).toFloat)
+  let bound : UInt64 := (1 : UInt64) <<< (62 - e2).toUInt64
+  if wf ≥ bound.toFloat then return .unknown
+  let w0 := r &&& (bound - 1)
+  -- consistency with the estimate (a prime of `found` not dividing `v(x)` would break it)
+  if (w0.toFloat - wf).abs > wf / fc 1048576 + fc 2 then return .unknown
+  let mut w := w0
+  let mut exps : List (Nat × Nat) := []
+  for i in found do
+    let (w', e) := stripU (ctx.prime[i]!).toUInt64 64 w 1
+    w := w'
+    exps := (i, e) :: exps
+  for i in ap.qs do
+    exps := (i, 1) :: exps
+    let (w', e) := stripU (ctx.prime[i]!).toUInt64 64 w 0
+    if e > 0 then
+      w := w'
+      exps := (i, e) :: exps
+  for i in ctx.special do
+    let (w', e) := stripU (ctx.prime[i]!).toUInt64 64 w 0
+    if e > 0 then
+      w := w'
+      exps := (i, e) :: exps
+  if e2 > 0 then exps := (0, e2) :: exps
+  let u := w.toNat
+  match largePrimes ctx u with
+  | some (l1, l2) => return .accept exps u l1 l2
+  | none => return .reject
+
+/-- The checked relation at position `j` from the exponents and cofactor of
+`fastCofactor` (`neg`: the sign of `v(x)`). -/
+def relationOf (ctx : Ctx) (ap : APoly) (B : Int) (j : Nat) (neg : Bool) (u : Nat)
+    (exps : List (Nat × Nat)) (l1 l2 : Nat) : Option (Found ctx.n ctx.fb) :=
+  let x : Int := (j : Int) - (ctx.M : Int)
+  let A : Int := ap.A
+  let X := ((if ctx.q2 then 2 * A * x + B else A * x + B) % (ctx.n : Int)).toNat
+  let sorted := exps.mergeSort (fun a b => a.1 ≤ b.1)
+  match Relation.mk? ctx.n ctx.fb X (if ctx.q2 then 2 else 1) u neg sorted with
+  | some r => some ⟨r, l1, l2⟩
+  | none => none
+
+/-- The lists of medium and big factor-base primes of the candidates: the
+progressions of the medium primes are walked once, the roots of the big primes
+looked at once. -/
+def walkLists (ctx : Ctx) (ap : APoly) (roots : Array Nat) (buf : ByteArray) (cands : Array Nat) :
+    Array (List Nat) := Id.run do
   let len : USize := ctx.size.toUSize
+  let smallU := ctx.smallEnd.toUSize
+  let medU := ctx.medEnd.toUSize
+  let FU := ctx.fb.size.toUSize
   let mut recs : Array Nat := #[]
-  if h : len.toNat < buf.size ∧ ctx.medEnd ≤ ctx.prime.size ∧ ctx.medEnd ≤ ctx.cnt.size ∧
-      ctx.medEnd ≤ ap.logp.size ∧ ctx.medEnd ≤ roots.size then
-    recs := walkMed ctx.prime ctx.cnt ap.logp roots buf len h.1 ctx.smallEnd ctx.medEnd h.2.1 h.2.2.1
+  if h : len.toNat < buf.size ∧ medU.toNat ≤ ctx.prime.size ∧ medU.toNat ≤ ctx.cnt.size ∧
+      medU.toNat ≤ ap.logp.size ∧ medU.toNat ≤ roots.size then
+    recs := walkMed ctx.prime ctx.cnt ap.logp roots buf len h.1 smallU medU h.2.1 h.2.2.1
       h.2.2.2.1 h.2.2.2.2 recs
-  if h : len.toNat < buf.size ∧ F ≤ ap.logp.size ∧ F ≤ roots.size then
-    recs := checkBig ap.logp roots buf len h.1 ctx.medEnd F h.2.1 h.2.2 recs
+  if h : len.toNat < buf.size ∧ FU.toNat ≤ ap.logp.size ∧ FU.toNat ≤ roots.size then
+    recs := checkBig ap.logp roots buf len h.1 medU FU h.2.1 h.2.2 recs
   let mut lists : Array (List Nat) := Array.replicate cands.size []
   for r in recs do
     let c := findCand cands (r >>> 24)
     if c < cands.size then lists := lists.modify c ((r &&& 0xFFFFFF) :: ·)
+  return lists
+
+/-- All relations from the candidates of one polynomial. -/
+def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf : ByteArray)
+    (cands : Array Nat) (rels : Array (Found ctx.n ctx.fb)) : Array (Found ctx.n ctx.fb) := Id.run do
+  let lists := walkLists ctx ap roots buf cands
   let Af := nf ap.A
   let Bf := intF B
   let Cf := intF C
@@ -1440,10 +1615,13 @@ def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf :
   let biasF := nf ctx.bias.toNat
   let B2f := if ctx.q2 then Bf else fc 2 * Bf
   let pre8F := nf ctx.pre8
+  let spvU := ctx.spv.toUSize
+  let smallU := ctx.smallEnd.toUSize
   for c in [0:cands.size] do
     let j := cands[c]!
     let x := nf j - Mf
-    let vf := ((Af * x + B2f) * x + Cf).abs
+    let vs := (Af * x + B2f) * x + Cf
+    let vf := vs.abs
     let l8v := if vf < fc 2 then fc 0 else fc 8 * Float.log2 vf
     let x64 := j.toUInt64 - M64
     let v64 := (A64 * x64 + B64) * x64 + C64
@@ -1452,17 +1630,17 @@ def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf :
     -- roots and the sieved ones through the sieve byte (rounded logarithms, each
     -- prime once), with four bits for rounding and prime powers
     let (tiny, lt) :=
-      if h : ctx.spv ≤ ap.logp.size ∧ ctx.spv ≤ ctx.log8.size ∧ ctx.spv ≤ ctx.pinv.size ∧
-          ctx.spv ≤ ctx.lim.size ∧ ctx.spv ≤ roots.size then
-        smallTest ap.logp ctx.log8 ctx.pinv ctx.lim roots j.toUInt32 1 ctx.spv h.1 h.2.1 h.2.2.1
+      if h : spvU.toNat ≤ ap.logp.size ∧ spvU.toNat ≤ ctx.log8.size ∧ spvU.toNat ≤ ctx.prime.size ∧
+          spvU.toNat ≤ ctx.pl.size ∧ spvU.toNat ≤ roots.size then
+        smallTest ap.logp ctx.log8 ctx.prime ctx.pl roots j.toUInt32 1 spvU h.1 h.2.1 h.2.2.1
           h.2.2.2.1 h.2.2.2.2 [] (8 * e2)
       else ([], 8 * e2)
     let sieved := ((buf.get! j).toUInt64.toFloat - biasF) * ctx.scale * fc 8
     if l8v > nf lt + sieved + pre8F then continue
     let (hits, l8) :=
-      if h : ctx.smallEnd ≤ ap.logp.size ∧ ctx.smallEnd ≤ ctx.log8.size ∧ ctx.smallEnd ≤ ctx.pinv.size ∧
-          ctx.smallEnd ≤ ctx.lim.size ∧ ctx.smallEnd ≤ roots.size then
-        smallTest ap.logp ctx.log8 ctx.pinv ctx.lim roots j.toUInt32 ctx.spv ctx.smallEnd h.1 h.2.1
+      if h : smallU.toNat ≤ ap.logp.size ∧ smallU.toNat ≤ ctx.log8.size ∧
+          smallU.toNat ≤ ctx.prime.size ∧ smallU.toNat ≤ ctx.pl.size ∧ smallU.toNat ≤ roots.size then
+        smallTest ap.logp ctx.log8 ctx.prime ctx.pl roots j.toUInt32 spvU smallU h.1 h.2.1
           h.2.2.1 h.2.2.2.1 h.2.2.2.2 tiny lt
       else (tiny, lt)
     let mut l8 := l8
@@ -1471,30 +1649,77 @@ def processCands (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf :
       l8 := l8 + (ctx.log8.get! i).toNat
       found := i :: found
     if l8v ≤ (nf (l8 + ctx.allow8)) then
-      if let some r := exactRelation ctx ap B C j found then rels := rels.push r
+      let neg := vs < fc 0
+      -- the sign of a value far below the size of its terms is not trusted
+      let vmag := (Af * x * x).abs + (B2f * x).abs + Cf.abs
+      let cof := if vf * fc 1073741824 < vmag then .unknown
+        else fastCofactor ctx ap found (if neg then -v64 else v64) e2 vf
+      match cof with
+      | .reject => pure ()
+      | .accept exps u l1 l2 =>
+        if let some r := relationOf ctx ap B j neg u exps l1 l2 then rels := rels.push r
+      | .unknown =>
+        if let some r := exactRelation ctx ap B C j found then rels := rels.push r
   return rels
 
 /-! ## One `A`: all of its Gray-code polynomials -/
 
+/-- Sieve every sieved prime at `roots` (the first polynomial of an `A`). -/
+def sieveAt (ctx : Ctx) (ap : APoly) (roots : Array Nat) (buf : ByteArray) : ByteArray :=
+  let len : USize := ctx.size.toUSize
+  let spvU := ctx.spv.toUSize
+  let medU := ctx.medEnd.toUSize
+  let FU := ctx.fb.size.toUSize
+  let buf :=
+    if h : len.toNat < buf.size ∧ medU.toNat ≤ ctx.prime.size ∧ medU.toNat ≤ ctx.cnt.size ∧
+        medU.toNat ≤ roots.size ∧ medU.toNat ≤ ap.logp.size then
+      sieveMed ctx.prime ctx.cnt roots ap.logp buf len h.1 spvU medU h.2.1 h.2.2.1 h.2.2.2.1
+        h.2.2.2.2
+    else buf
+  if h : len.toNat < 2 ^ 31 ∧ len.toNat + 64 ≤ buf.size ∧ FU.toNat ≤ roots.size ∧
+      FU.toNat ≤ ap.logp.size then
+    sieveLarge roots ap.logp buf len h.1 h.2.1 medU FU h.2.2.1 h.2.2.2
+  else buf
+
+/-- The next Gray-code polynomial: the roots move by `±δ` (`drow`, `negate`) and
+the buffer (a copy of the template) is sieved at the new roots; the roots of the
+unsieved small primes move too. -/
+def switchPoly (ctx : Ctx) (ap : APoly) (drow : Array UInt32) (negate : Bool) (roots : Array Nat)
+    (buf : ByteArray) : Array Nat × ByteArray :=
+  let len : USize := ctx.size.toUSize
+  let spvU := ctx.spv.toUSize
+  let medU := ctx.medEnd.toUSize
+  let FU := ctx.fb.size.toUSize
+  let (roots, buf) :=
+    if h : len.toNat < buf.size ∧ medU.toNat ≤ ctx.prime.size ∧ medU.toNat ≤ drow.size ∧
+        medU.toNat ≤ ctx.cnt.size ∧ medU.toNat ≤ ap.logp.size ∧ medU.toNat ≤ roots.size then
+      switchMed ctx.prime drow ctx.cnt ap.logp negate roots buf len h.1 spvU medU h.2.1 h.2.2.1
+        h.2.2.2.1 h.2.2.2.2.1 h.2.2.2.2.2
+    else (roots, buf)
+  let (roots, buf) :=
+    if h : len.toNat < 2 ^ 31 ∧ len.toNat + 64 ≤ buf.size ∧ FU.toNat ≤ ctx.prime.size ∧
+        FU.toNat ≤ drow.size ∧ FU.toNat ≤ ap.logp.size ∧ FU.toNat ≤ roots.size then
+      switchBig ctx.prime drow ap.logp negate roots buf len h.1 h.2.1 medU FU h.2.2.1 h.2.2.2.1
+        h.2.2.2.2.1 h.2.2.2.2.2
+    else (roots, buf)
+  let roots :=
+    if h : spvU.toNat ≤ ctx.prime.size ∧ spvU.toNat ≤ drow.size ∧ spvU.toNat ≤ roots.size then
+      moveTiny ctx.prime drow negate roots 1 spvU h.1 h.2.1 h.2.2
+    else roots
+  (roots, buf)
+
 /-- Sieve every polynomial of the `A` chosen by `seed`. -/
 def processA (ctx : Ctx) (seed : Nat) : Array (Found ctx.n ctx.fb) := Id.run do
   let some ap := mkAPoly ctx seed | return #[]
-  let F := ctx.fb.size
   let s := ap.qs.size
-  let len : USize := ctx.size.toUSize
   let mut rels : Array (Found ctx.n ctx.fb) := #[]
   let mut B : Int := (ap.Bl.foldl (· + ·) 0 : Nat)
   let A : Int := ap.A
   let mut roots := ap.roots
   let mut buf := ctx.template.copySlice 0 ByteArray.empty 0 ctx.template.size
   -- first polynomial: sieve at the initial roots
-  if h : len.toNat < buf.size ∧ ctx.medEnd ≤ ctx.prime.size ∧ ctx.medEnd ≤ ctx.cnt.size ∧
-      ctx.medEnd ≤ roots.size ∧ ctx.medEnd ≤ ap.logp.size then
-    buf := sieveMed ctx.prime ctx.cnt roots ap.logp buf len h.1 ctx.spv ctx.medEnd h.2.1 h.2.2.1
-      h.2.2.2.1 h.2.2.2.2
-  if h : len.toNat < buf.size ∧ F ≤ roots.size ∧ F ≤ ap.logp.size then
-    buf := sieveLarge roots ap.logp buf len h.1 ctx.medEnd F h.2.1 h.2.2
-  -- clamped updates land on the trash byte; clear it for candidate processing
+  buf := sieveAt ctx ap ap.roots buf
+  -- clamped updates land on the first trash byte; clear it for candidate processing
   buf := buf.set! ctx.size 0
   let cands := scan buf ctx.size
   if !cands.isEmpty then
@@ -1509,23 +1734,10 @@ def processA (ctx : Ctx) (seed : Nat) : Array (Found ctx.n ctx.fb) := Id.run do
     let bv : Int := (ap.Bl[v]! : Int)
     B := if negate then B - 2 * bv else B + 2 * bv
     buf := ctx.template.copySlice 0 buf 0 ctx.template.size
-    let drow := ap.delta[v]!
     -- B decreases by 2B_v: roots A⁻¹(±t - B) increase by δ_v, and conversely
-    if h : len.toNat < buf.size ∧ F ≤ ctx.prime.size ∧ F ≤ drow.size ∧ F ≤ ctx.cnt.size ∧
-        F ≤ ap.logp.size ∧ F ≤ roots.size ∧ ctx.medEnd ≤ F ∧ ctx.spv ≤ F then
-      let (roots', buf') := switchMed ctx.prime drow ctx.cnt ap.logp negate roots buf len h.1
-        ctx.spv ctx.medEnd (by omega) (by omega) (by omega) (by omega) (by omega)
-      roots := roots'
-      buf := buf'
-    if h : len.toNat < buf.size ∧ F ≤ ctx.prime.size ∧ F ≤ drow.size ∧ F ≤ ap.logp.size ∧
-        F ≤ roots.size then
-      let (roots', buf') := switchBig ctx.prime drow ap.logp negate roots buf len h.1 ctx.medEnd F
-        h.2.1 h.2.2.1 h.2.2.2.1 h.2.2.2.2
-      roots := roots'
-      buf := buf'
-    -- primes below the small prime bound are not sieved, but their roots move
-    if h : ctx.spv ≤ ctx.prime.size ∧ ctx.spv ≤ drow.size ∧ ctx.spv ≤ roots.size then
-      roots := moveTiny ctx.prime drow negate roots 1 ctx.spv h.1 h.2.1 h.2.2
+    let (roots', buf') := switchPoly ctx ap ap.delta[v]! negate roots buf
+    roots := roots'
+    buf := buf'
     let C := (B * B - (ctx.N : Int)) / (if ctx.q2 then 4 * A else A)
     buf := buf.set! ctx.size 0
     let cands := scan buf ctx.size

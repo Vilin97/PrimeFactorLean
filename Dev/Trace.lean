@@ -101,11 +101,12 @@ def sieveBench (size lo hi reps : Nat) : IO Unit := do
   let updates := ps.foldl (fun acc p => acc + 2 * ((size + p - 1) / p)) 0
   let mut buf := ByteArray.mk (Array.replicate (size + 1) 0)
   let len := size.toUSize
+  let pU := ps.size.toUSize
   let t0 ← IO.monoNanosNow
   for _ in [0:reps] do
-    if h : len.toNat < buf.size ∧ ps.size ≤ prime.size ∧ ps.size ≤ cnt.size ∧ ps.size ≤ roots.size ∧
-        ps.size ≤ logp.size then
-      buf := SIQS.sieveMed prime cnt roots logp buf len h.1 0 ps.size h.2.1 h.2.2.1 h.2.2.2.1 h.2.2.2.2
+    if h : len.toNat < buf.size ∧ pU.toNat ≤ prime.size ∧ pU.toNat ≤ cnt.size ∧
+        pU.toNat ≤ roots.size ∧ pU.toNat ≤ logp.size then
+      buf := SIQS.sieveMed prime cnt roots logp buf len h.1 0 pU h.2.1 h.2.2.1 h.2.2.2.1 h.2.2.2.2
   let t1 ← IO.monoNanosNow
   IO.println s!"size {size}, primes [{lo}, {hi}): {ps.size} primes, {updates} updates per pass: {(t1 - t0).toFloat / (updates * reps).toFloat} ns per update (check {buf.get! 7})"
 

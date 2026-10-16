@@ -113,3 +113,51 @@ def ecmCurveBench (n b1 curves : Nat) : IO Unit := do
     (ECMF.runCurve n one (1000 + c)).map (·.val)
   let t2 ← IO.monoNanosNow
   IO.println s!"B1={b1}: {(t1 - t0).toFloat / 1.0e6 / curves.toFloat} ms/curve (found {r1.length}), stage 1 only {(t2 - t1).toFloat / 1.0e6 / curves.toFloat} ms/curve (found {r2.length})"
+
+/-- Stage 1 per bit at 80 digits: the fused generated ladder against the generic
+`ladderLoop` (same curve, same bits). -/
+def ladderCompare (b1 : Nat) : IO Unit := do
+  let n := 17100104831195064426243855290661269581152208979016832912601645679249190067150771
+  let m := Mod10.ofNat n
+  let fast := ECMF.mkFast b1 b1
+  let bits := fast.bits
+  let a24 : N10 := Arith.toMont m 12345
+  let x0 : N10 := Arith.toMont m 7
+  let one : N10 := Arith.toMont m 1
+  let P : ECMF.Pt N10 := ⟨x0, one⟩
+  let D := ECMF.dbl m a24 P
+  let t0 ← IO.monoNanosNow
+  let r1 ← IO.lazyPure fun _ => Mont.Arith.ladder m a24 x0 bits (bits.size - 1) P.x P.z D.x D.z
+  let t1 ← IO.monoNanosNow
+  let r2 ← IO.lazyPure fun _ => ECMF.ladderLoop m a24 x0 bits P D (bits.size - 1)
+  let t2 ← IO.monoNanosNow
+  let same := Arith.fromMont m (Arith.mul m r1.1 r2.z) == Arith.fromMont m (Arith.mul m r2.x r1.2)
+  IO.println s!"{bits.size} bits: fused {(t1 - t0).toFloat / bits.size.toFloat} ns/bit, generic {(t2 - t1).toFloat / bits.size.toFloat} ns/bit, same point {same}"
+
+/-- Wall time of `curves` curves on `threads` tasks (one batch per round), with
+`B2 = b2` (`b2 = b1`: stage 1 only), in one process. -/
+def ecmPar (n b1 b2 curves threads : Nat) : IO Unit := do
+  let fast := ECMF.mkFast b1 b2
+  let _ ← IO.lazyPure fun _ => fast.plan.isPrime.size + fast.bits.size + fast.sched.hits.size
+  let t0 ← IO.monoNanosNow
+  let mut found := 0
+  let mut done := 0
+  while done < curves do
+    let tasks := (List.range threads).map fun t =>
+      Task.spawn fun _ => ECMF.runCurve n fast (100 + done + t)
+    for task in tasks do
+      if (task.get).isSome then found := found + 1
+    done := done + threads
+  let t1 ← IO.monoNanosNow
+  IO.println s!"B1={b1} B2={b2} {done} curves on {threads} threads: {(t1 - t0).toFloat / 1.0e6} ms, {(t1 - t0).toFloat / 1.0e6 / (done / threads).toFloat} ms per round ({found} found)"
+
+/-- Time to build the stage data of `B1 = b1`, `B2 = 100 b1`. -/
+def planTime (b1 : Nat) : IO Unit := do
+  let t0 ← IO.monoNanosNow
+  let plan ← IO.lazyPure fun _ => ECMM.mkPlan b1 (100 * b1)
+  let t1 ← IO.monoNanosNow
+  let sched ← IO.lazyPure fun _ => ECMF.schedule plan
+  let t2 ← IO.monoNanosNow
+  let bits ← IO.lazyPure fun _ => ECMF.natBits (plan.powers.foldl (· * ·) 1)
+  let t3 ← IO.monoNanosNow
+  IO.println s!"B1={b1}: mkPlan {(t1 - t0) / 1000000} ms ({plan.isPrime.size}), schedule {(t2 - t1) / 1000000} ms ({sched.hits.size}), bits {(t3 - t2) / 1000000} ms ({bits.size})"

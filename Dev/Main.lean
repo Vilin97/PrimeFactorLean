@@ -8,6 +8,7 @@ import Dev.NFSDebug
 import Dev.QSDebug
 import Dev.Micro
 import Dev.RB
+import Dev.SiqsProf
 import Dev.LasDebug
 import Dev.Bench8
 import Dev.Stages
@@ -200,8 +201,29 @@ def devMain (args : List String) : IO Unit := do
     strideBench 131072 1000
     strideBench 262144 500
   | ["siqstimes", ns, ts, reps] => siqsPhaseTimes ns.toNat! ts.toNat! reps.toNat!
+  | ["siqstimes1", ns, ts, fb, m] => siqsPhaseTimes ns.toNat! ts.toNat! 1 fb.toNat! m.toNat!
   | ["monttest"] => montTestMain
   | ["mulbench", k] => mulBench k.toNat!
+  | ["laddercmp", b] => ladderCompare b.toNat!
+  | ["siqsprof", ns, as] =>
+    let n := ns.toNat!
+    SiqsProf.run n (SIQS.chooseParams (QS.decimalDigits n)) as.toNat!
+  | ["siqscollect", ns, ts, fb, m] =>
+    let n := ns.toNat!
+    let p0 := SIQS.chooseParams (QS.decimalDigits n)
+    let p1 : SIQS.Params := { p0 with fbSize := if fb.toNat! > 0 then fb.toNat! else p0.fbSize }
+    SiqsProf.collectStats n { p1 with M := if m.toNat! > 0 then m.toNat! else p1.M } ts.toNat!
+  | ["siqsprofc", ns, as] =>
+    let n := ns.toNat!
+    SiqsProf.run n (SIQS.chooseParams (QS.decimalDigits n)) as.toNat! true
+  | ["siqsprof", ns, as, fb, m, lp, dlp, slack] =>
+    let n := ns.toNat!
+    let p0 := SIQS.chooseParams (QS.decimalDigits n)
+    let p1 : SIQS.Params := { p0 with fbSize := fb.toNat!, M := m.toNat! }
+    let p2 : SIQS.Params := { p1 with lpMult := lp.toNat!, dlpDiv := dlp.toNat! }
+    SiqsProf.run n { p2 with slack := slack.toNat! } as.toNat!
+  | ["plantime", b] => planTime b.toNat!
+  | ["ecmpar", ns, b1, b2, c, ts] => ecmPar ns.toNat! b1.toNat! b2.toNat! c.toNat! ts.toNat!
   | ["ecmcurves", ns, b1, c] => ecmCurveBench ns.toNat! b1.toNat! c.toNat!
   | ["gnfsphases", ns, ts] => gnfsPhases ns.toNat! ts.toNat!
   | "gnfsover" :: ns :: ts :: kvs => gnfsPhases ns.toNat! ts.toNat! 0 0 none kvs
