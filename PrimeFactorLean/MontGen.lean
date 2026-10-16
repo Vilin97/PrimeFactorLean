@@ -93,9 +93,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N1.sqr` as one shared function. -/
 @[noinline] def N1.sqrS (m : Mod1) (a : N1) : N1 := N1.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N1.mulSubS (m : Mod1) (a b c : N1) : N1 := N1.mul m a (N1.sub m b c)
+
 instance : Arith N1 Mod1 where
   mul := N1.mulS
   sqr := N1.sqrS
+  mulSub := N1.mulSubS
   add := N1.add
   sub := N1.sub
   modulus := Mod1.n
@@ -218,9 +222,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N2.sqr` as one shared function. -/
 @[noinline] def N2.sqrS (m : Mod2) (a : N2) : N2 := N2.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N2.mulSubS (m : Mod2) (a b c : N2) : N2 := N2.mul m a (N2.sub m b c)
+
 instance : Arith N2 Mod2 where
   mul := N2.mulS
   sqr := N2.sqrS
+  mulSub := N2.mulSubS
   add := N2.add
   sub := N2.sub
   modulus := Mod2.n
@@ -374,9 +382,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N3.sqr` as one shared function. -/
 @[noinline] def N3.sqrS (m : Mod3) (a : N3) : N3 := N3.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N3.mulSubS (m : Mod3) (a b c : N3) : N3 := N3.mul m a (N3.sub m b c)
+
 instance : Arith N3 Mod3 where
   mul := N3.mulS
   sqr := N3.sqrS
+  mulSub := N3.mulSubS
   add := N3.add
   sub := N3.sub
   modulus := Mod3.n
@@ -561,9 +573,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N4.sqr` as one shared function. -/
 @[noinline] def N4.sqrS (m : Mod4) (a : N4) : N4 := N4.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N4.mulSubS (m : Mod4) (a b c : N4) : N4 := N4.mul m a (N4.sub m b c)
+
 instance : Arith N4 Mod4 where
   mul := N4.mulS
   sqr := N4.sqrS
+  mulSub := N4.mulSubS
   add := N4.add
   sub := N4.sub
   modulus := Mod4.n
@@ -779,9 +795,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N5.sqr` as one shared function. -/
 @[noinline] def N5.sqrS (m : Mod5) (a : N5) : N5 := N5.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N5.mulSubS (m : Mod5) (a b c : N5) : N5 := N5.mul m a (N5.sub m b c)
+
 instance : Arith N5 Mod5 where
   mul := N5.mulS
   sqr := N5.sqrS
+  mulSub := N5.mulSubS
   add := N5.add
   sub := N5.sub
   modulus := Mod5.n
@@ -1028,9 +1048,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N6.sqr` as one shared function. -/
 @[noinline] def N6.sqrS (m : Mod6) (a : N6) : N6 := N6.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N6.mulSubS (m : Mod6) (a b c : N6) : N6 := N6.mul m a (N6.sub m b c)
+
 instance : Arith N6 Mod6 where
   mul := N6.mulS
   sqr := N6.sqrS
+  mulSub := N6.mulSubS
   add := N6.add
   sub := N6.sub
   modulus := Mod6.n
@@ -1308,9 +1332,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N7.sqr` as one shared function. -/
 @[noinline] def N7.sqrS (m : Mod7) (a : N7) : N7 := N7.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N7.mulSubS (m : Mod7) (a b c : N7) : N7 := N7.mul m a (N7.sub m b c)
+
 instance : Arith N7 Mod7 where
   mul := N7.mulS
   sqr := N7.sqrS
+  mulSub := N7.mulSubS
   add := N7.add
   sub := N7.sub
   modulus := Mod7.n
@@ -1619,9 +1647,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N8.sqr` as one shared function. -/
 @[noinline] def N8.sqrS (m : Mod8) (a : N8) : N8 := N8.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N8.mulSubS (m : Mod8) (a b c : N8) : N8 := N8.mul m a (N8.sub m b c)
+
 instance : Arith N8 Mod8 where
   mul := N8.mulS
   sqr := N8.sqrS
+  mulSub := N8.mulSubS
   add := N8.add
   sub := N8.sub
   modulus := Mod8.n
@@ -1961,9 +1993,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N9.sqr` as one shared function. -/
 @[noinline] def N9.sqrS (m : Mod9) (a : N9) : N9 := N9.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N9.mulSubS (m : Mod9) (a b c : N9) : N9 := N9.mul m a (N9.sub m b c)
+
 instance : Arith N9 Mod9 where
   mul := N9.mulS
   sqr := N9.sqrS
+  mulSub := N9.mulSubS
   add := N9.add
   sub := N9.sub
   modulus := Mod9.n
@@ -2334,9 +2370,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N10.sqr` as one shared function. -/
 @[noinline] def N10.sqrS (m : Mod10) (a : N10) : N10 := N10.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N10.mulSubS (m : Mod10) (a b c : N10) : N10 := N10.mul m a (N10.sub m b c)
+
 instance : Arith N10 Mod10 where
   mul := N10.mulS
   sqr := N10.sqrS
+  mulSub := N10.mulSubS
   add := N10.add
   sub := N10.sub
   modulus := Mod10.n
@@ -2738,9 +2778,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N11.sqr` as one shared function. -/
 @[noinline] def N11.sqrS (m : Mod11) (a : N11) : N11 := N11.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N11.mulSubS (m : Mod11) (a b c : N11) : N11 := N11.mul m a (N11.sub m b c)
+
 instance : Arith N11 Mod11 where
   mul := N11.mulS
   sqr := N11.sqrS
+  mulSub := N11.mulSubS
   add := N11.add
   sub := N11.sub
   modulus := Mod11.n
@@ -3173,9 +3217,13 @@ cache: the fused ladder of earlier versions ran 15% slower than these calls). -/
 /-- `N12.sqr` as one shared function. -/
 @[noinline] def N12.sqrS (m : Mod12) (a : N12) : N12 := N12.sqr m a
 
+/-- `a (b - c)` as one shared function (one result object rather than two). -/
+@[noinline] def N12.mulSubS (m : Mod12) (a b c : N12) : N12 := N12.mul m a (N12.sub m b c)
+
 instance : Arith N12 Mod12 where
   mul := N12.mulS
   sqr := N12.sqrS
+  mulSub := N12.mulSubS
   add := N12.add
   sub := N12.sub
   modulus := Mod12.n

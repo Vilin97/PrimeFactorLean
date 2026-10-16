@@ -39,7 +39,7 @@ variable {α μ : Type} [Arith α μ] [Inhabited α]
     if h : t < primes.size then
       let q := primes[t]
       let y := mul m y steps[(q - prev) / 2]!
-      accLoop m steps primes one q y (mul m acc (sub m y one)) (t + 1) fuel
+      accLoop m steps primes one q y (mulSub m acc y one) (t + 1) fuel
     else acc
 
 /-- `gcd` candidates of stages 1 and 2 (`none`: the gcd of stage 1 is `n`). -/

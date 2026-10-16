@@ -183,7 +183,7 @@ the points, and the generator state after them. -/
     α → Nat → Nat → α
   | prod, _, 0 => prod
   | prod, t, left + 1 =>
-    hitsOf m gx xs hits (mul m prod (sub m gx xs[(hits.get! t).toNat]!)) (t + 1) left
+    hitsOf m gx xs hits (mulSub m prod gx xs[(hits.get! t).toNat]!) (t + 1) left
 
 /-- The scheduled products of the normalized giant steps `gxs` (global indices
 from `base`, hits from offset `t`). -/

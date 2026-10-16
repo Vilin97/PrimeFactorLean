@@ -24,6 +24,8 @@ class Arith (α : Type) (μ : outParam Type) where
   sqr : μ → α → α
   add : μ → α → α → α
   sub : μ → α → α → α
+  /-- `a (b - c)`. -/
+  mulSub : μ → α → α → α → α := fun m a b c => mul m a (sub m b c)
   modulus : μ → Nat
   /-- A residue from its limbs (no conversion). -/
   ofLimbs : μ → Nat → α
