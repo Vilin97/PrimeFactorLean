@@ -133,6 +133,19 @@ Raw records are in `results/compare/b55d1d9-*.jsonl` (earlier runs at commits
 `4699f07`, `8fe59f3`, `038af0e`, `219ac2e` and `109e943`:
 `results/compare/4699f07-*.jsonl` and so on). Summaries:
 `python3 scripts/compare_report.py FILE --ours TOOL --base TOOL [--cases]`.
+
+![Total wall time per benchmark panel over the recorded comparison runs: the Lean CLI against YAFU and CADO-NFS](docs/progress.gif)
+
+The animation steps through every recorded comparison run (one per commit
+compared, oldest first) and plots, for each benchmark panel, the sum over its
+cases of each tool's median wall time in that run. Competitor times are the
+ones measured in the same run, interleaved with the Lean runs. A cross marks a
+panel that run did not measure; hollow markers are single runs; values far
+above the axis are drawn as arrows with their value. The plotted numbers are in
+[`results/progress/progress.json`](results/progress/progress.json), the last
+frame is [`docs/progress-final.png`](docs/progress-final.png), and
+`python3 scripts/progress_gif.py` (Pillow) regenerates all three from
+`results/compare/*.jsonl`.
 These runs are at commit `b55d1d9`. The machine is a laptop: its sustained
 speed drifts with temperature by several percent between runs (the same binary
 took 165 s and 181 s on RSA-100 hours apart), which the interleaving spreads

@@ -1,0 +1,1598 @@
+{
+ "description": "Sum over the cases of each panel of the median wall time (seconds) of each tool, per comparison run; null when a case of the panel lacks a passing record for the tool in that run.",
+ "panels": [
+  {
+   "key": "core",
+   "title": "Core tier (204 cases)",
+   "tools": [
+    "lean-auto",
+    "yafu"
+   ]
+  },
+  {
+   "key": "medium",
+   "title": "Medium tier (102 cases)",
+   "tools": [
+    "lean-auto",
+    "yafu"
+   ]
+  },
+  {
+   "key": "large",
+   "title": "Large tier, 20-59 digits (271)",
+   "tools": [
+    "lean-auto",
+    "yafu"
+   ]
+  },
+  {
+   "key": "huge",
+   "title": "Huge tier, 60-100 digits (253)",
+   "tools": [
+    "lean-auto",
+    "yafu"
+   ]
+  },
+  {
+   "key": "huge-balanced",
+   "title": "Huge: balanced semiprimes 64-80d (10)",
+   "tools": [
+    "lean-auto",
+    "yafu"
+   ]
+  },
+  {
+   "key": "huge-cunningham",
+   "title": "Huge: Cunningham numbers (243)",
+   "tools": [
+    "lean-auto",
+    "yafu"
+   ]
+  },
+  {
+   "key": "gnfs",
+   "title": "GNFS: balanced semiprimes 60-80d (12)",
+   "tools": [
+    "lean-gnfs",
+    "cado"
+   ]
+  },
+  {
+   "key": "rsa100",
+   "title": "RSA-100 (100 digits), GNFS",
+   "tools": [
+    "lean-gnfs",
+    "cado",
+    "yafu"
+   ]
+  }
+ ],
+ "runs": [
+  {
+   "index": 1,
+   "label": "before",
+   "first_record": "2026-10-10T07:45:11",
+   "note": "binary before a69f221 (file label \"before\")",
+   "files": [
+    "before-core-medium-large.jsonl"
+   ],
+   "panels": {
+    "core": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 6.635080502
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 2.33441243
+     }
+    },
+    "medium": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 3.343834898
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 1.28732776
+     }
+    },
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 61.637960203
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.830272598
+     }
+    },
+    "huge": {},
+    "huge-balanced": {},
+    "huge-cunningham": {},
+    "gnfs": {},
+    "rsa100": {}
+   }
+  },
+  {
+   "index": 2,
+   "label": "a69f221",
+   "first_record": "2026-10-10T08:03:31",
+   "note": "commit a69f221",
+   "files": [
+    "a69f221-core-medium-large.jsonl"
+   ],
+   "panels": {
+    "core": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.564573049
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 2.150942666
+     }
+    },
+    "medium": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.32433475
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 1.199498716
+     }
+    },
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 57.066529139
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.650725461
+     }
+    },
+    "huge": {},
+    "huge-balanced": {},
+    "huge-cunningham": {},
+    "gnfs": {},
+    "rsa100": {}
+   }
+  },
+  {
+   "index": 3,
+   "label": "5459c81",
+   "first_record": "2026-10-10T10:57:05",
+   "note": "commit 5459c81",
+   "files": [
+    "5459c81-large.jsonl"
+   ],
+   "panels": {
+    "core": {},
+    "medium": {},
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 17.735729584
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.481607439
+     }
+    },
+    "huge": {},
+    "huge-balanced": {},
+    "huge-cunningham": {},
+    "gnfs": {},
+    "rsa100": {}
+   }
+  },
+  {
+   "index": 4,
+   "label": "ecmfast",
+   "first_record": "2026-10-10T11:33:01",
+   "note": "working tree between 5459c81 and d964516 (file label \"ecmfast\")",
+   "files": [
+    "ecmfast-large.jsonl"
+   ],
+   "panels": {
+    "core": {},
+    "medium": {},
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 12.859312362
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.501136781
+     }
+    },
+    "huge": {},
+    "huge-balanced": {},
+    "huge-cunningham": {},
+    "gnfs": {},
+    "rsa100": {}
+   }
+  },
+  {
+   "index": 5,
+   "label": "d964516",
+   "first_record": "2026-10-10T13:08:35",
+   "note": "commit d964516",
+   "files": [
+    "d964516-huge.jsonl"
+   ],
+   "panels": {
+    "core": {},
+    "medium": {},
+    "large": {},
+    "huge": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 1,
+      "threads": [
+       16
+      ],
+      "total_s": 1258.438195685
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 1,
+      "threads": [
+       16
+      ],
+      "total_s": 127.693000363
+     }
+    },
+    "huge-balanced": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 1,
+      "threads": [
+       16
+      ],
+      "total_s": 61.535714407
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 1,
+      "threads": [
+       16
+      ],
+      "total_s": 31.668468865
+     }
+    },
+    "huge-cunningham": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 1,
+      "threads": [
+       16
+      ],
+      "total_s": 1196.9024812779999
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 1,
+      "threads": [
+       16
+      ],
+      "total_s": 96.024531498
+     }
+    },
+    "gnfs": {},
+    "rsa100": {}
+   }
+  },
+  {
+   "index": 6,
+   "label": "109e943",
+   "first_record": "2026-10-11T02:52:21",
+   "note": "commit 109e943",
+   "files": [
+    "109e943-auto-core-medium-large.jsonl",
+    "109e943-auto-huge.jsonl",
+    "109e943-gnfs-balanced.jsonl",
+    "109e943-rsa100.jsonl"
+   ],
+   "panels": {
+    "core": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.536295858
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 2.118731595
+     }
+    },
+    "medium": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.306967512
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 1.149515763
+     }
+    },
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 7.840959887
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.47975503
+     }
+    },
+    "huge": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 179.48003374
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 137.215077395
+     }
+    },
+    "huge-balanced": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 46.574886607
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 21.697117041000002
+     }
+    },
+    "huge-cunningham": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 132.905147133
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 115.51796035400001
+     }
+    },
+    "gnfs": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 126.336182442
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 191.272126084
+     }
+    },
+    "rsa100": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 365.730214865
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 166.156205054
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 174.853648249
+     }
+    }
+   }
+  },
+  {
+   "index": 7,
+   "label": "219ac2e",
+   "first_record": "2026-10-11T06:42:19",
+   "note": "commit 219ac2e",
+   "files": [
+    "219ac2e-auto-core-medium-large.jsonl",
+    "219ac2e-auto-huge.jsonl",
+    "219ac2e-gnfs-balanced.jsonl",
+    "219ac2e-rsa100.jsonl"
+   ],
+   "panels": {
+    "core": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.54510951
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 2.126936228
+     }
+    },
+    "medium": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.314082137
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 1.176550566
+     }
+    },
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 7.810348606
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.501426997
+     }
+    },
+    "huge": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 169.272589387
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 134.29468216
+     }
+    },
+    "huge-balanced": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 45.628964874
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 21.720075014
+     }
+    },
+    "huge-cunningham": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 123.643624513
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 112.574607146
+     }
+    },
+    "gnfs": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 107.038737951
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 190.974995496
+     }
+    },
+    "rsa100": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 293.908796012
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 166.817143635
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 173.948569919
+     }
+    }
+   }
+  },
+  {
+   "index": 8,
+   "label": "038af0e",
+   "first_record": "2026-10-11T21:03:00",
+   "note": "commit 038af0e",
+   "files": [
+    "038af0e-auto-core-medium-large.jsonl",
+    "038af0e-auto-huge.jsonl",
+    "038af0e-gnfs-balanced.jsonl",
+    "038af0e-rsa100.jsonl"
+   ],
+   "panels": {
+    "core": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.567499532
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 2.13941115
+     }
+    },
+    "medium": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.33349577
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 1.177784501
+     }
+    },
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 6.242884386
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.460395514
+     }
+    },
+    "huge": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 154.980192943
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 136.14996693
+     }
+    },
+    "huge-balanced": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 46.232779269
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 21.881573613
+     }
+    },
+    "huge-cunningham": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 108.747413674
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 114.268393317
+     }
+    },
+    "gnfs": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 85.292396174
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 192.263260323
+     }
+    },
+    "rsa100": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 168.739845636
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 172.790872057
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 174.83207544
+     }
+    }
+   }
+  },
+  {
+   "index": 9,
+   "label": "8fe59f3",
+   "first_record": "2026-10-12T01:09:52",
+   "note": "commit 8fe59f3",
+   "files": [
+    "8fe59f3-auto-core-medium-large.jsonl",
+    "8fe59f3-auto-huge.jsonl",
+    "8fe59f3-gnfs-balanced.jsonl",
+    "8fe59f3-rsa100.jsonl"
+   ],
+   "panels": {
+    "core": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.572311116
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 2.125596947
+     }
+    },
+    "medium": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.328913436
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 1.170313619
+     }
+    },
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 6.178267893
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.5334226
+     }
+    },
+    "huge": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 151.837269391
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 149.445150652
+     }
+    },
+    "huge-balanced": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 45.352082819
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 21.857653917
+     }
+    },
+    "huge-cunningham": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 106.485186572
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 127.587496735
+     }
+    },
+    "gnfs": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 82.469054822
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 190.762098709
+     }
+    },
+    "rsa100": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 159.860901527
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 168.527288788
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 174.897847182
+     }
+    }
+   }
+  },
+  {
+   "index": 10,
+   "label": "4699f07",
+   "first_record": "2026-10-12T04:16:53",
+   "note": "commit 4699f07",
+   "files": [
+    "4699f07-auto-core-medium-large.jsonl",
+    "4699f07-auto-huge.jsonl",
+    "4699f07-gnfs-balanced.jsonl",
+    "4699f07-rsa100.jsonl"
+   ],
+   "panels": {
+    "core": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.569436609
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 2.107905901
+     }
+    },
+    "medium": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.32804016
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 1.155159147
+     }
+    },
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 5.754138481
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.462633772
+     }
+    },
+    "huge": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 125.407789735
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 141.81238479499999
+     }
+    },
+    "huge-balanced": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 40.37201021
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 21.858425633
+     }
+    },
+    "huge-cunningham": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 85.035779525
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 119.953959162
+     }
+    },
+    "gnfs": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 77.025151624
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 195.865069231
+     }
+    },
+    "rsa100": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 158.531568869
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 166.711294023
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 175.433400014
+     }
+    }
+   }
+  },
+  {
+   "index": 11,
+   "label": "b55d1d9",
+   "first_record": "2026-10-12T05:58:57",
+   "note": "commit b55d1d9",
+   "files": [
+    "b55d1d9-auto-core-medium-large.jsonl",
+    "b55d1d9-auto-huge.jsonl",
+    "b55d1d9-gnfs-balanced.jsonl",
+    "b55d1d9-rsa100.jsonl"
+   ],
+   "panels": {
+    "core": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.572542366
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 204,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 2.120960294
+     }
+    },
+    "medium": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 0.325890599
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 102,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 1.165879343
+     }
+    },
+    "large": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 5.62178224
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 271,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 15.415150215
+     }
+    },
+    "huge": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 120.545380793
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 253,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 141.889690722
+     }
+    },
+    "huge-balanced": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 39.827843585000004
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 10,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 21.688201421000002
+     }
+    },
+    "huge-cunningham": {
+     "lean-auto": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 80.717537208
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 243,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 120.201489301
+     }
+    },
+    "gnfs": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 75.939872272
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 12,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 193.297129941
+     }
+    },
+    "rsa100": {
+     "lean-gnfs": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 156.18760509
+     },
+     "cado": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 169.484243165
+     },
+     "yafu": {
+      "complete": true,
+      "missing_cases": [],
+      "cases": 1,
+      "reps": 3,
+      "threads": [
+       16
+      ],
+      "total_s": 175.134872354
+     }
+    }
+   }
+  }
+ ]
+}
