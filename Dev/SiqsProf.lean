@@ -62,11 +62,9 @@ def candStats (ctx : Ctx) (ap : APoly) (B C : Int) (roots : Array Nat) (buf : By
         smallTest ap.logp ctx.log8 ctx.prime ctx.pl roots j.toUInt32 spvU smallU h.1 h.2.1
           h.2.2.1 h.2.2.2.1 h.2.2.2.2 tiny lt
       else (tiny, lt)
-    let mut l8 := l8
-    let mut found := hits
-    for i in lists[c]! do
-      l8 := l8 + (ctx.log8.get! i).toNat
-      found := i :: found
+    let lc := lists[c]!
+    let l8 := lc.foldl (fun acc i => acc + (ctx.log8.get! i).toNat) l8
+    let found := lc.foldl (fun acc i => i :: acc) hits
     if l8v ≤ (nf (l8 + ctx.allow8)) then
       cnt := { cnt with exact := cnt.exact + 1 }
       let neg := vs < fc 0
@@ -120,7 +118,7 @@ def run (n : Nat) (params : Params) (as : Nat) (check : Bool := false) : IO Unit
       let negate := gray.testBit v
       let bv : Int := (ap.Bl[v]! : Int)
       B := if negate then B - 2 * bv else B + 2 * bv
-      let drow := ap.delta[v]!
+      let drow := ap.pdc[v]!
       let a ← IO.monoNanosNow
       let spvU := ctx.spv.toUSize
       let medU := ctx.medEnd.toUSize
@@ -128,22 +126,22 @@ def run (n : Nat) (params : Params) (as : Nat) (check : Bool := false) : IO Unit
       let st ← IO.lazyPure fun _ => Id.run do
         let mut buf := ctx.template.copySlice 0 buf 0 ctx.template.size
         let mut roots := roots
-        if h : len.toNat < buf.size ∧ medU.toNat ≤ ctx.prime.size ∧ medU.toNat ≤ drow.size ∧
-            medU.toNat ≤ ctx.cnt.size ∧ medU.toNat ≤ ap.logp.size ∧ medU.toNat ≤ roots.size then
-          let (r', b') := switchMed ctx.prime drow ctx.cnt ap.logp negate roots buf len h.1 spvU medU
-            h.2.1 h.2.2.1 h.2.2.2.1 h.2.2.2.2.1 h.2.2.2.2.2
+        if h : len.toNat < buf.size ∧ medU.toNat ≤ drow.size ∧ medU.toNat ≤ ap.logp.size ∧
+            medU.toNat ≤ roots.size then
+          let (r', b') := switchMed drow ap.logp negate roots buf len h.1 spvU medU h.2.1 h.2.2.1
+            h.2.2.2
           roots := r'
           buf := b'
-        if h : spvU.toNat ≤ ctx.prime.size ∧ spvU.toNat ≤ drow.size ∧ spvU.toNat ≤ roots.size then
-          roots := moveTiny ctx.prime drow negate roots 1 spvU h.1 h.2.1 h.2.2
+        if h : spvU.toNat ≤ drow.size ∧ spvU.toNat ≤ roots.size then
+          roots := moveTiny drow negate roots 1 spvU h.1 h.2
         return (roots, buf)
       let b ← IO.monoNanosNow
       let st2 ← IO.lazyPure fun _ => Id.run do
         let mut (roots, buf) := st
-        if h : len.toNat < 2 ^ 31 ∧ len.toNat + 64 ≤ buf.size ∧ FU.toNat ≤ ctx.prime.size ∧
-            FU.toNat ≤ drow.size ∧ FU.toNat ≤ ap.logp.size ∧ FU.toNat ≤ roots.size then
-          let (r', b') := switchBig ctx.prime drow ap.logp negate roots buf len h.1 h.2.1 medU FU
-            h.2.2.1 h.2.2.2.1 h.2.2.2.2.1 h.2.2.2.2.2
+        if h : len.toNat < 2 ^ 31 ∧ len.toNat + 64 ≤ buf.size ∧ FU.toNat ≤ drow.size ∧
+            FU.toNat ≤ ap.logp.size ∧ FU.toNat ≤ roots.size then
+          let (r', b') := switchBig drow ap.logp negate roots buf len h.1 h.2.1 medU FU
+            h.2.2.1 h.2.2.2.1 h.2.2.2.2
           roots := r'
           buf := b'
         return (roots, buf.set! ctx.size 0)
@@ -221,5 +219,117 @@ def collectStats (n : Nat) (params : Params) (threads : Nat) : IO Unit := do
     gots := gots.push (fulls + cycles)
   let t1 ← IO.monoNanosNow
   IO.println s!"fb {ctx.fb.size} M {ctx.M} lp {ctx.lpBound} dlp {ctx.dlpBound}: {head} A, {polys} polys in {(t1 - t0) / 1000000} ms ({(t1 - t0) * threads / 1000 / polys} us/poly/thread); full {fulls}, 1lp {ones}, 2lp {twos}, cycles {cycles}, needed {needed}; rels/poly {(fulls + ones + twos).toFloat / polys.toFloat}"
+
+end PrimeFactorLean.SiqsProf
+
+
+namespace PrimeFactorLean.SiqsProf
+
+/-- The previous `mkAPoly` (prefix and suffix products with `%`): roots and
+delta rows, for comparison with `SIQS.mkAPoly`. -/
+def mkAPolyRef (ctx : Ctx) (seed : Nat) : Option (Array Nat × Array (Array UInt32)) := Id.run do
+  let some qs := chooseQs ctx.fb ctx.N seed ctx.target | return none
+  let s := qs.size
+  let A := qs.foldl (fun acc i => acc * ctx.fb[i]!) 1
+  let mut gam : Array Nat := #[]
+  for l in [0:s] do
+    let q := ctx.fb[qs[l]!]!
+    let t := ctx.sqrtN[qs[l]!]!.toNat
+    let aq := A / q
+    match Arith.invMod (aq % q) q with
+    | none => return none
+    | some inv =>
+      let mut gamma := t * inv % q
+      if ctx.q2 then
+        if (gamma % 2 == 1) != (l + 1 == s) then gamma := q - gamma
+      else if 2 * gamma > q then gamma := q - gamma
+      gam := gam.push gamma
+  let qv : Array UInt64 := qs.map fun i => ctx.fb[i]!.toUInt64
+  let F := ctx.fb.size
+  let mut delta : Array (Array UInt32) := Array.replicate s (Array.replicate F 0)
+  let mut roots : Array Nat := Array.replicate F 0
+  let mut pre : Array Nat := Array.replicate (s + 1) 1
+  for i in [1:F] do
+    if ctx.sqrtN[i]! == 0 then continue
+    let pu := ctx.fb[i]!.toUInt64
+    let mut acc : UInt64 := 1
+    for l in [0:s] do
+      pre := pre.set! l acc.toNat
+      acc := acc * (qv[l]! % pu) % pu
+    if acc == 0 then continue
+    let ainv0 := invModU acc pu
+    let ainv := if ctx.q2 then ainv0 * ((pu + 1) / 2) % pu else ainv0
+    let mut suf : UInt64 := 1
+    let mut bm : UInt64 := 0
+    for l' in [0:s] do
+      let l := s - 1 - l'
+      let bl := pre[l]!.toUInt64 * suf % pu * (gam[l]!.toUInt64 % pu) % pu
+      bm := (bm + bl) % pu
+      delta := delta.modify l fun row => row.set! i ((2 * bl % pu) * ainv % pu).toUInt32
+      suf := suf * (qv[l]! % pu) % pu
+    let t := ctx.sqrtN[i]!.toUInt64
+    let mm := ctx.mmod[i]!.toUInt64
+    let x1 := ainv * ((t + pu - bm) % pu) % pu
+    let x2 := ainv * ((pu - t + pu - bm) % pu) % pu
+    roots := roots.set! i (packRoots ((x1 + mm) % pu).toUInt32 ((x2 + mm) % pu).toUInt32)
+  return some (roots, delta)
+
+/-- `SIQS.mkAPoly` against `mkAPolyRef` on the `A`s `0 … count - 1`: mismatching
+roots and deltas, and the time of each. -/
+def aPolyCheck (n count : Nat) : IO Unit := do
+  let params := SIQS.chooseParams (QS.decimalDigits n)
+  let .inl ctx := mkCtx n params | IO.println "small factor"
+  let mut bad := 0
+  let mut checked := 0
+  for seed in [0:count] do
+    match mkAPoly ctx seed, mkAPolyRef ctx seed with
+    | some ap, some (roots, delta) =>
+      for i in [1:ctx.fb.size] do
+        if ap.logp.get! i == 0 then continue
+        checked := checked + 1
+        if ap.roots[i]! != roots[i]! then bad := bad + 1
+        for l in [0:ap.qs.size] do
+          let d := (ap.pdc[l]![i]! >>> 21) &&& 0x1FFFFF
+          if d != delta[l]![i]!.toNat then bad := bad + 1
+          if ap.pdc[l]![i]! &&& 0x1FFFFF != ctx.fb[i]! then bad := bad + 1
+    | none, none => pure ()
+    | _, _ => bad := bad + 1
+  let t0 ← IO.monoNanosNow
+  let a ← IO.lazyPure fun _ => (List.range count).foldl (fun acc k => acc + ((mkAPoly ctx k).map (·.roots.size)).getD 0) 0
+  let t1 ← IO.monoNanosNow
+  let b ← IO.lazyPure fun _ => (List.range count).foldl (fun acc k => acc + ((mkAPolyRef ctx k).map (·.1.size)).getD 0) 0
+  let t2 ← IO.monoNanosNow
+  IO.println s!"q2 {ctx.q2}: {checked} prime entries checked, {bad} mismatches; mkAPoly {(t1 - t0) / 1000 / count} us, reference {(t2 - t1) / 1000 / count} us per A ({a} {b})"
+
+end PrimeFactorLean.SiqsProf
+
+namespace PrimeFactorLean.SiqsProf
+
+/-- The parts of `SIQS.extract` on the relations of a real run: parity rows,
+block Lanczos, and the square roots of the dependencies until one splits `n`. -/
+def extractParts (n : Nat) (threads : Nat) (fb : Nat := 0) : IO Unit := do
+  let p0 := SIQS.chooseParams (QS.decimalDigits n)
+  let params := if fb > 0 then { p0 with fbSize := fb } else p0
+  let .inl ctx := mkCtx n params | IO.println "small factor"
+  let needed := ctx.fb.size + 1 + params.extra
+  let t0 ← IO.monoNanosNow
+  let rels ← IO.lazyPure fun _ => collect ctx needed threads 1000
+  let t1 ← IO.monoNanosNow
+  let rows ← IO.lazyPure fun _ => rels.map Squares.parityColumns
+  let t2 ← IO.monoNanosNow
+  let deps ← IO.lazyPure fun _ => Lanczos.dependencies (ctx.fb.size + 1) rows 64 threads
+  let t3 ← IO.monoNanosNow
+  let mut tried := 0
+  let mut found := false
+  for dep in deps do
+    if dep.isEmpty || found then continue
+    tried := tried + 1
+    let rs := dep.map fun i => rels[i]!
+    match (Squares.Relation.prodTree rs 0 rs.size).toSquares with
+    | none => pure ()
+    | some sc => if sc.factor.isSome then found := true
+  let t4 ← IO.monoNanosNow
+  let w := rows.foldl (fun acc r => acc + r.size) 0
+  IO.println s!"fb {ctx.fb.size}: collect {(t1 - t0) / 1000000} ms ({rels.size} rels, weight {w}), rows {(t2 - t1) / 1000000} ms, lanczos {(t3 - t2) / 1000000} ms ({deps.size} deps), sqrt {(t4 - t3) / 1000000} ms ({tried} tried, found {found})"
 
 end PrimeFactorLean.SiqsProf

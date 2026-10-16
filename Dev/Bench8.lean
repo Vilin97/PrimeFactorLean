@@ -320,6 +320,7 @@ def bench10Main : IO Unit := do
   let template := ByteArray.mk (Array.replicate (lenN + 64) 0)
   let medU := medEnd.toUSize
   let FU := F.toUSize
+  let pdcA : Array Nat := (Array.range F).map fun i => prime[i]!.toNat + delta[i]!.toNat * 2097152
   for variant in [0, 1, 2, 0, 1, 2] do
     let t0 ← IO.monoNanosNow
     let mut rs := roots
@@ -335,10 +336,10 @@ def bench10Main : IO Unit := do
           rs := a
           buf := b
         else if variant == 1 then
-          if h' : len.toNat < 2 ^ 31 ∧ len.toNat + 64 ≤ buf.size ∧ FU.toNat ≤ prime.size ∧
-              FU.toNat ≤ delta.size ∧ FU.toNat ≤ logp.size ∧ FU.toNat ≤ rs.size then
-            let (a, b) ← IO.lazyPure fun _ => switchBig prime delta logp (r % 2 == 0) rs buf len h'.1
-              h'.2.1 medU FU h'.2.2.1 h'.2.2.2.1 h'.2.2.2.2.1 h'.2.2.2.2.2
+          if h' : len.toNat < 2 ^ 31 ∧ len.toNat + 64 ≤ buf.size ∧ FU.toNat ≤ pdcA.size ∧
+              FU.toNat ≤ logp.size ∧ FU.toNat ≤ rs.size then
+            let (a, b) ← IO.lazyPure fun _ => switchBig pdcA logp (r % 2 == 0) rs buf len h'.1
+              h'.2.1 medU FU h'.2.2.1 h'.2.2.2.1 h'.2.2.2.2
             rs := a
             buf := b
         else

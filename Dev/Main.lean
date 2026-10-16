@@ -213,6 +213,11 @@ def devMain (args : List String) : IO Unit := do
     let p0 := SIQS.chooseParams (QS.decimalDigits n)
     let p1 : SIQS.Params := { p0 with fbSize := if fb.toNat! > 0 then fb.toNat! else p0.fbSize }
     SiqsProf.collectStats n { p1 with M := if m.toNat! > 0 then m.toNat! else p1.M } ts.toNat!
+  | ["apolycheck", ns, c] => SiqsProf.aPolyCheck ns.toNat! c.toNat!
+  | ["extractparts", ns, ts, fb] => SiqsProf.extractParts ns.toNat! ts.toNat! fb.toNat!
+  | ["siqsprofsb", ns, as, sb] =>
+    let n := ns.toNat!
+    SiqsProf.run n { SIQS.chooseParams (QS.decimalDigits n) with smallBound := sb.toNat! } as.toNat!
   | ["siqsprofc", ns, as] =>
     let n := ns.toNat!
     SiqsProf.run n (SIQS.chooseParams (QS.decimalDigits n)) as.toNat! true

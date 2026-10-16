@@ -225,7 +225,7 @@ def fastProfile (n : Nat) (params : SIQS.Params) (seed : Nat) : IO Unit := do
     let bv : Int := (ap.Bl[v]! : Int)
     B := if negate then B - 2 * bv else B + 2 * bv
     let b ← IO.monoNanosNow
-    let drow := ap.delta[v]!
+    let drow := ap.pdc[v]!
     let st ← IO.lazyPure fun _ =>
       SIQS.switchPoly ctx ap drow negate roots (ctx.template.copySlice 0 buf 0 ctx.template.size)
     roots := st.1
@@ -708,7 +708,7 @@ def grayCheck (n : Nat) (params : SIQS.Params) (seed steps : Nat) : IO Unit := d
     let negate := gray.testBit v
     let bv : Int := (ap.Bl[v]! : Int)
     B := if negate then B - 2 * bv else B + 2 * bv
-    let drow := ap.delta[v]!
+    let drow := ap.pdc[v]!
     let (r', b') := SIQS.switchPoly ctx ap drow negate roots scratch
     roots := r'
     scratch := b'

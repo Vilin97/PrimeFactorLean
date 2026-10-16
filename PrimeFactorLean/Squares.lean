@@ -420,13 +420,29 @@ theorem SquareCongruence.factor_sound {n : Nat} (c : SquareCongruence n) {d : Pr
 
 /-! ## Parity vectors for the (untrusted) linear algebra -/
 
-/-- Columns with odd total exponent: column `0` is the sign, column `j + 1` is
-`fb[j]`. Large-prime relations should be paired before entering the matrix. -/
-def parityColumns {n : Nat} {fb : Array Nat} (r : Relation n fb) : Array Nat := Id.run do
-  let merged := mergeRuns (r.exps.mergeSort (fun a b => a.1 ≤ b.1))
-  let mut cols : Array Nat := if r.neg then #[0] else #[]
-  for t in merged do
-    if t.2 % 2 == 1 then cols := cols.push (t.1 + 1)
-  return cols
+/-- First components non-decreasing from `prev` on. -/
+def sortedFrom (prev : Nat) : List (Nat × Nat) → Bool
+  | [] => true
+  | a :: rest => prev ≤ a.1 && sortedFrom a.1 rest
+
+/-- `acc` extended by `cur + 1` if the run of index `cur` (exponent sum `e`) is odd,
+then likewise for the runs of the rest of a list sorted by index. -/
+def oddRuns (cur e : Nat) : List (Nat × Nat) → Array Nat → Array Nat
+  | [], acc => if e % 2 == 1 then acc.push (cur + 1) else acc
+  | a :: rest, acc =>
+    if a.1 == cur then oddRuns cur (e + a.2) rest acc
+    else oddRuns a.1 a.2 rest (if e % 2 == 1 then acc.push (cur + 1) else acc)
+
+/-- The columns of a relation's parity row: `0` for the sign, `i + 1` for an odd
+total exponent of `fb[i]` (large-prime relations should be paired before
+entering the matrix). Relations keep their exponents sorted by index
+(`Relation.mk?` callers sort them, products merge sorted lists), so the sort is
+skipped when the list is already sorted. -/
+def parityColumns {n : Nat} {fb : Array Nat} (r : Relation n fb) : Array Nat :=
+  let sorted := if sortedFrom 0 r.exps then r.exps else r.exps.mergeSort (fun a b => a.1 ≤ b.1)
+  let start : Array Nat := if r.neg then #[0] else #[]
+  match sorted with
+  | [] => start
+  | a :: rest => oddRuns a.1 a.2 rest start
 
 end PrimeFactorLean.Squares
