@@ -27,24 +27,40 @@ variable {α μ : Type} [Arith α μ]
 @[specialize] def step (m : μ) (c y : α) : α := add m (sqr m y) c
 
 /-- `k` steps. -/
-@[specialize] def iter (m : μ) (c y : α) : Nat → α
-  | 0 => y
-  | k + 1 => iter m c (step m c y) k
+@[specialize] def iter (m : μ) (c y : α) (k : Nat) : α := Id.run do
+  let mut y := y
+  for _ in [0:k] do
+    y := step m c y
+  return y
 
-/-- `k` steps from `y`, multiplying `q` by `x - y` after each. -/
-@[specialize] def batch (m : μ) (c x y q : α) : Nat → Pair α
-  | 0 => ⟨y, q⟩
-  | k + 1 =>
-    let y := step m c y
-    batch m c x y (mul m q (sub m x y)) k
+/-- `k` steps from `y`, multiplying `q` by `x - y` after each.
 
-/-- Single steps from `ys` until `gcd(x - ys, n) ≠ 1` (after a batch whose gcd was `n`). -/
-@[specialize] def single (m : μ) (c x ys : α) : Nat → Nat
-  | 0 => 1
-  | k + 1 =>
-    let ys := step m c ys
-    let g := gcdN m (sub m x ys)
-    if g != 1 then g else single m c x ys k
+The loop keeps both accumulators in mutable state. This avoids allocating an
+intermediate `Pair` for every recursive step and lets native compilation emit
+a tight loop for the fixed-width Montgomery instances.
+-/
+@[specialize] def batch (m : μ) (c x y q : α) (k : Nat) : Pair α := Id.run do
+  let mut y := y
+  let mut q := q
+  for _ in [0:k] do
+    y := step m c y
+    q := mul m q (sub m x y)
+  return ⟨y, q⟩
+
+/-- Single steps from `ys` until `gcd(x - ys, n) ≠ 1` (after a batch whose gcd was `n`).
+
+This is the recovery path for a collapsed product. Keeping the point and gcd
+in a loop avoids constructing a recursive closure for every replay step.
+-/
+@[specialize] def single (m : μ) (c x ys : α) (k : Nat) : Nat := Id.run do
+  let mut ys := ys
+  let mut remaining := k
+  let mut g := 1
+  while remaining > 0 && g == 1 do
+    ys := step m c ys
+    g := gcdN m (sub m x ys)
+    remaining := remaining - 1
+  return g
 
 /-- Brent's rho for `y ↦ y² + c₀` from `y = 2`, about `maxSteps` steps at most:
 the final gcd (`1` when nothing was found). -/

@@ -1,0 +1,1418 @@
+{
+  "inputs": "/workspace/scratch/e2bdb10fd7f2/PrimeFactorLean/data/hex-int-factor-inputs.json",
+  "algorithm": "auto",
+  "repeats": 1,
+  "threads": 1,
+  "summary": {
+    "pfl": {
+      "pass": 55,
+      "median_ms": 4.197162,
+      "total_ms": 306.445191
+    },
+    "flint": {
+      "pass": 55,
+      "median_ms": 0.015083,
+      "total_ms": 25.346149
+    }
+  },
+  "records": [
+    {
+      "case": "table-0",
+      "n": "5999953",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4254378,
+        "elapsed_ns": 8062,
+        "factors": [
+          19,
+          457,
+          691
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 28813,
+        "factors": [
+          19,
+          457,
+          691
+        ]
+      }
+    },
+    {
+      "case": "table-1",
+      "n": "11999921",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4052264,
+        "elapsed_ns": 8193,
+        "factors": [
+          41,
+          541,
+          541
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 7031,
+        "factors": [
+          41,
+          541,
+          541
+        ]
+      }
+    },
+    {
+      "case": "table-2",
+      "n": "17999983",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3389303,
+        "elapsed_ns": 6580,
+        "factors": [
+          89,
+          263,
+          769
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 6830,
+        "factors": [
+          89,
+          263,
+          769
+        ]
+      }
+    },
+    {
+      "case": "table-3",
+      "n": "23999947",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3447211,
+        "elapsed_ns": 7522,
+        "factors": [
+          109,
+          421,
+          523
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 11587,
+        "factors": [
+          109,
+          421,
+          523
+        ]
+      }
+    },
+    {
+      "case": "table-4",
+      "n": "30000013",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3405929,
+        "elapsed_ns": 5679,
+        "factors": [
+          79,
+          401,
+          947
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 7101,
+        "factors": [
+          79,
+          401,
+          947
+        ]
+      }
+    },
+    {
+      "case": "table-5",
+      "n": "35999987",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3660622,
+        "elapsed_ns": 7001,
+        "factors": [
+          43,
+          911,
+          919
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5238,
+        "factors": [
+          43,
+          911,
+          919
+        ]
+      }
+    },
+    {
+      "case": "table-6",
+      "n": "41999597",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 5321478,
+        "elapsed_ns": 5619,
+        "factors": [
+          223,
+          331,
+          569
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5268,
+        "factors": [
+          223,
+          331,
+          569
+        ]
+      }
+    },
+    {
+      "case": "table-7",
+      "n": "47999209",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3520741,
+        "elapsed_ns": 8243,
+        "factors": [
+          181,
+          509,
+          521
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 4397,
+        "factors": [
+          181,
+          509,
+          521
+        ]
+      }
+    },
+    {
+      "case": "table-8",
+      "n": "53999863",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3080237,
+        "elapsed_ns": 6319,
+        "factors": [
+          311,
+          401,
+          433
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 9374,
+        "factors": [
+          311,
+          401,
+          433
+        ]
+      }
+    },
+    {
+      "case": "table-9",
+      "n": "59999501",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3073617,
+        "elapsed_ns": 7862,
+        "factors": [
+          107,
+          683,
+          821
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 4737,
+        "factors": [
+          107,
+          683,
+          821
+        ]
+      }
+    },
+    {
+      "case": "table-10",
+      "n": "66000017",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3211966,
+        "elapsed_ns": 6459,
+        "factors": [
+          193,
+          569,
+          601
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 4627,
+        "factors": [
+          193,
+          569,
+          601
+        ]
+      }
+    },
+    {
+      "case": "table-11",
+      "n": "71999951",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4035779,
+        "elapsed_ns": 8353,
+        "factors": [
+          401,
+          409,
+          439
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 8082,
+        "factors": [
+          401,
+          409,
+          439
+        ]
+      }
+    },
+    {
+      "case": "table-12",
+      "n": "77999983",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3271135,
+        "elapsed_ns": 6369,
+        "factors": [
+          197,
+          599,
+          661
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5238,
+        "factors": [
+          197,
+          599,
+          661
+        ]
+      }
+    },
+    {
+      "case": "table-13",
+      "n": "84000193",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3371746,
+        "elapsed_ns": 6009,
+        "factors": [
+          257,
+          461,
+          709
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5208,
+        "factors": [
+          257,
+          461,
+          709
+        ]
+      }
+    },
+    {
+      "case": "table-14",
+      "n": "89999939",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3229523,
+        "elapsed_ns": 6299,
+        "factors": [
+          199,
+          617,
+          733
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5438,
+        "factors": [
+          199,
+          617,
+          733
+        ]
+      }
+    },
+    {
+      "case": "table-15",
+      "n": "95999257",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3701154,
+        "elapsed_ns": 7952,
+        "factors": [
+          173,
+          643,
+          863
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 27081,
+        "factors": [
+          173,
+          643,
+          863
+        ]
+      }
+    },
+    {
+      "case": "balanced-32",
+      "n": "4296195809",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3703282,
+        "elapsed_ns": 115103,
+        "factors": [
+          64553,
+          66553
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 20501,
+        "factors": [
+          64553,
+          66553
+        ]
+      }
+    },
+    {
+      "case": "balanced-40",
+      "n": "1099546267613",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3092500,
+        "elapsed_ns": 108013,
+        "factors": [
+          1047587,
+          1049599
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 46010,
+        "factors": [
+          1047587,
+          1049599
+        ]
+      }
+    },
+    {
+      "case": "balanced-48",
+      "n": "281475177027259",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3149431,
+        "elapsed_ns": 134513,
+        "factors": [
+          16776217,
+          16778227
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 33911,
+        "factors": [
+          16776217,
+          16778227
+        ]
+      }
+    },
+    {
+      "case": "balanced-56",
+      "n": "72057609069267727",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3215010,
+        "elapsed_ns": 218891,
+        "factors": [
+          268434461,
+          268436507
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 103716,
+        "factors": [
+          268434461,
+          268436507
+        ]
+      }
+    },
+    {
+      "case": "balanced-64",
+      "n": "18446744168197812149",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 11781840,
+        "elapsed_ns": 8272771,
+        "factors": [
+          4294966297,
+          4294968317
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 438702,
+        "factors": [
+          4294966297,
+          4294968317
+        ]
+      }
+    },
+    {
+      "case": "balanced-72",
+      "n": "4722366488642080239163",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 16889911,
+        "elapsed_ns": 12883186,
+        "factors": [
+          68719475767,
+          68719477789
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 63446,
+        "factors": [
+          68719475767,
+          68719477789
+        ]
+      }
+    },
+    {
+      "case": "balanced-80",
+      "n": "1208925819625624289983961",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 17324522,
+        "elapsed_ns": 12624947,
+        "factors": [
+          1099511626781,
+          1099511628781
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 2832433,
+        "factors": [
+          1099511626781,
+          1099511628781
+        ]
+      }
+    },
+    {
+      "case": "smooth-32",
+      "n": "4294049777",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4331265,
+        "elapsed_ns": 129695,
+        "factors": [
+          65521,
+          65537
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 11036,
+        "factors": [
+          65521,
+          65537
+        ]
+      }
+    },
+    {
+      "case": "smooth-40",
+      "n": "550574174279",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3534012,
+        "elapsed_ns": 168935,
+        "factors": [
+          65537,
+          8400967
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 16335,
+        "factors": [
+          65537,
+          8400967
+        ]
+      }
+    },
+    {
+      "case": "smooth-48",
+      "n": "140740446466129",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4854294,
+        "elapsed_ns": 295816,
+        "factors": [
+          65537,
+          2147496017
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 11608,
+        "factors": [
+          65537,
+          2147496017
+        ]
+      }
+    },
+    {
+      "case": "smooth-56",
+      "n": "36029347583832121",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 5259434,
+        "elapsed_ns": 1324158,
+        "factors": [
+          65537,
+          549755826233
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 11487,
+        "factors": [
+          65537,
+          549755826233
+        ]
+      }
+    },
+    {
+      "case": "smooth-64",
+      "n": "9223512775153889363",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 5143239,
+        "elapsed_ns": 1573634,
+        "factors": [
+          65537,
+          140737488367699
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 20030,
+        "factors": [
+          65537,
+          140737488367699
+        ]
+      }
+    },
+    {
+      "case": "smooth-72",
+      "n": "2361219270232651542599",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 6313074,
+        "elapsed_ns": 2522886,
+        "factors": [
+          65537,
+          36028797018976327
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 3060547,
+        "factors": [
+          65537,
+          36028797018976327
+        ]
+      }
+    },
+    {
+      "case": "smooth-76",
+      "n": "37779508323710275366987",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 6607859,
+        "elapsed_ns": 3189912,
+        "factors": [
+          65537,
+          576460752303435851
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 1326351,
+        "factors": [
+          65537,
+          576460752303435851
+        ]
+      }
+    },
+    {
+      "case": "smooth-80",
+      "n": "604472133179352252493901",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 5543884,
+        "elapsed_ns": 2392239,
+        "factors": [
+          65537,
+          9223372036854788173
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 4342942,
+        "factors": [
+          65537,
+          9223372036854788173
+        ]
+      }
+    },
+    {
+      "case": "ecm-48",
+      "n": "268436384306737",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4699029,
+        "elapsed_ns": 738854,
+        "factors": [
+          1000003,
+          268435579
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 15083,
+        "factors": [
+          1000003,
+          268435579
+        ]
+      }
+    },
+    {
+      "case": "ecm-56",
+      "n": "68719683059430703",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 5171652,
+        "elapsed_ns": 1460753,
+        "factors": [
+          1000003,
+          68719476901
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 13670,
+        "factors": [
+          1000003,
+          68719476901
+        ]
+      }
+    },
+    {
+      "case": "ecm-64",
+      "n": "17592238821149133773",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 6181155,
+        "elapsed_ns": 2267080,
+        "factors": [
+          1000003,
+          17592186044591
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 19279,
+        "factors": [
+          1000003,
+          17592186044591
+        ]
+      }
+    },
+    {
+      "case": "ecm-72",
+      "n": "2362258565959719996521",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 16603398,
+        "elapsed_ns": 12049438,
+        "factors": [
+          8593846213,
+          274877919317
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 578293,
+        "factors": [
+          8593846213,
+          274877919317
+        ]
+      }
+    },
+    {
+      "case": "ecm-76",
+      "n": "37796135460432195119879",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 15952957,
+        "elapsed_ns": 11870263,
+        "factors": [
+          8593846213,
+          4398046523483
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 1286681,
+        "factors": [
+          8593846213,
+          4398046523483
+        ]
+      }
+    },
+    {
+      "case": "ecm-80",
+      "n": "604738165771235538626863",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 19335660,
+        "elapsed_ns": 14962012,
+        "factors": [
+          8593846213,
+          70368744190051
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5223951,
+        "factors": [
+          8593846213,
+          70368744190051
+        ]
+      }
+    },
+    {
+      "case": "power-2^12-1",
+      "n": "4095",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4118453,
+        "elapsed_ns": 4798,
+        "factors": [
+          3,
+          3,
+          5,
+          7,
+          13
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 6190,
+        "factors": [
+          3,
+          3,
+          5,
+          7,
+          13
+        ]
+      }
+    },
+    {
+      "case": "power-2^16-1",
+      "n": "65535",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3349253,
+        "elapsed_ns": 4386,
+        "factors": [
+          3,
+          5,
+          17,
+          257
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5278,
+        "factors": [
+          3,
+          5,
+          17,
+          257
+        ]
+      }
+    },
+    {
+      "case": "power-2^20-1",
+      "n": "1048575",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4237563,
+        "elapsed_ns": 6199,
+        "factors": [
+          3,
+          5,
+          5,
+          11,
+          31,
+          41
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5989,
+        "factors": [
+          3,
+          5,
+          5,
+          11,
+          31,
+          41
+        ]
+      }
+    },
+    {
+      "case": "power-2^24-1",
+      "n": "16777215",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3963951,
+        "elapsed_ns": 5839,
+        "factors": [
+          3,
+          3,
+          5,
+          7,
+          13,
+          17,
+          241
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 6010,
+        "factors": [
+          3,
+          3,
+          5,
+          7,
+          13,
+          17,
+          241
+        ]
+      }
+    },
+    {
+      "case": "power-2^28-1",
+      "n": "268435455",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4567045,
+        "elapsed_ns": 8463,
+        "factors": [
+          3,
+          5,
+          29,
+          43,
+          113,
+          127
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 6450,
+        "factors": [
+          3,
+          5,
+          29,
+          43,
+          113,
+          127
+        ]
+      }
+    },
+    {
+      "case": "power-2^32-1",
+      "n": "4294967295",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3895352,
+        "elapsed_ns": 6139,
+        "factors": [
+          3,
+          5,
+          17,
+          257,
+          65537
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5739,
+        "factors": [
+          3,
+          5,
+          17,
+          257,
+          65537
+        ]
+      }
+    },
+    {
+      "case": "power-2^40-1",
+      "n": "1099511627775",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3832061,
+        "elapsed_ns": 8373,
+        "factors": [
+          3,
+          5,
+          5,
+          11,
+          17,
+          31,
+          41,
+          61681
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 6230,
+        "factors": [
+          3,
+          5,
+          5,
+          11,
+          17,
+          31,
+          41,
+          61681
+        ]
+      }
+    },
+    {
+      "case": "power-2^48-1",
+      "n": "281474976710655",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4197162,
+        "elapsed_ns": 10446,
+        "factors": [
+          3,
+          3,
+          5,
+          7,
+          13,
+          17,
+          97,
+          241,
+          257,
+          673
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 6299,
+        "factors": [
+          3,
+          3,
+          5,
+          7,
+          13,
+          17,
+          97,
+          241,
+          257,
+          673
+        ]
+      }
+    },
+    {
+      "case": "power-2^56-1",
+      "n": "72057594037927935",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3372422,
+        "elapsed_ns": 22724,
+        "factors": [
+          3,
+          5,
+          17,
+          29,
+          43,
+          113,
+          127,
+          15790321
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 5548,
+        "factors": [
+          3,
+          5,
+          17,
+          29,
+          43,
+          113,
+          127,
+          15790321
+        ]
+      }
+    },
+    {
+      "case": "power-2^64-1",
+      "n": "18446744073709551615",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3880299,
+        "elapsed_ns": 204849,
+        "factors": [
+          3,
+          5,
+          17,
+          257,
+          641,
+          65537,
+          6700417
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 26300,
+        "factors": [
+          3,
+          5,
+          17,
+          257,
+          641,
+          65537,
+          6700417
+        ]
+      }
+    },
+    {
+      "case": "power-2^72-1",
+      "n": "4722366482869645213695",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 3737218,
+        "elapsed_ns": 35855,
+        "factors": [
+          3,
+          3,
+          3,
+          5,
+          7,
+          13,
+          17,
+          19,
+          37,
+          73,
+          109,
+          241,
+          433,
+          38737
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 23966,
+        "factors": [
+          3,
+          3,
+          3,
+          5,
+          7,
+          13,
+          17,
+          19,
+          37,
+          73,
+          109,
+          241,
+          433,
+          38737
+        ]
+      }
+    },
+    {
+      "case": "power-2^80-1",
+      "n": "1208925819614629174706175",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4748815,
+        "elapsed_ns": 777833,
+        "factors": [
+          3,
+          5,
+          5,
+          11,
+          17,
+          31,
+          41,
+          257,
+          61681,
+          4278255361
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 19088,
+        "factors": [
+          3,
+          5,
+          5,
+          11,
+          17,
+          31,
+          41,
+          257,
+          61681,
+          4278255361
+        ]
+      }
+    },
+    {
+      "case": "flint-regression",
+      "n": "96136956939863236169",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 5269781,
+        "elapsed_ns": 1063104,
+        "factors": [
+          95857,
+          95857,
+          101411,
+          103171
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 629891,
+        "factors": [
+          95857,
+          95857,
+          101411,
+          103171
+        ]
+      }
+    },
+    {
+      "case": "flint-regression",
+      "n": "65944518589428072257",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4883527,
+        "elapsed_ns": 1508096,
+        "factors": [
+          69011,
+          97987,
+          97987,
+          99523
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 495508,
+        "factors": [
+          69011,
+          97987,
+          97987,
+          99523
+        ]
+      }
+    },
+    {
+      "case": "flint-regression",
+      "n": "1117737217548882611767",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 5523353,
+        "elapsed_ns": 1207652,
+        "factors": [
+          161977,
+          161977,
+          186299,
+          228677
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 358531,
+        "factors": [
+          161977,
+          161977,
+          186299,
+          228677
+        ]
+      }
+    },
+    {
+      "case": "flint-regression",
+      "n": "379342496431314884483",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 4519763,
+        "elapsed_ns": 1005657,
+        "factors": [
+          134327,
+          134327,
+          140281,
+          149867
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 136736,
+        "factors": [
+          134327,
+          134327,
+          140281,
+          149867
+        ]
+      }
+    },
+    {
+      "case": "flint-regression",
+      "n": "33748151787603397083959",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 6003898,
+        "elapsed_ns": 1844152,
+        "factors": [
+          414013,
+          426527,
+          426527,
+          448067
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 799776,
+        "factors": [
+          414013,
+          426527,
+          426527,
+          448067
+        ]
+      }
+    },
+    {
+      "case": "flint-regression",
+      "n": "232399130433533084177623",
+      "repeat": 0,
+      "pfl": {
+        "status": "pass",
+        "wall_ns": 5630784,
+        "elapsed_ns": 1765294,
+        "factors": [
+          638423,
+          638423,
+          703033,
+          811039
+        ]
+      },
+      "flint": {
+        "status": "pass",
+        "wall_ns": 3180558,
+        "factors": [
+          638423,
+          638423,
+          703033,
+          811039
+        ]
+      }
+    }
+  ]
+}
