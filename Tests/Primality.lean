@@ -57,6 +57,10 @@ def run : IO Unit := do
     (!(generatePrimeCertificate Nat.primeFactorsList 101 64 0).isSome)
   require "base prime independent of budgets"
     (generatePrimeCertificate (fun _ => []) 2 0 0).isSome
+  require "Miller-Rabin skips divisible base 73"
+    (Arith.strongProbablePrime 73 28178)
+  require "Miller-Rabin skips divisible base 407521"
+    (Arith.strongProbablePrime 407521 9780504)
   for n in [73, 407521] do
     require ("Miller-Rabin prime screening " ++ toString n) (Arith.isProbablePrime n)
   require "Miller-Rabin pseudoprime rejection"
