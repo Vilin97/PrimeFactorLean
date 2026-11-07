@@ -299,13 +299,24 @@ def primesUpTo (n : Nat) : Array Nat :=
   let c := sieveOdds c 3 n (iroot n 2 / 2 + 2)
   collectOdds c 3 n #[2] (n / 2 + 1)
 
-/-- One strong-probable-prime round to base `a` for odd `n > 2`. -/
-def strongProbablePrime (n a : Nat) : Bool := Id.run do
-  let mut d := n - 1
+/-- Decompose a positive number as `d * 2^s` with `d` odd. -/
+@[inline] def oddPart (x : Nat) : Nat × Nat := Id.run do
+  let mut d := x
   let mut s := 0
   while d % 2 == 0 && d > 0 do
     d := d / 2
     s := s + 1
+  return (d, s)
+
+/-- One strong-probable-prime round after `n - 1 = d * 2^s` is decomposed. -/
+@[inline] def strongProbablePrimeCore (n d s a : Nat) : Bool := Id.run do
+  -- A deterministic base may be a multiple of the candidate itself. Such a
+  -- base carries no witness information and must be skipped rather than
+  -- turning a genuine prime into a false negative.
+  -- The fixed bases are usually smaller than a large candidate. Avoid a
+  -- division in that common case, while retaining the exact-base guard for
+  -- small candidates such as 73 and 407521.
+  if a >= n && a % n == 0 then return true
   let mut x := powMod a d n
   if x == 1 || x == n - 1 then return true
   for _ in [1:s] do
@@ -313,8 +324,14 @@ def strongProbablePrime (n a : Nat) : Bool := Id.run do
     if x == n - 1 then return true
   return false
 
-/-- Miller–Rabin screening. The 64-bit path uses a deterministic seven-base
-set, while larger inputs use the first thirteen small primes. Never used as a proof. -/
+/-- One strong-probable-prime round to base `a` for odd `n > 2`. -/
+def strongProbablePrime (n a : Nat) : Bool :=
+  let (d, s) := oddPart (n - 1)
+  strongProbablePrimeCore n d s a
+
+/-- Miller–Rabin screening. The path uses standard range-specific deterministic
+base sets through 64 bits and the first thirteen small primes above that. Never
+used as a proof. -/
 def isProbablePrime (n : Nat) : Bool :=
   if n < 2 then false
   else
@@ -322,13 +339,26 @@ def isProbablePrime (n : Nat) : Bool :=
     if small.contains n then true
     else if small.any (fun p => n % p == 0) then false
     else
-      -- These seven strong-prime bases are deterministic for every odd
-      -- 64-bit input. The result is only a screening hint for Pocklington,
-      -- whose checked certificate remains the authority for primality.
-      let bases := if n < 2 ^ 64 then
-        [2, 325, 9375, 28178, 450775, 9780504, 1795265022]
-      else small
-      bases.all (fun a => strongProbablePrime n a)
+      -- Use the smallest known deterministic base set for the candidate's
+      -- range. The result is only a screening hint for Pocklington, whose
+      -- checked certificate remains the authority for primality. The larger
+      -- thresholds are the standard strong-MR bounds, ending with the
+      -- seven-base 64-bit set.
+      let bases :=
+        if n < 1_373_653 then [2, 3]
+        else if n < 9_080_191 then [31, 73]
+        else if n < 25_326_001 then [2, 3, 5]
+        else if n < 3_215_031_751 then [2, 3, 5, 7]
+        else if n < 4_759_123_141 then [2, 7, 61]
+        else if n < 1_122_004_669_633 then [2, 13, 23, 1_662_803]
+        else if n < 2_152_302_898_747 then [2, 3, 5, 7, 11]
+        else if n < 3_474_749_660_383 then [2, 3, 5, 7, 11, 13]
+        else if n < 341_550_071_728_321 then [2, 3, 5, 7, 11, 13, 17]
+        else if n < 3_825_123_056_546_413_051 then [2, 3, 5, 7, 11, 13, 17, 19, 23]
+        else if n < 2 ^ 64 then [2, 325, 9375, 28178, 450775, 9780504, 1795265022]
+        else small
+      let (d, s) := oddPart (n - 1)
+      bases.all (fun a => strongProbablePrimeCore n d s a)
 
 /-! ## Verified small primality -/
 

@@ -57,7 +57,11 @@ def run : IO Unit := do
     (!(generatePrimeCertificate Nat.primeFactorsList 101 64 0).isSome)
   require "base prime independent of budgets"
     (generatePrimeCertificate (fun _ => []) 2 0 0).isSome
-  for n in [2, 3, 101, 65537, 1000000007, 2 ^ 61 - 1, 2 ^ 89 - 1, 2 ^ 127 - 1,
+  for n in [73, 407521] do
+    require ("Miller-Rabin prime screening " ++ toString n) (Arith.isProbablePrime n)
+  require "Miller-Rabin pseudoprime rejection"
+    (!Arith.isProbablePrime 341550071728321)
+  for n in [2, 3, 73, 407521, 101, 65537, 1000000007, 2 ^ 61 - 1, 2 ^ 89 - 1, 2 ^ 127 - 1,
             79638304766856507377778616296087448490695649] do
     require ("production oracle prime " ++ toString n) (primeOracle {} n)
   for n in [0, 1, 4, 561, 1105, 1729, 3215031751, 2 ^ 67 - 1, 3825123056546413051] do
