@@ -265,9 +265,22 @@ def autoSplitter (cfg : Config) : Splitter := fun n =>
   if n < 4 then none else
   (smallSplitter 4096 n).orElse fun _ =>
   (powerSplitter n).orElse fun _ =>
+  -- A short Fermat window is nearly free for balanced inputs. Run it before
+  -- the algebraic scan, and use a cheap gap heuristic to avoid spending 1024
+  -- iterations on clearly unbalanced candidates.
+  (if n < 2 ^ 81 then
+      let s := isqrt n
+      if (s + 1) * (s + 1) - n ≤ 1024 * 1024 then
+        ofSound (fun m => Search.fermat m { cfg.search with fermatSteps := 1024 })
+          (fun _ _ h => Search.fermat_sound h) n
+      else none
+    else none).orElse fun _ =>
   (algebraicSplitter n).orElse fun _ =>
-  (if n < 2 ^ 80 then SQUFOF.split n else none).orElse fun _ =>
-  (RhoF.split n 8000 1).orElse fun _ =>
+  -- SQUFOF and rho are word-size pretests. Above 64 bits their worst-case
+  -- walks can dominate ECM and SIQS, so leave the portfolio to size-aware
+  -- methods while keeping the explicit algorithms available through `splitter`.
+  (if n < 2 ^ 64 then SQUFOF.split n else none).orElse fun _ =>
+  (if n < 2 ^ 64 then RhoF.split n 8000 1 else none).orElse fun _ =>
   -- `p - 1` pays off only once the quadratic sieve is slow (from about 45 digits)
   (if n < 10 ^ 44 then none else PM1F.split n 20000).orElse fun _ =>
   let snfs := snfsCandidate n
@@ -322,7 +335,7 @@ def certSplitter (cfg : Config) (levels : List (Nat × Nat)) (full : Nat) : Spli
   if n < 10 ^ full then autoSplitter cfg n else
   (smallSplitter 4096 n).orElse fun _ =>
   (powerSplitter n).orElse fun _ =>
-  (RhoF.split n 8000 1).orElse fun _ =>
+  (if n < 2 ^ 64 then RhoF.split n 8000 1 else none).orElse fun _ =>
   (PM1F.split n 20000).orElse fun _ =>
   ecmLevels cfg.threads levels n
 
