@@ -56,6 +56,10 @@ def squaresMod64 : UInt64 := 0x0202021202030213
 /-- `some r` when `q = r²`; residues modulo `64` reject most non-squares cheaply. -/
 @[inline] def squareRoot? (q : Nat) : Option Nat :=
   if (squaresMod64 >>> (q % 64).toUInt64) &&& 1 == 0 then none
+  else if q % 3 == 2 then none
+  else if q % 5 == 2 || q % 5 == 3 then none
+  else if q % 7 == 3 || q % 7 == 5 || q % 7 == 6 then none
+  else if q % 11 == 2 || q % 11 == 6 || q % 11 == 7 || q % 11 == 8 || q % 11 == 10 then none
   else
     let r := isqrt q
     if r * r == q then some r else none
