@@ -32,15 +32,20 @@ variable {α μ : Type} [Arith α μ] [Inhabited α]
 
 /-- Stage 2 accumulation over `primes[t:]`: `y = x^{primes[t-1]}` on entry. -/
 @[specialize] def accLoop (m : μ) (steps : Array α) (primes : Array Nat) (one : α)
-    (prev : Nat) (y acc : α) (t : Nat) (fuel : Nat) : α :=
-  match fuel with
-  | 0 => acc
-  | fuel + 1 =>
-    if h : t < primes.size then
-      let q := primes[t]
-      let y := mul m y steps[(q - prev) / 2]!
-      accLoop m steps primes one q y (mulSub m acc y one) (t + 1) fuel
-    else acc
+    (prev : Nat) (y acc : α) (t fuel : Nat) : α := Id.run do
+  let mut prev := prev
+  let mut y := y
+  let mut acc := acc
+  let mut t := t
+  let mut fuel := fuel
+  while fuel > 0 && t < primes.size do
+    let q := primes[t]!
+    y := mul m y steps[(q - prev) / 2]!
+    acc := mulSub m acc y one
+    prev := q
+    t := t + 1
+    fuel := fuel - 1
+  return acc
 
 /-- `gcd` candidates of stages 1 and 2 (`none`: the gcd of stage 1 is `n`). -/
 @[specialize] def run (m : μ) (bits : ByteArray) (primes : Array Nat) (start : Nat) :
