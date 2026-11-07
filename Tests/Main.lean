@@ -16,6 +16,35 @@ private def largeCases : List String :=
 
 private def largeAlgorithms : List Algorithm := [.siqs, .mpqs, .auto]
 
+/-! The p−1 fast path is normally exercised only through the complete splitter.
+These direct checks pin the mutable stage-2 loop's boundary behavior as well as
+one nontrivial update sequence. -/
+private def pm1AccLoopTests : Bool := Id.run do
+  let m : Mont.Mod1 := Mont.Mod1.ofNat 101
+  let one : Mont.N1 := Mont.Arith.toMont m 1
+  let x : Mont.N1 := Mont.Arith.toMont m 3
+  let steps : Array Mont.N1 := #[one, x, Mont.N1.mul m x x]
+  let primes : Array Nat := #[7, 9, 11]
+  let initial : Mont.N1 := Mont.Arith.toMont m 5
+  let acc : Mont.N1 := Mont.Arith.toMont m 9
+  let decode (fuel : Nat) : Nat :=
+    Mont.Arith.fromMont m (PM1F.accLoop m steps primes one 7 initial acc 1 fuel)
+  let empty :=
+    Mont.Arith.fromMont m (PM1F.accLoop m steps #[] one 7 initial acc 0 10)
+  -- Fuel 0 leaves the accumulator untouched. One and two updates produce
+  -- 9*(15−1)=25 and 25*(45−1)=90 modulo 101. Extra fuel stops at the end
+  -- of the prime array rather than indexing past it.
+  return decode 0 == 9 && decode 1 == 25 && decode 2 == 90 &&
+    decode 10 == 90 && empty == 9
+
+private def squfofExtensionTests : Bool := Id.run do
+  let balanced64 := 4294966297 * 4294968317
+  let balanced72 := 68719475767 * 68719477789
+  let split64 := (SQUFOF.split balanced64).isSome
+  let split72 := (SQUFOF.split balanced72).isSome
+  let boundary := (SQUFOF.split (2 ^ 80)).isNone
+  return split64 && split72 && boundary
+
 private def check (algorithm : Algorithm) (c : Tests.DatasetCase) (cfg : Config) :
     IO Bool := do
   let result := (factor algorithm c.n cfg).map (fun ps => ps.mergeSort (· ≤ ·))
@@ -55,6 +84,12 @@ private def runTests : IO UInt32 := do
   if (checkedSplitter (fun _ => some 10) 91).isSome then return 1
   if (checkedSplitter (fun _ => some 91) 91).isSome then return 1
   if (checkedSplitter (fun _ => some 7) 91).isNone then return 1
+  unless pm1AccLoopTests do
+    IO.eprintln "FAIL PM1F.accLoop boundary/update regression"
+    return 1
+  unless squfofExtensionTests do
+    IO.eprintln "FAIL SQUFOF 80-bit extension regression"
+    return 1
   if Search.fermat 8051 {fermatSteps := 0} != none then return 1
   if Search.brent 8051 {rhoSteps := 0} != none then return 1
   if ECM.split 8051 200 0 != none then return 1

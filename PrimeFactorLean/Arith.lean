@@ -313,15 +313,22 @@ def strongProbablePrime (n a : Nat) : Bool := Id.run do
     if x == n - 1 then return true
   return false
 
-/-- Miller–Rabin with the first thirteen prime bases (deterministic below
-`3.3 · 10^24`, and an excellent screen above). Never used as a proof. -/
+/-- Miller–Rabin screening. The 64-bit path uses a deterministic seven-base
+set, while larger inputs use the first thirteen small primes. Never used as a proof. -/
 def isProbablePrime (n : Nat) : Bool :=
   if n < 2 then false
   else
     let small := [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41]
     if small.contains n then true
     else if small.any (fun p => n % p == 0) then false
-    else small.all (fun a => strongProbablePrime n a)
+    else
+      -- These seven strong-prime bases are deterministic for every odd
+      -- 64-bit input. The result is only a screening hint for Pocklington,
+      -- whose checked certificate remains the authority for primality.
+      let bases := if n < 2 ^ 64 then
+        [2, 325, 9375, 28178, 450775, 9780504, 1795265022]
+      else small
+      bases.all (fun a => strongProbablePrime n a)
 
 /-! ## Verified small primality -/
 

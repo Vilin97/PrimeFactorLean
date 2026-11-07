@@ -22,7 +22,7 @@ continued fraction expansion of `√D`. With `s = ⌊√D⌋`, `P₀ = s`, `Q₀
   forward cycle simply continues.
 
 All forward and reverse quantities stay below `2√D`; for the intended range
-`n < 2^62` and multipliers up to `1155` they are machine-word sized, so each step
+`n < 2^80` and multipliers up to `1155` they are machine-word sized, so each step
 costs a handful of word operations. The sixteen multipliers
 `k ∈ {1, 3, 5, 7, 11, 15, …, 1155}` (the products of subsets of `{3, 5, 7, 11}`)
 are *raced*: every multiplier advances in round-robin chunks of forward steps,
@@ -56,6 +56,10 @@ def squaresMod64 : UInt64 := 0x0202021202030213
 /-- `some r` when `q = r²`; residues modulo `64` reject most non-squares cheaply. -/
 @[inline] def squareRoot? (q : Nat) : Option Nat :=
   if (squaresMod64 >>> (q % 64).toUInt64) &&& 1 == 0 then none
+  else if q % 3 == 2 then none
+  else if q % 5 == 2 || q % 5 == 3 then none
+  else if q % 7 == 3 || q % 7 == 5 || q % 7 == 6 then none
+  else if q % 11 == 2 || q % 11 == 6 || q % 11 == 7 || q % 11 == 8 || q % 11 == 10 then none
   else
     let r := isqrt q
     if r * r == q then some r else none
@@ -151,10 +155,10 @@ def race (n : Nat) (chunk : Nat := 256) : Option (ProperFactor n) := Id.run do
 
 /-! ## Public splitter -/
 
-/-- SQUFOF for `4 ≤ n < 2^62`: even numbers and perfect powers are handled first,
+/-- SQUFOF for `4 ≤ n < 2^80`: even numbers and perfect powers are handled first,
 probable primes are declined, everything else is raced over the multipliers. -/
 def split (n : Nat) : Option (ProperFactor n) :=
-  if n < 4 ∨ 2 ^ 62 ≤ n then none
+  if n < 4 ∨ 2 ^ 80 ≤ n then none
   else if n % 2 = 0 then checkFactor n 2
   else match perfectPower n with
     | some (r, _) => checkFactor n r
