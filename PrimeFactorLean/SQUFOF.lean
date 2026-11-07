@@ -22,7 +22,7 @@ continued fraction expansion of `√D`. With `s = ⌊√D⌋`, `P₀ = s`, `Q₀
   forward cycle simply continues.
 
 All forward and reverse quantities stay below `2√D`; for the intended range
-`n < 2^62` and multipliers up to `1155` they are machine-word sized, so each step
+`n < 2^80` and multipliers up to `1155` they are machine-word sized, so each step
 costs a handful of word operations. The sixteen multipliers
 `k ∈ {1, 3, 5, 7, 11, 15, …, 1155}` (the products of subsets of `{3, 5, 7, 11}`)
 are *raced*: every multiplier advances in round-robin chunks of forward steps,
@@ -151,10 +151,10 @@ def race (n : Nat) (chunk : Nat := 256) : Option (ProperFactor n) := Id.run do
 
 /-! ## Public splitter -/
 
-/-- SQUFOF for `4 ≤ n < 2^62`: even numbers and perfect powers are handled first,
+/-- SQUFOF for `4 ≤ n < 2^80`: even numbers and perfect powers are handled first,
 probable primes are declined, everything else is raced over the multipliers. -/
 def split (n : Nat) : Option (ProperFactor n) :=
-  if n < 4 ∨ 2 ^ 62 ≤ n then none
+  if n < 4 ∨ 2 ^ 80 ≤ n then none
   else if n % 2 = 0 then checkFactor n 2
   else match perfectPower n with
     | some (r, _) => checkFactor n r

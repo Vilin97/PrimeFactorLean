@@ -266,7 +266,7 @@ def autoSplitter (cfg : Config) : Splitter := fun n =>
   (smallSplitter 4096 n).orElse fun _ =>
   (powerSplitter n).orElse fun _ =>
   (algebraicSplitter n).orElse fun _ =>
-  (if n < 2 ^ 62 then SQUFOF.split n else none).orElse fun _ =>
+  (if n < 2 ^ 80 then SQUFOF.split n else none).orElse fun _ =>
   (RhoF.split n 8000 1).orElse fun _ =>
   -- `p - 1` pays off only once the quadratic sieve is slow (from about 45 digits)
   (if n < 10 ^ 44 then none else PM1F.split n 20000).orElse fun _ =>
