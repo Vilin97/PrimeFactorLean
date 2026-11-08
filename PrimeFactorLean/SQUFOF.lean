@@ -53,13 +53,18 @@ def multipliers : Array Nat :=
 `Nat` literal above `2^32` would be parsed from its digits wherever it is used). -/
 def squaresMod64 : UInt64 := 0x0202021202030213
 
-/-- `some r` when `q = r²`; residues modulo `64` reject most non-squares cheaply. -/
+/-- `some r` when `q = r²`; small-prime residue filters reject most
+non-squares cheaply before the exact integer square root. -/
 @[inline] def squareRoot? (q : Nat) : Option Nat :=
-  if (squaresMod64 >>> (q % 64).toUInt64) &&& 1 == 0 then none
+  if (squaresMod64 >>> (q &&& 63).toUInt64) &&& 1 == 0 then none
   else if q % 3 == 2 then none
   else if q % 5 == 2 || q % 5 == 3 then none
   else if q % 7 == 3 || q % 7 == 5 || q % 7 == 6 then none
   else if q % 11 == 2 || q % 11 == 6 || q % 11 == 7 || q % 11 == 8 || q % 11 == 10 then none
+  else if q % 13 == 2 || q % 13 == 5 || q % 13 == 6 || q % 13 == 7 ||
+      q % 13 == 8 || q % 13 == 11 then none
+  else if q % 17 == 3 || q % 17 == 5 || q % 17 == 6 || q % 17 == 7 ||
+      q % 17 == 10 || q % 17 == 11 || q % 17 == 12 || q % 17 == 14 then none
   else
     let r := isqrt q
     if r * r == q then some r else none
@@ -125,7 +130,7 @@ def Racer.advance (n : Nat) (r : Racer) (steps : Nat) :
     Qprev := Q
     Q := Q'
     i := i + 1
-    if i % 2 == 0 then
+    if (i &&& 1) == 0 then
       if let some root := squareRoot? Q then
         if root > 1 then
           if let some f := reverseCycle n r.D r.s P root r.bound then
