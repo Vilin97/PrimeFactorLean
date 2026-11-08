@@ -281,6 +281,15 @@ def autoSplitter (cfg : Config) : Splitter := fun n =>
   -- methods while keeping the explicit algorithms available through `splitter`.
   (if n < 2 ^ 64 then SQUFOF.split n else none).orElse fun _ =>
   (if n < 2 ^ 64 then RhoF.split n 8000 1 else none).orElse fun _ =>
+  -- On clearly unbalanced 64--80-bit inputs, a short ECM stage can find a
+  -- 20--30-bit factor before SIQS. The near-square gate keeps this probe off
+  -- balanced inputs, where Fermat already handles the split cheaply.
+  (if 2 ^ 64 ≤ n && n < 2 ^ 81 then
+      let s := isqrt n
+      if (s + 1) * (s + 1) - n > 1024 * 1024 then
+        ecmLevels cfg.threads [(610, 5)] n
+      else none
+    else none).orElse fun _ =>
   -- `p - 1` pays off only once the quadratic sieve is slow (from about 45 digits)
   (if n < 10 ^ 44 then none else PM1F.split n 20000).orElse fun _ =>
   let snfs := snfsCandidate n
