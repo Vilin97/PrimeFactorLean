@@ -95,19 +95,20 @@ end Generic
 
 /-- One Brent run at the width that fits `n` (`1` beyond 336 bits). -/
 def brent (n c maxSteps : Nat) : Nat :=
+  let batch := if n < 2 ^ 48 then 256 else 128
   match (n.log2 + 28) / 28 with
-  | 1 => brentW (α := N1) (Mod1.ofNat n) c maxSteps 128
-  | 2 => brentW (α := N2) (Mod2.ofNat n) c maxSteps 128
-  | 3 => brentW (α := N3) (Mod3.ofNat n) c maxSteps 128
-  | 4 => brentW (α := N4) (Mod4.ofNat n) c maxSteps 128
-  | 5 => brentW (α := N5) (Mod5.ofNat n) c maxSteps 128
-  | 6 => brentW (α := N6) (Mod6.ofNat n) c maxSteps 128
-  | 7 => brentW (α := N7) (Mod7.ofNat n) c maxSteps 128
-  | 8 => brentW (α := N8) (Mod8.ofNat n) c maxSteps 128
-  | 9 => brentW (α := N9) (Mod9.ofNat n) c maxSteps 128
-  | 10 => brentW (α := N10) (Mod10.ofNat n) c maxSteps 128
-  | 11 => brentW (α := N11) (Mod11.ofNat n) c maxSteps 128
-  | 12 => brentW (α := N12) (Mod12.ofNat n) c maxSteps 128
+  | 1 => brentW (α := N1) (Mod1.ofNat n) c maxSteps batch
+  | 2 => brentW (α := N2) (Mod2.ofNat n) c maxSteps batch
+  | 3 => brentW (α := N3) (Mod3.ofNat n) c maxSteps batch
+  | 4 => brentW (α := N4) (Mod4.ofNat n) c maxSteps batch
+  | 5 => brentW (α := N5) (Mod5.ofNat n) c maxSteps batch
+  | 6 => brentW (α := N6) (Mod6.ofNat n) c maxSteps batch
+  | 7 => brentW (α := N7) (Mod7.ofNat n) c maxSteps batch
+  | 8 => brentW (α := N8) (Mod8.ofNat n) c maxSteps batch
+  | 9 => brentW (α := N9) (Mod9.ofNat n) c maxSteps batch
+  | 10 => brentW (α := N10) (Mod10.ofNat n) c maxSteps batch
+  | 11 => brentW (α := N11) (Mod11.ofNat n) c maxSteps batch
+  | 12 => brentW (α := N12) (Mod12.ofNat n) c maxSteps batch
   | _ => 1
 
 /-- Up to `restarts` runs with `c = 1, 3, 5, …`; even `n` is answered by `2`. -/
